@@ -230,3 +230,4 @@ if __name__ == "__main__":
     test_uint8_compressor_memory()
     test_sparse_compressor_memory()
     test_bit_compressor_memory()
+    test_conventional_memory()
