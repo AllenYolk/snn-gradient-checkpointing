@@ -4,31 +4,24 @@ sys.path.insert(0, "./src")
 
 import torch
 
-from models import VanillaLIF, HandWrittenLIF, MELIF
+from models import SJLIFNode, HandWrittenLIFNode, MELIFNode
 
 
-def test_forward_equality():
+def test_forward_equality_not_detached():
     T = 1000
     N = 10
     C = 100
     x = torch.randn(T, N, C) + 0.6
 
-    # VanillaLIF
-    s_vanilla = VanillaLIF()(x)
+    s_sj = SJLIFNode(detach_reset=False, backend="torch")(x)
+    s_handwritten = HandWrittenLIFNode(detach_reset=False)(x)
+    s_me = MELIFNode(detach_reset=False)(x)
 
-    # HandWrittenLIF
-    s_handwritten = HandWrittenLIF()(x)
-
-    s_me = MELIF()(x)
-
-    assert torch.allclose(s_vanilla, s_handwritten, atol=1e-5)
-    assert torch.allclose(s_vanilla, s_me, atol=1e-5)
-    print(f"VanillaLIF spike rate: {s_vanilla.mean().item()}")
-    print(f"HandWrittenLIF spike rate: {s_handwritten.mean().item()}")
-    print(f"MELIF spike rate: {s_me.mean().item()}")
+    assert torch.allclose(s_sj, s_handwritten, atol=1e-5)
+    assert torch.allclose(s_sj, s_me, atol=1e-5)
 
 
-def test_backward_equality():
+def test_backward_equality_not_detached():
     T = 1000
     N = 10
     C = 100
@@ -38,28 +31,74 @@ def test_backward_equality():
     # VanillaLIF
     x1 = x.clone()
     x1.requires_grad = True
-    s_vanilla = VanillaLIF()(x1)
+    s_vanilla = SJLIFNode(detach_reset=False, backend="torch")(x1)
     s_vanilla.backward(grad_s)
 
     # HandWrittenLIF
     x2 = x.clone()
     x2.requires_grad = True
-    s_handwritten = HandWrittenLIF()(x2)
+    s_handwritten = HandWrittenLIFNode(detach_reset=False)(x2)
     s_handwritten.backward(grad_s)
 
-    # MELIF
+    # HandWrittenLIF
     x3 = x.clone()
     x3.requires_grad = True
-    s_me = MELIF()(x3)
+    s_me = MELIFNode(detach_reset=False)(x3)
     s_me.backward(grad_s)
 
     assert torch.allclose(x1.grad, x2.grad, atol=1e-5)
     assert torch.allclose(x1.grad, x3.grad, atol=1e-5)
-    print("Grad_x[t=0] for some VanillaLIF: ", x1.grad[0, 0, :10])
-    print("Grad_x[t=0] for some HandWrittenLIF: ", x2.grad[0, 0, :10])
-    print("Grad_x[t=0] for some MELIF: ", x3.grad[0, 0, :10])
+
+
+def test_forward_equality_detached():
+    T = 1000
+    N = 10
+    C = 100
+    x = torch.randn(T, N, C) + 0.6
+
+    s_vanilla = SJLIFNode(
+        decay_lambda=0.99, detach_reset=True, backend="torch"
+    )(x)
+    s_handwritten = HandWrittenLIFNode(decay_lambda=0.99, detach_reset=True)(x)
+    s_me = MELIFNode(decay_lambda=0.99, detach_reset=True)(x)
+
+    assert torch.allclose(s_vanilla, s_handwritten, atol=1e-5)
+    assert torch.allclose(s_vanilla, s_me, atol=1e-5)
+
+
+def test_backward_equality_detached():
+    T = 1000
+    N = 10
+    C = 100
+    x = torch.randn(T, N, C) + 0.6
+    grad_s = torch.randn(T, N, C)
+
+    # VanillaLIF
+    x1 = x.clone()
+    x1.requires_grad = True
+    s_vanilla = SJLIFNode(
+        decay_lambda=0.01, detach_reset=True, backend="torch"
+    )(x1)
+    s_vanilla.backward(grad_s)
+
+    # HandWrittenLIF
+    x2 = x.clone()
+    x2.requires_grad = True
+    s_handwritten = HandWrittenLIFNode(decay_lambda=0.01, detach_reset=True)(x2)
+    s_handwritten.backward(grad_s)
+
+    # HandWrittenLIF
+    x3 = x.clone()
+    x3.requires_grad = True
+    s_me = MELIFNode(decay_lambda=0.01, detach_reset=True)(x3)
+    s_me.backward(grad_s)
+
+    assert torch.allclose(x1.grad, x2.grad, atol=1e-5)
+    assert torch.allclose(x1.grad, x3.grad, atol=1e-5)
 
 
 if __name__ == "__main__":
-    test_forward_equality()
-    test_backward_equality()
+    test_forward_equality_not_detached()
+    test_backward_equality_not_detached()
+    test_forward_equality_detached()
+    test_backward_equality_detached()

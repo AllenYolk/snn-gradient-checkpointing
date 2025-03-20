@@ -4,7 +4,7 @@ sys.path.insert(0, "./src")
 
 import torch
 
-from models import VanillaLIF, HandWrittenLIF, MELIF
+from models import SJLIFNode, HandWrittenLIFNode, MELIFNode
 
 
 def test_vanilla_lif():
@@ -13,7 +13,7 @@ def test_vanilla_lif():
     C = 200
     x = torch.randn(T, N, C) + 0.6
 
-    net = VanillaLIF()
+    net = SJLIFNode()
     x.requires_grad = True
     net = net.to("cuda:0")
     x = x.to("cuda:0")
@@ -37,7 +37,7 @@ def test_handwritten_lif():
     C = 200
     x = torch.randn(T, N, C) + 0.6
 
-    net = HandWrittenLIF()
+    net = HandWrittenLIFNode()
     x.requires_grad = True
     net = net.to("cuda:0")
     x = x.to("cuda:0")
@@ -61,7 +61,7 @@ def test_me_lif():
     C = 200
     x = torch.randn(T, N, C) + 0.6
 
-    net = MELIF()
+    net = MELIFNode()
     x.requires_grad = True
     net = net.to("cuda:0")
     x = x.to("cuda:0")
