@@ -129,10 +129,9 @@ def test_compressor_equality():
     assert torch.allclose(x1.grad, x3.grad, atol=1e-5)
     assert torch.allclose(x1.grad, x4.grad, atol=1e-5)
     print("Firing rate: ", s1.mean().item())
-    print(IdentitySpikeCompressor().__class__.__name__)
 
 
-def test_compressor_memory(compressor):
+def _test_compressor_memory(compressor):
     T = 4
     N = 32
     C = 32
@@ -164,31 +163,32 @@ def test_compressor_memory(compressor):
     print(
         f"{compressor.__class__.__name__}, "
         f"Peak allocated: {peak_allocated:.2f} MB, "
-        f"Peak reserved: {peak_reserved:.2f} MB"
+        f"Peak reserved: {peak_reserved:.2f} MB, "
+        f"Firing rate: {s.mean().item()}"
     )
 
 
 def test_identity_compressor_memory():
-    test_compressor_memory(IdentitySpikeCompressor())
+    _test_compressor_memory(IdentitySpikeCompressor())
 
 
 def test_boolean_compressor_memory():
-    test_compressor_memory(BooleanSpikeCompressor())
+    _test_compressor_memory(BooleanSpikeCompressor())
 
 
 def test_uint8_compressor_memory():
-    test_compressor_memory(Uint8SpikeCompressor())
+    _test_compressor_memory(Uint8SpikeCompressor())
 
 
 def test_sparse_compressor_memory():
-    test_compressor_memory(SparseSpikeCompressor(dtype=torch.int64))
+    _test_compressor_memory(SparseSpikeCompressor(dtype=torch.int64))
 
 
 def test_bit_compressor_memory():
-    test_compressor_memory(BitSpikeCompressor())
+    _test_compressor_memory(BitSpikeCompressor())
 
 
-def test_conventional_memory():
+def _test_conventional_memory(neuron_type):
     T = 4
     N = 32
     C = 32
@@ -204,8 +204,7 @@ def test_conventional_memory():
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}split", SplitTN(T))
         net.add_module(
-            f"{i}neuron",
-            HandWrittenLIFNode(backend="torch", detach_reset=False)
+            f"{i}neuron", neuron_type(backend="torch", detach_reset=False)
         )
     net = net.to("cuda:0")
 
@@ -219,8 +218,17 @@ def test_conventional_memory():
     print(
         f"Conventional, "
         f"Peak allocated: {peak_allocated:.2f} MB, "
-        f"Peak reserved: {peak_reserved:.2f} MB"
+        f"Peak reserved: {peak_reserved:.2f} MB, "
+        f"Firing rate: {s.mean().item()}"
     )
+
+
+def test_handwritten_conventional_memory():
+    _test_conventional_memory(HandWrittenLIFNode)
+
+
+def test_sj_conventional_memory():
+    _test_conventional_memory(SJLIFNode)
 
 
 if __name__ == "__main__":
@@ -230,4 +238,6 @@ if __name__ == "__main__":
     test_uint8_compressor_memory()
     test_sparse_compressor_memory()
     test_bit_compressor_memory()
-    test_conventional_memory()
+    _test_conventional_memory()
+    test_handwritten_conventional_memory()
+    test_sj_conventional_memory()
