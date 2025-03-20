@@ -8,6 +8,7 @@ import einops
 
 from models import SJLIFNode, HandWrittenLIFNode
 from models import LinearLIF, Conv2dLIF
+from models import IdentitySpikeCompressor
 
 
 def make_parameters_equal(net, reference_net):
@@ -41,16 +42,17 @@ def test_linear_lif_equality():
     N = 64
     C = 128
     x = torch.randn(T, N, C) + 0.6
-    x = (x >= 0.2).float()
+    x = (x >= 0.0).float()
     grad_s = torch.randn(T, N, C)
 
     net1 = LinearLIF(
         proj=nn.Linear(C, C, bias=True),
-        neuron=HandWrittenLIFNode(),
+        neuron=HandWrittenLIFNodeLIFNode(decay_lambda=0.8),
+        spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         nn.Linear(C, C, bias=True),
-        SJLIFNode(backend="torch"),
+        SJLIFNode(decay_lambda=0.8, backend="torch"),
     )
     make_parameters_equal(net2, net1)
 
@@ -68,6 +70,7 @@ def test_linear_lif_equality():
     assert torch.allclose(x1.grad, x2.grad, atol=1e-5)
     assert torch.allclose(net1.proj.weight.grad, net2[0].weight.grad, atol=1e-5)
     assert torch.allclose(net1.proj.bias.grad, net2[0].bias.grad, atol=1e-5)
+    print("Firing rate: ", s1.mean().item())
 
 
 def test_linear_lif_memory_blocked():
@@ -84,6 +87,7 @@ def test_linear_lif_memory_blocked():
             LinearLIF(
                 proj=nn.Linear(C, C, bias=True),
                 neuron=HandWrittenLIFNode(detach_reset=False),
+                spike_compressor=IdentitySpikeCompressor()
             ),
         )
     net = net.to("cuda:0")
@@ -137,17 +141,19 @@ def test_conv2d_lif_equality():
     H = 32
     W = 32
     x = torch.randn(T, N, C, H, W) + 0.6
+    x = (x >= 0.0).float()
     grad_s = torch.randn(T, N, C, H, W)
 
     net1 = Conv2dLIF(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-        neuron=HandWrittenLIFNode(),
+        neuron=HandWrittenLIFNode(decay_lambda=0.8),
+        spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         MergeTN(),
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         SplitTN(T),
-        SJLIFNode(backend="torch"),
+        SJLIFNode(decay_lambda=0.8, backend="torch"),
     )
     make_parameters_equal(net2, net1)
 
@@ -184,6 +190,7 @@ def test_conv2d_lif_memory_blocked():
             Conv2dLIF(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
                 neuron=HandWrittenLIFNode(detach_reset=False),
+                spike_compressor=IdentitySpikeCompressor()
             ),
         )
     net = net.to("cuda:0")
@@ -236,9 +243,9 @@ def test_conv2d_lif_memory_conventional():
 
 if __name__ == "__main__":
     test_linear_lif_equality()
-    test_linear_lif_memory_blocked()
-    test_linear_lif_memory_conventional()
+    #test_linear_lif_memory_blocked()
+    #test_linear_lif_memory_conventional()
 
     test_conv2d_lif_equality()
-    test_conv2d_lif_memory_blocked()
-    test_conv2d_lif_memory_conventional()
+    #test_conv2d_lif_memory_blocked()
+    #test_conv2d_lif_memory_conventional()

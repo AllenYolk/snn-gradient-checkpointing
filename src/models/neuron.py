@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
-from spikingjelly.activation_based import surrogate, neuron
+from spikingjelly.activation_based import surrogate, neuron, functional
 
 try:
     import cupy
@@ -51,6 +51,7 @@ class SJLIFNode(neuron.LIFNode):
         )
 
     def forward(self, x_seq):
+        functional.reset_net(self)  #! reset internal states before forwarding
         return self.multi_step_forward(x_seq)
 
 
@@ -141,6 +142,8 @@ class HandWrittenLIFNode(nn.Module):
     * v_threshold = 1.
     * hard_reset, v_reset = 0.
     * ATan surrogate function
+    Experiments show that HandWrittenLIFNode consumes much less memory than
+    SJLIFNode, while its computational efficiency is nearly the same.
     """
 
     def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
