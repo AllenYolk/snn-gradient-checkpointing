@@ -30,6 +30,8 @@ class SJLIFNode(neuron.LIFNode):
         decay_lambda: float = 0.5,
         detach_reset: bool = True,
         backend: str = DEFAULT_SJ_BACKEND,
+        *args,
+        **kwargs
     ):
         if decay_lambda < 0. or decay_lambda > 1.:
             raise ValueError('`decay_lambda` should be in the range [0, 1).')
@@ -141,7 +143,7 @@ class HandWrittenLIFNode(nn.Module):
     * ATan surrogate function
     """
 
-    def __init__(self, decay_lambda=0.5, detach_reset=True):
+    def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
         super().__init__()
         if decay_lambda < 0. or decay_lambda > 1.:
             raise ValueError('`decay_lambda` should be in the range [0, 1).')
@@ -252,7 +254,7 @@ class MELIFNode(nn.Module):
     * ATan surrogate function
     """
 
-    def __init__(self, decay_lambda=0.5, detach_reset=True):
+    def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
         super().__init__()
         if decay_lambda < 0. or decay_lambda > 1.:
             raise ValueError('`decay_lambda` should be in the range [0, 1).')
