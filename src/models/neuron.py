@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
+import torch.nn.functional as F
 from spikingjelly.activation_based import surrogate, neuron, functional
+import einops
 
 try:
     import cupy
@@ -16,7 +18,7 @@ def atan_derivative(x: torch.Tensor, alpha: float = 2.):
     return alpha / 2 / (1 + (torch.pi / 2 * alpha * x).pow_(2))
 
 
-# ================ Standard SpikingJelly Multi-step LIF neuron ================
+# ================ Standard SpikingJelly Multi-step neurons ================
 class SJLIFNode(neuron.LIFNode):
     """Multi-step spikingjelly LIF neuron with:
     * decay_input=False
@@ -53,6 +55,60 @@ class SJLIFNode(neuron.LIFNode):
     def forward(self, x_seq):
         functional.reset_net(self)  #! reset internal states before forwarding
         return self.multi_step_forward(x_seq)
+
+
+class SJPSN(neuron.PSN):
+    """Multi-step spikingjelly PSN with:
+    * ATan surrogate function
+
+    Also, we implement a forwarding function to facilitate the programming of
+    PSN-based blocks.
+    """
+
+    def __init__(self, T: int, *args, **kwargs):
+        super().__init__(T=T, surrogate_function=surrogate.ATan())
+
+    @staticmethod
+    def forward_function(x_seq, weight, bias):
+        # x_seq.shape = [T, N, ...]; weight.shape = [T, T]; bias.shape = [T, 1]
+        h_seq = torch.addmm(bias, weight, x_seq.flatten(1))
+        s_seq = surrogate.atan.apply(h_seq, 2.)
+        return s_seq.reshape(x_seq.shape)
+
+
+class SJSlidingPSN(neuron.SlidingPSN):
+    """Multi-step spikingjelly SlidingPSN with:
+    * exponential weight initialization rule
+    * ATan surrogate function
+    * convolutional implementation
+
+    Also, we implement a forwarding function to facilitate the programming of
+    SlidingPSN-based blocks.
+    """
+
+    def __init__(self, k: int, *args, **kwargs):
+        super().__init__(
+            k=k,
+            exp_init=True,
+            surrogate_function=surrogate.ATan(),
+            step_mode="m",
+            backend="conv"
+        )
+
+    def forward(self, x_seq):  # disable single-step forward!!!
+        functional.reset_net(self)
+        return self.multi_step_forward(x_seq)
+
+    @staticmethod
+    def forward_function(x_seq, weight, bias, k):
+        # x_seq.shape = [T, N, ...]; weight.shape = [k], bias.shape = []
+        x_seq_shape = x_seq.shape
+        x_seq = einops.rearrange(x_seq, "T N ... -> (N ...) 1 T")
+        x_seq = F.pad(x_seq, pad=(k - 1, 0), mode="constant", value=0.)
+        weight = einops.rearrange(weight, "k -> 1 1 k")
+        x_seq = F.conv1d(x_seq, weight, stride=1)
+        x_seq = einops.rearrange(x_seq, "N 1 T -> T N").view(x_seq_shape)
+        return surrogate.atan.apply(x_seq + bias, 2.)
 
 
 # ================ Hand-written Multistep LIF neuron ================
