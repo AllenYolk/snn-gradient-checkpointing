@@ -7,7 +7,7 @@ import torch.nn as nn
 import einops
 
 from models import SJLIFNode, HandWrittenLIFNode
-from models import Conv2dLIF
+from models import Conv2dBNLIF
 from models import IdentitySpikeCompressor, BitSpikeCompressor
 from models import BooleanSpikeCompressor, SparseSpikeCompressor
 from models import Uint8SpikeCompressor
@@ -49,28 +49,33 @@ def test_compressor_equality():
     x = (x >= 0.0).float()
     grad_s = torch.randn(T, N, C, H, W)
 
-    net1 = Conv2dLIF(
+    net1 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
+        bn=nn.BatchNorm2d(C),
         neuron=HandWrittenLIFNode(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
-    net11 = Conv2dLIF(
+    net11 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
+        bn=nn.BatchNorm2d(C),
         neuron=SJLIFNode(decay_lambda=0.5, backend="torch"),
         spike_compressor=IdentitySpikeCompressor()
     )
-    net2 = Conv2dLIF(
+    net2 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
+        bn=nn.BatchNorm2d(C),
         neuron=HandWrittenLIFNode(decay_lambda=0.5),
         spike_compressor=BooleanSpikeCompressor()
     )
-    net3 = Conv2dLIF(
+    net3 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
+        bn=nn.BatchNorm2d(C),
         neuron=HandWrittenLIFNode(decay_lambda=0.5),
         spike_compressor=SparseSpikeCompressor(dtype=torch.int64)
     )
-    net4 = Conv2dLIF(
+    net4 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
+        bn=nn.BatchNorm2d(C),
         neuron=HandWrittenLIFNode(decay_lambda=0.5),
         spike_compressor=BitSpikeCompressor()
     )
@@ -145,8 +150,9 @@ def _test_compressor_memory(compressor):
     for i in range(36):
         net.add_module(
             f"{i}",
-            Conv2dLIF(
+            Conv2dBNLIF(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
+                bn=nn.BatchNorm2d(C),
                 neuron=HandWrittenLIFNode(decay_lambda=0.99),
                 spike_compressor=compressor
             ),
@@ -202,6 +208,7 @@ def _test_conventional_memory(neuron_type):
     for i in range(36):
         net.add_module(f"{i}merge", MergeTN())
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
+        net.add_module(f"{i}bn", nn.BatchNorm2d(C))
         net.add_module(f"{i}split", SplitTN(T))
         net.add_module(
             f"{i}neuron", neuron_type(backend="torch", detach_reset=False)

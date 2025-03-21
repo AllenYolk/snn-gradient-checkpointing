@@ -7,7 +7,7 @@ import torch.nn as nn
 import einops
 
 from models import SJLIFNode, HandWrittenLIFNode
-from models import LinearLIF, Conv2dLIF
+from models import LinearLIF, LinearBNLIF, Conv2dLIF, Conv2dBNLIF
 from models import IdentitySpikeCompressor
 
 
@@ -47,12 +47,12 @@ def test_linear_lif_equality():
 
     net1 = LinearLIF(
         proj=nn.Linear(C, C, bias=True),
-        neuron=HandWrittenLIFNode(decay_lambda=0.8),
+        neuron=HandWrittenLIFNode(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         nn.Linear(C, C, bias=True),
-        SJLIFNode(decay_lambda=0.8, backend="torch"),
+        SJLIFNode(decay_lambda=0.5, backend="torch"),
     )
     make_parameters_equal(net2, net1)
 
@@ -134,6 +134,111 @@ def test_linear_lif_memory_conventional():
     )
 
 
+def test_linear_bn_lif_equality():
+    T = 100
+    N = 64
+    C = 128
+    x = torch.randn(T, N, C) + 0.6
+    x = (x >= 0.0).float()
+    grad_s = torch.randn(T, N, C)
+
+    net1 = LinearBNLIF(
+        proj=nn.Linear(C, C, bias=True),
+        bn=nn.BatchNorm1d(C),
+        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        spike_compressor=IdentitySpikeCompressor()
+    )
+    net2 = nn.Sequential(
+        nn.Linear(C, C, bias=True),
+        MergeTN(),
+        nn.BatchNorm1d(C),
+        SplitTN(T),
+        SJLIFNode(decay_lambda=0.5, backend="torch"),
+    )
+    make_parameters_equal(net2, net1)
+
+    x1 = x.clone()
+    x1.requires_grad = True
+    s1 = net1(x1)
+    s1.backward(grad_s)
+
+    x2 = x.clone()
+    x2.requires_grad = True
+    s2 = net2(x2)
+    s2.backward(grad_s)
+
+    assert torch.allclose(s1, s2, atol=1e-5)
+    assert torch.allclose(x1.grad, x2.grad, atol=1e-5)
+    assert torch.allclose(net1.proj.weight.grad, net2[0].weight.grad, atol=1e-5)
+    assert torch.allclose(net1.proj.bias.grad, net2[0].bias.grad, atol=1e-5)
+    print("Firing rate: ", s1.mean().item())
+
+
+def test_linear_bn_lif_memory_blocked():
+    T = 50
+    N = 64
+    C = 700
+    x = torch.randn(T, N, C) + 0.6
+    x = x.to("cuda:0")
+
+    net = nn.Sequential()
+    for i in range(100):
+        net.add_module(
+            f"{i}",
+            LinearBNLIF(
+                proj=nn.Linear(C, C, bias=True),
+                bn=nn.BatchNorm1d(C),
+                neuron=HandWrittenLIFNode(detach_reset=False),
+                spike_compressor=IdentitySpikeCompressor()
+            ),
+        )
+    net = net.to("cuda:0")
+
+    torch.cuda.reset_peak_memory_stats("cuda:0")
+    s = net(x)
+    loss = s.sum()
+    loss.backward()
+    mem_stats = torch.cuda.memory_stats("cuda:0")
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Blocked Implementation, Peak allocated: {peak_allocated:.2f} MB, "
+        f"Peak reserved: {peak_reserved:.2f} MB"
+    )
+
+
+def test_linear_bn_lif_memory_conventional():
+    T = 50
+    N = 64
+    C = 700
+    x = torch.randn(T, N, C) + 0.6
+    x = x.to("cuda:0")
+
+    net = nn.Sequential()
+    for i in range(100):
+        net.add_module(f"{i}proj", nn.Linear(C, C, bias=True))
+        net.add_module(f"{i}merge", MergeTN())
+        net.add_module(f"{i}bn", nn.BatchNorm1d(C))
+        net.add_module(f"{i}split", SplitTN(T))
+        net.add_module(
+            f"{i}neuron",
+            HandWrittenLIFNode(backend="torch", detach_reset=False)
+        )
+    net = net.to("cuda:0")
+
+    torch.cuda.reset_peak_memory_stats("cuda:0")
+    s = net(x)
+    loss = s.sum()
+    loss.backward()
+    mem_stats = torch.cuda.memory_stats("cuda:0")
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Conventional Implementation, Peak allocated: {peak_allocated:.2f} MB, "
+        f"Peak reserved: {peak_reserved:.2f} MB"
+    )
+
+
 def test_conv2d_lif_equality():
     T = 20
     N = 64
@@ -146,14 +251,14 @@ def test_conv2d_lif_equality():
 
     net1 = Conv2dLIF(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-        neuron=HandWrittenLIFNode(decay_lambda=0.8),
+        neuron=HandWrittenLIFNode(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         MergeTN(),
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         SplitTN(T),
-        SJLIFNode(decay_lambda=0.8, backend="torch"),
+        SJLIFNode(decay_lambda=0.5, backend="torch"),
     )
     make_parameters_equal(net2, net1)
 
@@ -241,11 +346,134 @@ def test_conv2d_lif_memory_conventional():
     )
 
 
+def test_conv2d_bn_lif_equality():
+    T = 20
+    N = 64
+    C = 48
+    H = 32
+    W = 32
+    x = torch.randn(T, N, C, H, W) + 0.6
+    x = (x >= 0.0).float()
+    grad_s = torch.randn(T, N, C, H, W)
+
+    net1 = Conv2dBNLIF(
+        proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
+        bn=nn.BatchNorm2d(C),
+        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        spike_compressor=IdentitySpikeCompressor()
+    )
+    net2 = nn.Sequential(
+        MergeTN(),
+        nn.Conv2d(C, C, 3, padding=1, bias=True),
+        nn.BatchNorm2d(C),
+        SplitTN(T),
+        SJLIFNode(decay_lambda=0.5, backend="torch"),
+    )
+    make_parameters_equal(net2, net1)
+
+    x1 = x.clone()
+    x1.requires_grad = True
+    s1 = net1(x1)
+    s1.backward(grad_s)
+
+    x2 = x.clone()
+    x2.requires_grad = True
+    s2 = net2(x2)
+    s2.backward(grad_s)
+
+    assert torch.allclose(s1, s2, atol=1e-5)
+    assert torch.allclose(net1.proj.weight.grad, net2[1].weight.grad, atol=1e-5)
+    assert torch.allclose(net1.proj.bias.grad, net2[1].bias.grad, atol=1e-5)
+    assert torch.allclose(x1.grad, x2.grad, atol=1e-5)
+    print("Firing rate: ", s1.mean().item())
+
+
+def test_conv2d_bn_lif_memory_blocked():
+    T = 4
+    N = 32
+    C = 32
+    H = 32
+    W = 32
+    x = torch.randn(T, N, C, H, W) + 0.6
+    x = x.to("cuda:0")
+
+    net = nn.Sequential()
+    for i in range(50):
+        net.add_module(
+            f"{i}",
+            Conv2dBNLIF(
+                proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
+                bn=nn.BatchNorm2d(C),
+                neuron=HandWrittenLIFNode(detach_reset=False),
+                spike_compressor=IdentitySpikeCompressor()
+            ),
+        )
+    net = net.to("cuda:0")
+
+    torch.cuda.reset_peak_memory_stats("cuda:0")
+    s = net(x)
+    loss = s.sum()
+    loss.backward()
+    mem_stats = torch.cuda.memory_stats("cuda:0")
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Blocked Implementation, Peak allocated: {peak_allocated:.2f} MB, "
+        f"Peak reserved: {peak_reserved:.2f} MB"
+    )
+
+
+def test_conv2d_bn_lif_memory_conventional():
+    T = 4
+    N = 32
+    C = 32
+    H = 32
+    W = 32
+    x = torch.randn(T, N, C, H, W) + 0.6
+    x = x.to("cuda:0")
+
+    net = nn.Sequential()
+    for i in range(50):
+        net.add_module(f"{i}merge", MergeTN())
+        net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
+        net.add_module(f"{i}bn", nn.BatchNorm2d(C))
+        net.add_module(f"{i}split", SplitTN(T))
+        net.add_module(
+            f"{i}neuron",
+            HandWrittenLIFNode(backend="torch", detach_reset=False)
+        )
+    net = net.to("cuda:0")
+
+    torch.cuda.reset_peak_memory_stats("cuda:0")
+    s = net(x)
+    loss = s.sum()
+    loss.backward()
+    mem_stats = torch.cuda.memory_stats("cuda:0")
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Conventional Implementation, Peak allocated: {peak_allocated:.2f} MB, "
+        f"Peak reserved: {peak_reserved:.2f} MB"
+    )
+
+
 if __name__ == "__main__":
+    print("=" * 20, "LinearLIF", "=" * 20)
     test_linear_lif_equality()
     test_linear_lif_memory_blocked()
     test_linear_lif_memory_conventional()
 
+    print("=" * 20, "LinearBNLIF", "=" * 20)
+    test_linear_bn_lif_equality()
+    test_linear_bn_lif_memory_blocked()
+    test_linear_bn_lif_memory_conventional()
+
+    print("=" * 20, "Conv2dLIF", "=" * 20)
     test_conv2d_lif_equality()
     test_conv2d_lif_memory_blocked()
     test_conv2d_lif_memory_conventional()
+
+    print("=" * 20, "Conv2dBNLIF", "=" * 20)
+    test_conv2d_bn_lif_equality()
+    test_conv2d_bn_lif_memory_blocked()
+    test_conv2d_bn_lif_memory_conventional()
