@@ -107,7 +107,7 @@ class SJSlidingPSN(neuron.SlidingPSN):
         x_seq = F.pad(x_seq, pad=(k - 1, 0), mode="constant", value=0.)
         weight = einops.rearrange(weight, "k -> 1 1 k")
         x_seq = F.conv1d(x_seq, weight, stride=1)
-        x_seq = einops.rearrange(x_seq, "N 1 T -> T N").view(x_seq_shape)
+        x_seq = einops.rearrange(x_seq, "N 1 T -> T N").reshape(x_seq_shape)
         return surrogate.atan.apply(x_seq + bias, 2.)
 
 

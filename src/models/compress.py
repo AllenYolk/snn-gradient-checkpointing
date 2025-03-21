@@ -58,7 +58,7 @@ class BitSpikeCompressor(BaseSpikeCompressor):
         super().__init__()
 
     def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
-        s_seq = s_seq.to(dtype=torch.bool).view(-1)
+        s_seq = s_seq.to(dtype=torch.bool).reshape(-1)
         compressed_shape = (s_seq.numel() + 7) // 8
         s_seq_compresses = torch.zeros(
             compressed_shape, dtype=torch.uint8, device=s_seq.device
@@ -86,7 +86,7 @@ class SparseSpikeCompressor(BaseSpikeCompressor):
         self.dtype = dtype
 
     def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
-        indices = torch.nonzero(s_seq.view(-1))
+        indices = torch.nonzero(s_seq.reshape(-1))
         return indices.to(dtype=self.dtype)
 
     def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
@@ -96,7 +96,7 @@ class SparseSpikeCompressor(BaseSpikeCompressor):
         s_seq_decompressed = torch.scatter(
             s_seq_decompressed,
             dim=0,
-            index=s_seq.to(dtype=torch.int64).view(-1),
+            index=s_seq.to(dtype=torch.int64).reshape(-1),
             value=1,
         )
         return s_seq_decompressed.reshape(shape)
