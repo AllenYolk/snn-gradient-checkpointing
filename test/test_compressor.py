@@ -56,7 +56,7 @@ def test_compressor_equality():
     )
     net11 = Conv2dLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
-        neuron=SJLIFNode(decay_lambda=0.5),
+        neuron=SJLIFNode(decay_lambda=0.5, backend="torch"),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = Conv2dLIF(

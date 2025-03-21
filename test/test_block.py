@@ -47,7 +47,7 @@ def test_linear_lif_equality():
 
     net1 = LinearLIF(
         proj=nn.Linear(C, C, bias=True),
-        neuron=HandWrittenLIFNodeLIFNode(decay_lambda=0.8),
+        neuron=HandWrittenLIFNode(decay_lambda=0.8),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -243,9 +243,9 @@ def test_conv2d_lif_memory_conventional():
 
 if __name__ == "__main__":
     test_linear_lif_equality()
-    #test_linear_lif_memory_blocked()
-    #test_linear_lif_memory_conventional()
+    test_linear_lif_memory_blocked()
+    test_linear_lif_memory_conventional()
 
     test_conv2d_lif_equality()
-    #test_conv2d_lif_memory_blocked()
-    #test_conv2d_lif_memory_conventional()
+    test_conv2d_lif_memory_blocked()
+    test_conv2d_lif_memory_conventional()
