@@ -1,9 +1,15 @@
+import sys
+
+sys.path.insert(0, "./src")
+
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
 import torch.nn.functional as F
 from spikingjelly.activation_based import surrogate, neuron, functional
 import einops
+
+from utils import *
 
 try:
     import cupy
@@ -132,7 +138,7 @@ class _BaseHandWrittenLIFAutogradFunction(autograd.Function):
             h_seq.append(h)
         s_seq = torch.stack(s_seq, dim=0)
         h_seq = torch.stack(h_seq, dim=0)
-        ctx.save_for_backward(h_seq, s_seq)  # internal states
+        ctx.save_for_backward(h_seq)  # internal states
         ctx.decay_lambda = decay_lambda
         ctx.T = T
         return s_seq
@@ -149,21 +155,18 @@ class _HandWrittenLIFAutogradFunctionNotDetached(
     @staticmethod
     def backward(ctx, grad_s_seq):
         decay_lambda = ctx.decay_lambda
-        h_seq, s_seq = ctx.saved_tensors
+        h_seq = ctx.saved_tensors[0]
 
-        grad_x_seq = []
+        grad_x_seq = torch.empty_like(grad_s_seq)
         grad_v = 0.
         for t in range(ctx.T - 1, -1, -1):
             grad_s = grad_s_seq[t]
             h = h_seq[t]
-            s = s_seq[t]
-            grad_x = (grad_s - grad_v*h) * atan_derivative(h - 1)
-            grad_x = grad_x + grad_v * (1-s)
-            grad_v = decay_lambda * grad_x
+            grad_v = ((grad_s - grad_v*h) * atan_derivative(h - 1) + grad_v *
+                      (1 - surrogate.heaviside(h - 1.)))
+            grad_x_seq[t] = grad_v
+            grad_v *= decay_lambda
 
-            grad_x_seq.append(grad_x)
-
-        grad_x_seq = torch.stack(grad_x_seq[::-1], dim=0)
         return grad_x_seq, None
 
 
@@ -174,21 +177,20 @@ class _HandWrittenLIFAutogradFunctionDetached(
     @staticmethod
     def backward(ctx, grad_s_seq):
         decay_lambda = ctx.decay_lambda
-        h_seq, s_seq = ctx.saved_tensors
+        h_seq = ctx.saved_tensors[0]
 
-        grad_x_seq = []
+        grad_x_seq = torch.empty_like(grad_s_seq)
         grad_v = 0.
         for t in range(ctx.T - 1, -1, -1):
             grad_s = grad_s_seq[t]
             h = h_seq[t]
-            s = s_seq[t]
-            grad_x = grad_s * atan_derivative(h - 1)  # detach_reset = True
-            grad_x = grad_x + grad_v * (1-s)
-            grad_v = decay_lambda * grad_x
+            grad_v = (
+                grad_s * atan_derivative(h - 1) + grad_v *
+                (1 - surrogate.heaviside(h - 1.))
+            )
+            grad_x_seq[t] = grad_v
+            grad_v *= decay_lambda
 
-            grad_x_seq.append(grad_x)
-
-        grad_x_seq = torch.stack(grad_x_seq[::-1], dim=0)
         return grad_x_seq, None
 
 
