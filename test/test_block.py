@@ -45,6 +45,12 @@ def _test_linear_equatlity(
             net1.bn.weight.grad, net2[2].weight.grad, atol=1e-5
         )
         assert torch.allclose(net1.bn.bias.grad, net2[2].bias.grad, atol=1e-5)
+        assert torch.allclose(
+            net1.bn.running_mean, net2[2].running_mean, atol=1e-5
+        )
+        assert torch.allclose(
+            net1.bn.running_var, net2[2].running_var, atol=1e-5
+        )
     if with_psn:
         idx = 4 if with_bn else 1
         assert torch.allclose(
@@ -87,6 +93,12 @@ def _test_conv2d_equality(
             net1.bn.weight.grad, net2[2].weight.grad, atol=1e-5
         )
         assert torch.allclose(net1.bn.bias.grad, net2[2].bias.grad, atol=1e-5)
+        assert torch.allclose(
+            net1.bn.running_mean, net2[2].running_mean, atol=1e-5
+        )
+        assert torch.allclose(
+            net1.bn.running_var, net2[2].running_var, atol=1e-5
+        )
     if with_psn:
         idx = 4 if with_bn else 3
         assert torch.allclose(
@@ -153,6 +165,7 @@ def test_linear_lif_equality():
         SJLIFNode(decay_lambda=0.5, backend="torch"),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=False)
+    _test_linear_equatlity(net1, net2, C, T, with_bn=False)
 
 
 def test_linear_lif_memory_blocked():
@@ -194,6 +207,7 @@ def test_linear_PSN_equality():
         nn.Linear(C, C, bias=True),
         SJPSN(T=T),
     )
+    _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
 
 
@@ -237,6 +251,7 @@ def test_linear_SlidingPSN_equality():
         nn.Linear(C, C, bias=True),
         SJSlidingPSN(k=T // 5),
     )
+    _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
 
 
@@ -284,6 +299,7 @@ def test_linear_bn_lif_equality():
         SplitTN(T),
         SJLIFNode(decay_lambda=0.5, backend="torch"),
     )
+    _test_linear_equatlity(net1, net2, C, T, with_bn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=True)
 
 

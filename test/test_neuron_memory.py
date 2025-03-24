@@ -90,7 +90,9 @@ def test_vanilla_lif_snn():
     net = nn.Sequential(
         nn.Linear(C, C),
         SJLIFNode(),
-        nn.Linear(C, 20),
+        nn.Linear(C, C),
+        SJLIFNode(),
+        nn.Linear(C, C),
     )
     x.requires_grad = True
     net = net.to("cuda:0")
@@ -118,7 +120,9 @@ def test_handwritten_lif_snn():
     net = nn.Sequential(
         nn.Linear(C, C),
         HandWrittenLIFNode(),
-        nn.Linear(C, 20),
+        nn.Linear(C, C),
+        HandWrittenLIFNode(),
+        nn.Linear(C, C),
     )
     x.requires_grad = True
     net = net.to("cuda:0")
@@ -127,7 +131,6 @@ def test_handwritten_lif_snn():
     torch.cuda.reset_peak_memory_stats("cuda:0")
     s = net(x)
     loss = s.sum()
-    get_all_addresses_referenced_by_tensor(verbose=True)
     loss.backward()
     mem_stats = torch.cuda.memory_stats("cuda:0")
     peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
@@ -147,7 +150,9 @@ def test_me_lif_snn():
     net = nn.Sequential(
         nn.Linear(C, C),
         MELIFNode(),
-        nn.Linear(C, 20),
+        nn.Linear(C, C),
+        MELIFNode(),
+        nn.Linear(C, C),
     )
     x.requires_grad = True
     net = net.to("cuda:0")

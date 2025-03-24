@@ -308,8 +308,8 @@ class _LinearBNLIFAutogradFunction(autograd.Function):
                 y_seq = einops.rearrange(y_seq, "T N ... -> (T N) ...")
                 y_seq = F.batch_norm(
                     y_seq,
-                    bn_running_mean,
-                    bn_running_var,
+                    bn_running_mean.clone(),  # avoid updating stats twice!
+                    bn_running_var.clone(),
                     bn_weight,
                     bn_bias,
                     training=training
@@ -426,8 +426,8 @@ class _LinearBNPSNAutogradFunction(autograd.Function):
                 y_seq = einops.rearrange(y_seq, "T N ... -> (T N) ...")
                 y_seq = F.batch_norm(
                     y_seq,
-                    bn_running_mean,
-                    bn_running_var,
+                    bn_running_mean.clone(),
+                    bn_running_var.clone(),
                     bn_weight,
                     bn_bias,
                     training=training
@@ -556,8 +556,8 @@ class _LinearBNSlidingPSNAutogradFunction(autograd.Function):
                 y_seq = einops.rearrange(y_seq, "T N ... -> (T N) ...")
                 y_seq = F.batch_norm(
                     y_seq,
-                    bn_running_mean,
-                    bn_running_var,
+                    bn_running_mean.clone(),
+                    bn_running_var.clone(),
                     bn_weight,
                     bn_bias,
                     training=training
@@ -992,8 +992,8 @@ class _Conv2dBNLIFAutogradFunction(autograd.Function):
                 )
                 y_seq = F.batch_norm(
                     y_seq,
-                    bn_running_mean,
-                    bn_running_var,
+                    bn_running_mean.clone(),
+                    bn_running_var.clone(),
                     bn_weight,
                     bn_bias,
                     training=training
@@ -1129,8 +1129,8 @@ class _Conv2dBNPSNAutogradFunction(autograd.Function):
                 )
                 y_seq = F.batch_norm(
                     y_seq,
-                    bn_running_mean,
-                    bn_running_var,
+                    bn_running_mean.clone(),
+                    bn_running_var.clone(),
                     bn_weight,
                     bn_bias,
                     training=training
@@ -1278,8 +1278,8 @@ class _Conv2dBNSlidingPSNAutogradFunction(autograd.Function):
                 )
                 y_seq = F.batch_norm(
                     y_seq,
-                    bn_running_mean,
-                    bn_running_var,
+                    bn_running_mean.clone(),
+                    bn_running_var.clone(),
                     bn_weight,
                     bn_bias,
                     training=training
