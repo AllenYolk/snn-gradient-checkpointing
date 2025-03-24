@@ -5,7 +5,7 @@ sys.path.insert(0, "./src")
 import torch
 import torch.nn as nn
 
-from models import SJLIFNode, HandWrittenLIFNode, MELIFNode
+from models import SJLIF, HandWrittenLIF, MELIF
 from utils import *
 
 
@@ -15,7 +15,7 @@ def test_vanilla_lif():
     C = 200
     x = torch.randn(T, N, C) + 0.6
 
-    net = SJLIFNode()
+    net = SJLIF()
     x.requires_grad = True
     net = net.to("cuda:0")
     x = x.to("cuda:0")
@@ -39,7 +39,7 @@ def test_handwritten_lif():
     C = 200
     x = torch.randn(T, N, C) + 0.6
 
-    net = HandWrittenLIFNode()
+    net = HandWrittenLIF()
     x.requires_grad = True
     net = net.to("cuda:0")
     x = x.to("cuda:0")
@@ -63,7 +63,7 @@ def test_me_lif():
     C = 200
     x = torch.randn(T, N, C) + 0.6
 
-    net = MELIFNode()
+    net = MELIF()
     x.requires_grad = True
     net = net.to("cuda:0")
     x = x.to("cuda:0")
@@ -89,9 +89,9 @@ def test_vanilla_lif_snn():
 
     net = nn.Sequential(
         nn.Linear(C, C),
-        SJLIFNode(),
+        SJLIF(),
         nn.Linear(C, C),
-        SJLIFNode(),
+        SJLIF(),
         nn.Linear(C, C),
     )
     x.requires_grad = True
@@ -119,9 +119,9 @@ def test_handwritten_lif_snn():
 
     net = nn.Sequential(
         nn.Linear(C, C),
-        HandWrittenLIFNode(),
+        HandWrittenLIF(),
         nn.Linear(C, C),
-        HandWrittenLIFNode(),
+        HandWrittenLIF(),
         nn.Linear(C, C),
     )
     x.requires_grad = True
@@ -149,9 +149,9 @@ def test_me_lif_snn():
 
     net = nn.Sequential(
         nn.Linear(C, C),
-        MELIFNode(),
+        MELIF(),
         nn.Linear(C, C),
-        MELIFNode(),
+        MELIF(),
         nn.Linear(C, C),
     )
     x.requires_grad = True

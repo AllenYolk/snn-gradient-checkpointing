@@ -19,13 +19,17 @@ except Exception:
 print(f"Using {DEFAULT_SJ_BACKEND} backend by default.")
 
 
+def get_neuron(neuron_type: str, **kwargs):
+    return globals()[neuron_type](**kwargs)
+
+
 @torch.jit.script
 def atan_derivative(x: torch.Tensor, alpha: float = 2.):
     return alpha / 2 / (1 + (torch.pi / 2 * alpha * x).pow_(2))
 
 
 # ================ Standard SpikingJelly Multi-step neurons ================
-class SJLIFNode(neuron.LIFNode):
+class SJLIF(neuron.LIFNode):
     """Multi-step spikingjelly LIF neuron with:
     * decay_input=False
     * v_threshold = 1.
@@ -194,14 +198,14 @@ class _HandWrittenLIFAutogradFunctionDetached(
         return grad_x_seq, None
 
 
-class HandWrittenLIFNode(nn.Module):
+class HandWrittenLIF(nn.Module):
     """Multi-step handwritten LIF neuron with:
     * decay_input=False
     * v_threshold = 1.
     * hard_reset, v_reset = 0.
     * ATan surrogate function
     Experiments show that HandWrittenLIFNode consumes much less memory than
-    SJLIFNode, while its computational efficiency is nearly the same.
+    SJLIF, while its computational efficiency is nearly the same.
     """
 
     def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
@@ -302,7 +306,7 @@ class _MELIFAutogradFunctionDetached(_BaseMELIFAutogradFunction):
         return grad_x_seq, None
 
 
-class MELIFNode(nn.Module):
+class MELIF(nn.Module):
     """Multi-step memory-efficient LIF neuron with:
     * decay_input=False
     * v_threshold = 1.

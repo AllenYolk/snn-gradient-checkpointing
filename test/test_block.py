@@ -157,12 +157,12 @@ def test_linear_lif_equality():
     T = 100
     net1 = LinearLIF(
         proj=nn.Linear(C, C, bias=True),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         nn.Linear(C, C, bias=True),
-        SJLIFNode(decay_lambda=0.5, backend="torch"),
+        SJLIF(decay_lambda=0.5, backend="torch"),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=False)
     _test_linear_equatlity(net1, net2, C, T, with_bn=False)
@@ -176,7 +176,7 @@ def test_linear_lif_memory_blocked():
             f"{i}",
             LinearLIF(
                 proj=nn.Linear(C, C, bias=True),
-                neuron=HandWrittenLIFNode(detach_reset=False),
+                neuron=HandWrittenLIF(detach_reset=False),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -189,8 +189,7 @@ def test_linear_lif_memory_conventional():
     for i in range(100):
         net.add_module(f"{i}proj", nn.Linear(C, C, bias=True))
         net.add_module(
-            f"{i}neuron",
-            HandWrittenLIFNode(backend="torch", detach_reset=False)
+            f"{i}neuron", HandWrittenLIF(backend="torch", detach_reset=False)
         )
     _test_linear_memory(net, C)
 
@@ -289,7 +288,7 @@ def test_linear_bn_lif_equality():
     net1 = LinearBNLIF(
         proj=nn.Linear(C, C, bias=True),
         bn=nn.BatchNorm1d(C),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -297,7 +296,7 @@ def test_linear_bn_lif_equality():
         MergeTN(),
         nn.BatchNorm1d(C),
         SplitTN(T),
-        SJLIFNode(decay_lambda=0.5, backend="torch"),
+        SJLIF(decay_lambda=0.5, backend="torch"),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=True)
@@ -313,7 +312,7 @@ def test_linear_bn_lif_memory_blocked():
             LinearBNLIF(
                 proj=nn.Linear(C, C, bias=True),
                 bn=nn.BatchNorm1d(C),
-                neuron=HandWrittenLIFNode(detach_reset=False),
+                neuron=HandWrittenLIF(detach_reset=False),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -330,8 +329,7 @@ def test_linear_bn_lif_memory_conventional():
         net.add_module(f"{i}bn", nn.BatchNorm1d(C))
         net.add_module(f"{i}split", SplitTN(T))
         net.add_module(
-            f"{i}neuron",
-            HandWrittenLIFNode(backend="torch", detach_reset=False)
+            f"{i}neuron", HandWrittenLIF(backend="torch", detach_reset=False)
         )
     _test_linear_memory(net, C, T)
 
@@ -443,14 +441,14 @@ def test_conv2d_lif_equality():
     T = 20
     net1 = Conv2dLIF(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         MergeTN(),
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         SplitTN(T),
-        SJLIFNode(decay_lambda=0.5, backend="torch"),
+        SJLIF(decay_lambda=0.5, backend="torch"),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=False)
     _test_conv2d_equality(net1, net2, C, T, with_bn=False)
@@ -465,7 +463,7 @@ def test_conv2d_lif_memory_blocked():
             f"{i}",
             Conv2dLIF(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-                neuron=HandWrittenLIFNode(detach_reset=False),
+                neuron=HandWrittenLIF(detach_reset=False),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -481,8 +479,7 @@ def test_conv2d_lif_memory_conventional():
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}split", SplitTN(T))
         net.add_module(
-            f"{i}neuron",
-            HandWrittenLIFNode(backend="torch", detach_reset=False)
+            f"{i}neuron", HandWrittenLIF(backend="torch", detach_reset=False)
         )
     _test_conv2d_memory(net, C, T)
 
@@ -585,7 +582,7 @@ def test_conv2d_bn_lif_equality():
     net1 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -593,7 +590,7 @@ def test_conv2d_bn_lif_equality():
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         nn.BatchNorm2d(C),
         SplitTN(T),
-        SJLIFNode(decay_lambda=0.5, backend="torch"),
+        SJLIF(decay_lambda=0.5, backend="torch"),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=True)
@@ -609,7 +606,7 @@ def test_conv2d_bn_lif_memory_blocked():
             Conv2dBNLIF(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
                 bn=nn.BatchNorm2d(C),
-                neuron=HandWrittenLIFNode(detach_reset=False),
+                neuron=HandWrittenLIF(detach_reset=False),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -626,8 +623,7 @@ def test_conv2d_bn_lif_memory_conventional():
         net.add_module(f"{i}bn", nn.BatchNorm2d(C))
         net.add_module(f"{i}split", SplitTN(T))
         net.add_module(
-            f"{i}neuron",
-            HandWrittenLIFNode(backend="torch", detach_reset=False)
+            f"{i}neuron", HandWrittenLIF(backend="torch", detach_reset=False)
         )
     _test_conv2d_memory(net, C, T)
 

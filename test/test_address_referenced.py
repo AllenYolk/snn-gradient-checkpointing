@@ -18,7 +18,7 @@ def test_lif_address_referenced():
 
     net = nn.Sequential(
         nn.ReLU(),
-        HandWrittenLIFNode(),
+        HandWrittenLIF(),
         nn.ReLU(),
     )
     x.requires_grad = True
@@ -41,22 +41,22 @@ def test_linear_lif_address_referenced():
     net = nn.Sequential(
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIFNode(),
+            neuron=HandWrittenLIF(),
             spike_compressor=Uint8SpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIFNode(),
+            neuron=HandWrittenLIF(),
             spike_compressor=BooleanSpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIFNode(),
+            neuron=HandWrittenLIF(),
             spike_compressor=BitSpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIFNode(),
+            neuron=HandWrittenLIF(),
             spike_compressor=SparseSpikeCompressor(),
         )
     )

@@ -29,31 +29,31 @@ def test_compressor_equality_lif():
     net1 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net11 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJLIFNode(decay_lambda=0.5, backend="torch"),
+        neuron=SJLIF(decay_lambda=0.5, backend="torch"),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=BooleanSpikeCompressor()
     )
     net3 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=SparseSpikeCompressor(dtype=torch.int64)
     )
     net4 = Conv2dBNLIF(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=HandWrittenLIFNode(decay_lambda=0.5),
+        neuron=HandWrittenLIF(decay_lambda=0.5),
         spike_compressor=BitSpikeCompressor()
     )
     make_parameters_equal(net11, net1)
@@ -209,7 +209,7 @@ def _test_compressor_memory_lif(compressor):
             Conv2dBNLIF(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
                 bn=nn.BatchNorm2d(C),
-                neuron=HandWrittenLIFNode(decay_lambda=0.99),
+                neuron=HandWrittenLIF(decay_lambda=0.99),
                 spike_compressor=compressor
             ),
         )
@@ -287,11 +287,11 @@ def _test_conventional_memory_lif(neuron_type, prefix):
 
 
 def test_handwritten_conventional_memory_lif():
-    _test_conventional_memory_lif(HandWrittenLIFNode, "Handwritten")
+    _test_conventional_memory_lif(HandWrittenLIF, "Handwritten")
 
 
 def test_sj_conventional_memory_lif():
-    _test_conventional_memory_lif(SJLIFNode, "SJ")
+    _test_conventional_memory_lif(SJLIF, "SJ")
 
 
 def _test_compressor_memory_SlidingPSN(compressor):

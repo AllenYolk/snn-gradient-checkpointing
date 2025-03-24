@@ -1,0 +1,142 @@
+import torch
+import torch.nn as nn
+import einops
+from spikingjelly.activation_based import layer, functional
+
+from .block import get_block
+from .neuron import get_neuron
+from .compress import get_spike_compressor
+from .merge_split import *
+
+
+class MESequentialCIFARNet(nn.Module):
+
+    def __init__(
+        self,
+        channels: int,
+        neuron_type: str,
+        spike_compressor: str,
+        num_classes=100,
+        **kwargs
+    ):
+        """A Conv1d-based network for Sequential CIFAR-10/100 classification.
+
+        Args:
+            channels (int)
+            neuron_type (str)
+            spike_compressor (str)
+            num_classes (int, optional): Defaults to 100.
+            **kwargs: Additional arguments for `get_neuron(...)`. See 
+                `src/models/neuron.py` for details.
+        """
+        super().__init__()
+
+        conv = []
+        for _ in range(2):
+            for _ in range(3):
+                if len(conv) == 0:
+                    in_channels = 3
+                else:
+                    in_channels = channels
+
+                conv_block = get_block(
+                    proj_type="Conv1d",
+                    neuron_type=neuron_type,
+                    need_bn=True,
+                    proj=nn.Conv1d(
+                        in_channels,
+                        channels,
+                        kernel_size=3,
+                        padding=1,
+                        bias=True
+                    ),
+                    bn=nn.BatchNorm1d(channels),
+                    neuron=get_neuron(neuron_type, **kwargs),
+                    spike_compressor=get_spike_compressor(spike_compressor),
+                )
+                conv.append(conv_block)
+            conv.append(MergeSplitTNWrapper(nn.AvgPool1d(2, 2)))
+
+        self.conv = nn.Sequential(*conv)
+
+        self.fc = get_block(
+            proj_type="Linear",
+            neuron_type=neuron_type,
+            need_bn=False,
+            proj=nn.Linear(channels * 8, channels * 8 // 4),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+        self.decode = nn.Linear(channels * 8 // 4, num_classes)
+
+    def forward(self, x: torch.Tensor):
+        # x.shape = [T, N, C, L]
+        y = self.conv(x)
+        y = self.fc(einops.rearrange(y, "T N C L -> T N (C L)"))
+        y = einops.reduce(y, "T N C -> N C", "mean")
+        y = self.decode(y)
+        return y
+
+
+class SequentialCIFARNet(nn.Module):
+
+    def __init__(
+        self,
+        channels: int,
+        neuron_type: str,
+        spike_compressor: str,
+        num_classes=100,
+        **kwargs
+    ):
+        """A Conv1d-based network for Sequential CIFAR-10/100 classification.
+
+        Args:
+            channels (int)
+            neuron_type (str)
+            spike_compressor (str)
+            num_classes (int, optional): Defaults to 100.
+            **kwargs: Additional arguments for `get_neuron(...)`. See 
+                `src/models/neuron.py` for details.
+        """
+        super().__init__()
+
+        conv = []
+        for _ in range(2):
+            for _ in range(3):
+                if len(conv) == 0:
+                    in_channels = 3
+                else:
+                    in_channels = channels
+
+                conv_block = nn.Sequential(
+                    layer.Conv1d(
+                        in_channels,
+                        channels,
+                        kernel_size=3,
+                        padding=1,
+                        bias=True
+                    ),
+                    layer.BatchNorm1d(channels),
+                    get_neuron(neuron_type, **kwargs),
+                )
+                conv.append(conv_block)
+            conv.append(layer.AvgPool1d(2, 2))
+
+        self.conv = nn.Sequential(*conv)
+
+        self.fc = nn.Sequential(
+            layer.Linear(channels * 8, channels * 8 // 4),
+            get_neuron(neuron_type, **kwargs),
+        )
+
+        self.decode = nn.Linear(channels * 8 // 4, num_classes)
+
+        functional.set_step_mode(self, "m")
+
+    def forward(self, x: torch.Tensor):
+        # x.shape = [T, N, C, L]
+        y = self.conv(x)
+        y = self.fc(einops.rearrange(y, "T N C L -> T N (C L)"))
+        y = einops.reduce(y, "T N C -> N C", "mean")
+        y = self.decode(y)
+        return y

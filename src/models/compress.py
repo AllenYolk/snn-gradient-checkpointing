@@ -2,6 +2,10 @@ import abc
 import torch
 
 
+def get_spike_compressor(spike_compressor: str):
+    return globals()[spike_compressor]()
+
+
 class BaseSpikeCompressor(abc.ABC):
 
     def __init__(self):
