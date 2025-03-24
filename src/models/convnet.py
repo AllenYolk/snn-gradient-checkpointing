@@ -81,19 +81,13 @@ class MESequentialCIFARNet(nn.Module):
 class SequentialCIFARNet(nn.Module):
 
     def __init__(
-        self,
-        channels: int,
-        neuron_type: str,
-        spike_compressor: str,
-        num_classes=100,
-        **kwargs
+        self, channels: int, neuron_type: str, num_classes=100, **kwargs
     ):
         """A Conv1d-based network for Sequential CIFAR-10/100 classification.
 
         Args:
             channels (int)
             neuron_type (str)
-            spike_compressor (str)
             num_classes (int, optional): Defaults to 100.
             **kwargs: Additional arguments for `get_neuron(...)`. See 
                 `src/models/neuron.py` for details.

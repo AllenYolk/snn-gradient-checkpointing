@@ -274,7 +274,6 @@ def main():
         proj=f"sequential-cifar{args.num_classes}-me"
     )
     run_name = run_name_generator.generate(args)
-    model_name = run_name[:100] if len(run_name) > 100 else run_name
     wandb.require("core")
     wandb.init(
         project=f"sequential-cifar{args.num_classes}-me",
