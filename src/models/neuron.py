@@ -185,7 +185,7 @@ class _HandWrittenLIFAutogradFunctionDetached(
             grad_s = grad_s_seq[t]
             h = h_seq[t]
             grad_v = (
-                grad_s * atan_derivative(h - 1) + grad_v *
+                grad_s * atan_derivative(h - 1.) + grad_v *
                 (1 - surrogate.heaviside(h - 1.))
             )
             grad_x_seq[t] = grad_v
@@ -258,7 +258,7 @@ class _MELIFAutogradFunctionNotDetached(_BaseMELIFAutogradFunction):
         decay_lambda = ctx.decay_lambda
         x_seq = ctx.saved_tensors[0]
 
-        grad_x_seq = []
+        grad_x_seq = torch.empty_like(grad_s_seq)
         grad_v = 0.
         for t in range(ctx.T - 1, -1, -1):
             grad_s = grad_s_seq[t]
@@ -269,13 +269,11 @@ class _MELIFAutogradFunctionNotDetached(_BaseMELIFAutogradFunction):
                 h = decay_lambda*v + x
                 s = surrogate.heaviside(h - 1.)
                 v = h * (1.-s)
-            grad_x = (grad_s - grad_v*h) * atan_derivative(h - 1)
-            grad_x = grad_x + grad_v * (1-s)
-            grad_v = decay_lambda * grad_x
+            grad_v = ((grad_s - grad_v*h) * atan_derivative(h - 1) + grad_v *
+                      (1-s))
+            grad_x_seq[t] = grad_v
+            grad_v *= decay_lambda
 
-            grad_x_seq.append(grad_x)
-
-        grad_x_seq = torch.stack(grad_x_seq[::-1], dim=0)
         return grad_x_seq, None
 
 
@@ -286,7 +284,7 @@ class _MELIFAutogradFunctionDetached(_BaseMELIFAutogradFunction):
         decay_lambda = ctx.decay_lambda
         x_seq = ctx.saved_tensors[0]
 
-        grad_x_seq = []
+        grad_x_seq = torch.empty_like(grad_s_seq)
         grad_v = 0.
         for t in range(ctx.T - 1, -1, -1):
             grad_s = grad_s_seq[t]
@@ -297,13 +295,10 @@ class _MELIFAutogradFunctionDetached(_BaseMELIFAutogradFunction):
                 h = decay_lambda*v + x
                 s = surrogate.heaviside(h - 1.)
                 v = h * (1.-s)
-            grad_x = grad_s * atan_derivative(h - 1)  # detach_reset = True
-            grad_x = grad_x + grad_v * (1-s)
-            grad_v = decay_lambda * grad_x
+            grad_v = grad_s * atan_derivative(h - 1) + grad_v * (1-s)
+            grad_x_seq[t] = grad_v
+            grad_v *= decay_lambda
 
-            grad_x_seq.append(grad_x)
-
-        grad_x_seq = torch.stack(grad_x_seq[::-1], dim=0)
         return grad_x_seq, None
 
 

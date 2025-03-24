@@ -16,25 +16,6 @@ def make_parameters_equal(net, reference_net):
         p.data = ref_p.data.clone()
 
 
-class MergeTN(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x_seq):
-        return einops.rearrange(x_seq, "T N ... -> (T N) ...")
-
-
-class SplitTN(nn.Module):
-
-    def __init__(self, T):
-        super().__init__()
-        self.T = T
-
-    def forward(self, x_seq):
-        return einops.rearrange(x_seq, "(T N) ... -> T N ...", T=self.T)
-
-
 def test_compressor_equality_lif():
     T = 20
     N = 64

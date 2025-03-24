@@ -45,7 +45,7 @@ def get_all_addresses_referenced_by_tensor(verbose=False):
                 x = tensor_info["tensor"]
                 obj_name = tensor_info["name"]
                 info_str = f'-> "{obj_name}" ' if obj_name else "-> "
-                info_str += f"{list(x.size())} ({x.dtype})"
+                info_str += f"{list(x.size())} ({x.dtype}, {x.device})"
                 print(" " * real_indent, info_str)
         print("=" * (42 + len(title)))
 
