@@ -6,6 +6,7 @@ import einops
 
 from .compress import *
 from .neuron import SJSlidingPSN, SJPSN
+from .compiled import *
 
 
 class _LinearLIFAutogradFunction(autograd.Function):
@@ -19,7 +20,7 @@ class _LinearLIFAutogradFunction(autograd.Function):
             ctx.neuron = neuron
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        return neuron(F.linear(x_seq, weight, bias))
+        return neuron(linear_forward_compiled(x_seq, weight, bias))
 
     @staticmethod
     def backward(ctx, grad_s_seq):
@@ -38,7 +39,7 @@ class _LinearLIFAutogradFunction(autograd.Function):
                 x_seq = x_seq.detach().requires_grad_(True)
                 weight = weight.detach().requires_grad_(True)
                 bias = bias.detach().requires_grad_(True)
-                y_seq = F.linear(x_seq, weight, bias)
+                y_seq = linear_forward_compiled(x_seq, weight, bias)
                 s_seq = neuron(y_seq)
                 s_seq.backward(grad_s_seq)
 
@@ -87,7 +88,7 @@ class _LinearPSNAutogradFunction(autograd.Function):
             )
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = F.linear(x_seq, weight, bias)
+        x_seq = linear_forward_compiled(x_seq, weight, bias)
         s_seq = SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
         return s_seq
 
@@ -110,7 +111,7 @@ class _LinearPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = F.linear(x_seq, weight, bias)
+                y_seq = linear_forward_compiled(x_seq, weight, bias)
                 s_seq = SJPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias
                 )
@@ -171,7 +172,7 @@ class _LinearSlidingPSNAutogradFunction(autograd.Function):
             ctx.neuron_k = neuron_k
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = F.linear(x_seq, weight, bias)
+        x_seq = linear_forward_compiled(x_seq, weight, bias)
         s_seq = SJSlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -197,7 +198,7 @@ class _LinearSlidingPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = F.linear(x_seq, weight, bias)
+                y_seq = linear_forward_compiled(x_seq, weight, bias)
                 s_seq = SJSlidingPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias, neuron_k
                 )
@@ -266,18 +267,10 @@ class _LinearBNLIFAutogradFunction(autograd.Function):
             ctx.x_seq_shape = x_seq.shape
             ctx.training = training
 
-        T = x_seq.size(0)
-        x_seq = F.linear(x_seq, weight, bias)
-        x_seq = einops.rearrange(x_seq, "T N ... -> (T N) ...")
-        x_seq = F.batch_norm(
-            x_seq,
-            bn_running_mean,
-            bn_running_var,
-            bn_weight,
-            bn_bias,
-            training=training
+        x_seq = linear_bn_forward_compiled(
+            x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean,
+            bn_running_var, training
         )
-        x_seq = einops.rearrange(x_seq, "(T N) ... -> T N ...", T=T)
         return neuron(x_seq)
 
     @staticmethod
@@ -303,18 +296,11 @@ class _LinearBNLIFAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = F.linear(x_seq, weight, bias)
-                y_seq = einops.rearrange(y_seq, "T N ... -> (T N) ...")
-                y_seq = F.batch_norm(
-                    y_seq,
-                    bn_running_mean.clone(),  # avoid updating stats twice!
-                    bn_running_var.clone(),
-                    bn_weight,
-                    bn_bias,
-                    training=training
+
+                y_seq = linear_bn_forward_compiled(
+                    x_seq, weight, bias, bn_weight, bn_bias,
+                    bn_running_mean.clone(), bn_running_var.clone(), training
                 )
-                y_seq = einops.rearrange(y_seq, "(T N) ... -> T N ...", T=T)
                 s_seq = neuron(y_seq)
                 s_seq.backward(grad_s_seq)
 
@@ -380,18 +366,10 @@ class _LinearBNPSNAutogradFunction(autograd.Function):
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
             ctx.training = training
-        T = x_seq.size(0)
-        x_seq = F.linear(x_seq, weight, bias)
-        x_seq = einops.rearrange(x_seq, "T N ... -> (T N) ...")
-        x_seq = F.batch_norm(
-            x_seq,
-            bn_running_mean,
-            bn_running_var,
-            bn_weight,
-            bn_bias,
-            training=training
+        x_seq = linear_bn_forward_compiled(
+            x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean,
+            bn_running_var, training
         )
-        x_seq = einops.rearrange(x_seq, "(T N) ... -> T N ...", T=T)
         s_seq = SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
         return s_seq
 
@@ -421,18 +399,10 @@ class _LinearBNPSNAutogradFunction(autograd.Function):
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = F.linear(x_seq, weight, bias)
-                y_seq = einops.rearrange(y_seq, "T N ... -> (T N) ...")
-                y_seq = F.batch_norm(
-                    y_seq,
-                    bn_running_mean.clone(),
-                    bn_running_var.clone(),
-                    bn_weight,
-                    bn_bias,
-                    training=training
+                y_seq = linear_bn_forward_compiled(
+                    x_seq, weight, bias, bn_weight, bn_bias,
+                    bn_running_mean.clone(), bn_running_var.clone(), training
                 )
-                y_seq = einops.rearrange(y_seq, "(T N) ... -> T N ...", T=T)
                 s_seq = SJPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias
                 )
@@ -507,18 +477,10 @@ class _LinearBNSlidingPSNAutogradFunction(autograd.Function):
             ctx.x_seq_shape = x_seq.shape
             ctx.training = training
             ctx.neuron_k = neuron_k
-        T = x_seq.size(0)
-        x_seq = F.linear(x_seq, weight, bias)
-        x_seq = einops.rearrange(x_seq, "T N ... -> (T N) ...")
-        x_seq = F.batch_norm(
-            x_seq,
-            bn_running_mean,
-            bn_running_var,
-            bn_weight,
-            bn_bias,
-            training=training
+        x_seq = linear_bn_forward_compiled(
+            x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean,
+            bn_running_var, training
         )
-        x_seq = einops.rearrange(x_seq, "(T N) ... -> T N ...", T=T)
         s_seq = SJSlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -551,18 +513,10 @@ class _LinearBNSlidingPSNAutogradFunction(autograd.Function):
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = F.linear(x_seq, weight, bias)
-                y_seq = einops.rearrange(y_seq, "T N ... -> (T N) ...")
-                y_seq = F.batch_norm(
-                    y_seq,
-                    bn_running_mean.clone(),
-                    bn_running_var.clone(),
-                    bn_weight,
-                    bn_bias,
-                    training=training
+                y_seq = linear_bn_forward_compiled(
+                    x_seq, weight, bias, bn_weight, bn_bias,
+                    bn_running_mean.clone(), bn_running_var.clone(), training
                 )
-                y_seq = einops.rearrange(y_seq, "(T N) ... -> T N ...", T=T)
                 s_seq = SJSlidingPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias, neuron_k
                 )
@@ -638,10 +592,9 @@ class _Conv2dLIFAutogradFunction(autograd.Function):
             ctx.neuron = neuron
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        T = x_seq.size(0)
-        x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-        x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
+        x_seq = conv2d_forward_compiled(
+            x_seq, weight, bias, stride, padding, dilation, groups
+        )
         return neuron(x_seq)
 
     @staticmethod
@@ -664,12 +617,9 @@ class _Conv2dLIFAutogradFunction(autograd.Function):
                 x_seq = x_seq.detach().requires_grad_(True)
                 weight = weight.detach().requires_grad_(True)
                 bias = bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-                y_seq = F.conv2d(
-                    y_seq, weight, bias, stride, padding, dilation, groups
+                y_seq = conv2d_forward_compiled(
+                    x_seq, weight, bias, stride, padding, dilation, groups
                 )
-                y_seq = einops.rearrange(y_seq, "(T N) C H W -> T N C H W", T=T)
                 s_seq = neuron(y_seq)
                 s_seq.backward(grad_s_seq)
 
@@ -730,10 +680,9 @@ class _Conv2dPSNAutogradFunction(autograd.Function):
             ctx.groups = groups
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        T = x_seq.size(0)
-        x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-        x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
+        x_seq = conv2d_forward_compiled(
+            x_seq, weight, bias, stride, padding, dilation, groups
+        )
         return SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     @staticmethod
@@ -758,12 +707,9 @@ class _Conv2dPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-                y_seq = F.conv2d(
-                    y_seq, weight, bias, stride, padding, dilation, groups
+                y_seq = conv2d_forward_compiled(
+                    x_seq, weight, bias, stride, padding, dilation, groups
                 )
-                y_seq = einops.rearrange(y_seq, "(T N) C H W -> T N C H W", T=T)
                 s_seq = SJPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias
                 )
@@ -832,10 +778,9 @@ class _Conv2dSlidingPSNAutogradFunction(autograd.Function):
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
             ctx.neuron_k = neuron_k
-        T = x_seq.size(0)
-        x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-        x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
+        x_seq = conv2d_forward_compiled(
+            x_seq, weight, bias, stride, padding, dilation, groups
+        )
         return SJSlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -863,12 +808,9 @@ class _Conv2dSlidingPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-                y_seq = F.conv2d(
-                    y_seq, weight, bias, stride, padding, dilation, groups
+                y_seq = conv2d_forward_compiled(
+                    x_seq, weight, bias, stride, padding, dilation, groups
                 )
-                y_seq = einops.rearrange(y_seq, "(T N) C H W -> T N C H W", T=T)
                 s_seq = SJSlidingPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias, neuron_k
                 )
@@ -945,18 +887,10 @@ class _Conv2dBNLIFAutogradFunction(autograd.Function):
             ctx.neuron = neuron
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        T = x_seq.size(0)
-        x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-        x_seq = F.batch_norm(
-            x_seq,
-            bn_running_mean,
-            bn_running_var,
-            bn_weight,
-            bn_bias,
-            training=training
+        x_seq = conv2d_bn_forward_compiled(
+            x_seq, weight, bias, stride, padding, dilation, groups, bn_weight,
+            bn_bias, bn_running_mean, bn_running_var, training
         )
-        x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
         return neuron(x_seq)
 
     @staticmethod
@@ -985,20 +919,11 @@ class _Conv2dBNLIFAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-                y_seq = F.conv2d(
-                    y_seq, weight, bias, stride, padding, dilation, groups
+                y_seq = conv2d_bn_forward_compiled(
+                    x_seq, weight, bias, stride, padding, dilation, groups,
+                    bn_weight, bn_bias, bn_running_mean.clone(),
+                    bn_running_var.clone(), training
                 )
-                y_seq = F.batch_norm(
-                    y_seq,
-                    bn_running_mean.clone(),
-                    bn_running_var.clone(),
-                    bn_weight,
-                    bn_bias,
-                    training=training
-                )
-                y_seq = einops.rearrange(y_seq, "(T N) C H W -> T N C H W", T=T)
                 s_seq = neuron(y_seq)
                 s_seq.backward(grad_s_seq)
 
@@ -1079,18 +1004,10 @@ class _Conv2dBNPSNAutogradFunction(autograd.Function):
             ctx.training = training
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        T = x_seq.size(0)
-        x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-        x_seq = F.batch_norm(
-            x_seq,
-            bn_running_mean,
-            bn_running_var,
-            bn_weight,
-            bn_bias,
-            training=training
+        x_seq = conv2d_bn_forward_compiled(
+            x_seq, weight, bias, stride, padding, dilation, groups, bn_weight,
+            bn_bias, bn_running_mean, bn_running_var, training
         )
-        x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
         return SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     @staticmethod
@@ -1122,20 +1039,11 @@ class _Conv2dBNPSNAutogradFunction(autograd.Function):
                 bn_bias = bn_bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-                y_seq = F.conv2d(
-                    y_seq, weight, bias, stride, padding, dilation, groups
+                y_seq = conv2d_bn_forward_compiled(
+                    x_seq, weight, bias, stride, padding, dilation, groups,
+                    bn_weight, bn_bias, bn_running_mean.clone(),
+                    bn_running_var.clone(), training
                 )
-                y_seq = F.batch_norm(
-                    y_seq,
-                    bn_running_mean.clone(),
-                    bn_running_var.clone(),
-                    bn_weight,
-                    bn_bias,
-                    training=training
-                )
-                y_seq = einops.rearrange(y_seq, "(T N) C H W -> T N C H W", T=T)
                 s_seq = SJPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias
                 )
@@ -1225,18 +1133,10 @@ class _Conv2dBNSlidingPSNAutogradFunction(autograd.Function):
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
             ctx.neuron_k = neuron_k
-        T = x_seq.size(0)
-        x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-        x_seq = F.batch_norm(
-            x_seq,
-            bn_running_mean,
-            bn_running_var,
-            bn_weight,
-            bn_bias,
-            training=training
+        x_seq = conv2d_bn_forward_compiled(
+            x_seq, weight, bias, stride, padding, dilation, groups, bn_weight,
+            bn_bias, bn_running_mean, bn_running_var, training
         )
-        x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
         return SJSlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -1271,20 +1171,11 @@ class _Conv2dBNSlidingPSNAutogradFunction(autograd.Function):
                 bn_bias = bn_bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                T = x_seq.size(0)
-                y_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
-                y_seq = F.conv2d(
-                    y_seq, weight, bias, stride, padding, dilation, groups
+                y_seq = conv2d_bn_forward_compiled(
+                    x_seq, weight, bias, stride, padding, dilation, groups,
+                    bn_weight, bn_bias, bn_running_mean.clone(),
+                    bn_running_var.clone(), training
                 )
-                y_seq = F.batch_norm(
-                    y_seq,
-                    bn_running_mean.clone(),
-                    bn_running_var.clone(),
-                    bn_weight,
-                    bn_bias,
-                    training=training
-                )
-                y_seq = einops.rearrange(y_seq, "(T N) C H W -> T N C H W", T=T)
                 s_seq = SJSlidingPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias, neuron_k
                 )

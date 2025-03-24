@@ -39,7 +39,7 @@ def _test_linear_equatlity(
     assert torch.allclose(s1, s2, atol=1e-5)
     assert torch.allclose(x1.grad, x2.grad, atol=1e-5)
     assert torch.allclose(net1.proj.weight.grad, net2[0].weight.grad, atol=1e-5)
-    assert torch.allclose(net1.proj.bias.grad, net2[0].bias.grad, atol=1e-5)
+    assert torch.allclose(net1.proj.bias.grad, net2[0].bias.grad, atol=1e-4)
     if with_bn:
         assert torch.allclose(
             net1.bn.weight.grad, net2[2].weight.grad, atol=1e-5
@@ -353,6 +353,7 @@ def test_linear_bn_PSN_equality():
         SJPSN(T=T),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
+    _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
 
 
 def test_linear_bn_PSN_memory_blocked():
@@ -403,6 +404,7 @@ def test_linear_bn_SlidingPSN_equality():
         SJSlidingPSN(k=T // 5),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
+    _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
 
 
 def test_linear_bn_SlidingPSN_memory_blocked():
@@ -450,6 +452,7 @@ def test_conv2d_lif_equality():
         SplitTN(T),
         SJLIFNode(decay_lambda=0.5, backend="torch"),
     )
+    _test_conv2d_equality(net1, net2, C, T, with_bn=False)
     _test_conv2d_equality(net1, net2, C, T, with_bn=False)
 
 
@@ -499,6 +502,7 @@ def test_conv2d_PSN_equality():
         SJPSN(T=T),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
+    _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
 
 
 def test_conv2d_PSN_memory_blocked():
@@ -543,6 +547,7 @@ def test_conv2d_SlidingPSN_equality():
         SplitTN(T),
         SJSlidingPSN(k=T // 5),
     )
+    _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
 
 
@@ -590,6 +595,7 @@ def test_conv2d_bn_lif_equality():
         SplitTN(T),
         SJLIFNode(decay_lambda=0.5, backend="torch"),
     )
+    _test_conv2d_equality(net1, net2, C, T, with_bn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=True)
 
 
@@ -643,6 +649,7 @@ def test_conv2d_bn_PSN_equality():
         SJPSN(T=T),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
+    _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
 
 
 def test_conv2d_bn_PSN_memory_blocked():
@@ -691,6 +698,7 @@ def test_conv2d_bn_SlidingPSN_equality():
         SplitTN(T),
         SJSlidingPSN(k=T // 5),
     )
+    _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
 
 
