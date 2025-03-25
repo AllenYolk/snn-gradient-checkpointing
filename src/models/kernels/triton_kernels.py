@@ -2,7 +2,6 @@ try:
     import triton
     import triton.language as tl
     import torch
-    import math
 
     TRITON_AVAILABLE = True
 
@@ -139,7 +138,7 @@ try:
                 NCL,
                 grad_s_seq.stride(0),
                 decay_lambda,
-                math.pi,
+                torch.pi,
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
@@ -159,7 +158,7 @@ try:
                 NCL,
                 grad_s_seq.stride(0),
                 decay_lambda,
-                math.pi,
+                torch.pi,
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
