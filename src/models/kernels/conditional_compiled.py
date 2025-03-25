@@ -2,7 +2,6 @@ import functools
 
 import torch
 import torch.nn.functional as F
-import einops
 from spikingjelly.activation_based import surrogate
 
 TORCH_VERSION = torch.__version__.split('.')[0]
@@ -53,9 +52,9 @@ def linear_bn_forward_compiled(
     x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean, bn_running_var,
     training, momentum
 ):
-    T = x_seq.size(0)
+    T, N = x_seq.size(0), x_seq.size(1)
     x_seq = F.linear(x_seq, weight, bias)
-    x_seq = einops.rearrange(x_seq, "T N ... -> (T N) ...")
+    x_seq = x_seq.flatten(0, 1)
     x_seq = F.batch_norm(
         x_seq,
         bn_running_mean,
@@ -65,7 +64,7 @@ def linear_bn_forward_compiled(
         training=training,
         momentum=momentum
     )
-    y_seq = einops.rearrange(x_seq, "(T N) ... -> T N ...", T=T)
+    y_seq = y_seq.reshape(T, N, *x_seq.shape[1:])
     return y_seq
 
 
@@ -74,9 +73,9 @@ def conv1d_forward_compiled(
     x_seq, weight, bias, stride, padding, dilation, groups
 ):
     T = x_seq.size(0)
-    x_seq = einops.rearrange(x_seq, "T N C L -> (T N) C L")
+    x_seq = x_seq.flatten(0, 1)
     x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
-    x_seq = einops.rearrange(x_seq, "(T N) C L -> T N C L", T=T)
+    x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
     return x_seq
 
 
@@ -85,8 +84,8 @@ def conv1d_bn_forward_compiled(
     x_seq, weight, bias, stride, padding, dilation, groups, bn_weight, bn_bias,
     bn_running_mean, bn_running_var, training, momentum
 ):
-    T = x_seq.size(0)
-    x_seq = einops.rearrange(x_seq, "T N C L -> (T N) C L")
+    T, N = x_seq.size(0), x_seq.size(1)
+    x_seq = x_seq.flatten(0, 1)
     x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
     x_seq = F.batch_norm(
         x_seq,
@@ -97,7 +96,7 @@ def conv1d_bn_forward_compiled(
         training=training,
         momentum=momentum
     )
-    y_seq = einops.rearrange(x_seq, "(T N) C L -> T N C L", T=T)
+    y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
     return y_seq
 
 
@@ -105,10 +104,10 @@ def conv1d_bn_forward_compiled(
 def conv2d_forward_compiled(
     x_seq, weight, bias, stride, padding, dilation, groups
 ):
-    T = x_seq.size(0)
-    x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
+    T, N = x_seq.size(0), x_seq.size(1)
+    x_seq = x_seq.flatten(0, 1)
     x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
-    x_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
+    x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
     return x_seq
 
 
@@ -117,8 +116,8 @@ def conv2d_bn_forward_compiled(
     x_seq, weight, bias, stride, padding, dilation, groups, bn_weight, bn_bias,
     bn_running_mean, bn_running_var, training, momentum
 ):
-    T = x_seq.size(0)
-    x_seq = einops.rearrange(x_seq, "T N C H W -> (T N) C H W")
+    T, N = x_seq.size(0), x_seq.size(1)
+    x_seq = x_seq.flatten(0, 1)
     x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
     x_seq = F.batch_norm(
         x_seq,
@@ -129,7 +128,7 @@ def conv2d_bn_forward_compiled(
         training=training,
         momentum=momentum
     )
-    y_seq = einops.rearrange(x_seq, "(T N) C H W -> T N C H W", T=T)
+    y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
     return y_seq
 
 
@@ -199,9 +198,10 @@ def psn_forward_compiled(x_seq, weight, bias):
 def sliding_psn_forward_compiled(x_seq, weight, bias, k):
     # x_seq.shape = [T, N, ...]; weight.shape = [k], bias.shape = []
     x_seq_shape = x_seq.shape
-    x_seq = einops.rearrange(x_seq, "T N ... -> (N ...) 1 T")
+    x_seq = x_seq.flatten(1).t().unsqueeze(1)  # [T, N, ...] -> [(N*...), 1, T]
     x_seq = F.pad(x_seq, pad=(k - 1, 0), mode="constant", value=0.)
-    weight = einops.rearrange(weight, "k -> 1 1 k")
-    x_seq = F.conv1d(x_seq, weight, stride=1)
-    x_seq = einops.rearrange(x_seq, "N 1 T -> T N").reshape(x_seq_shape)
+    x_seq = F.conv1d(x_seq, weight.reshape(1, 1, -1), stride=1)
+    x_seq = x_seq = x_seq.squeeze(1).t().view(
+        x_seq_shape
+    )  # [(N*...), 1, T] -> [T, N, ...]
     return surrogate.atan.apply(x_seq + bias, 2.)

@@ -1,5 +1,4 @@
 import torch.nn as nn
-import einops
 
 
 class MergeTN(nn.Module):
@@ -8,7 +7,7 @@ class MergeTN(nn.Module):
         super().__init__()
 
     def forward(self, x_seq):
-        return einops.rearrange(x_seq, "T N ... -> (T N) ...")
+        return x_seq.flatten(0, 1)
 
 
 class SplitTN(nn.Module):
@@ -18,7 +17,7 @@ class SplitTN(nn.Module):
         self.T = T
 
     def forward(self, x_seq):
-        return einops.rearrange(x_seq, "(T N) ... -> T N ...", T=self.T)
+        return x_seq.reshape(self.T, x_seq.shape[0] // self.T, *x_seq.shape[1:])
 
 
 class MergeSplitTNWrapper(nn.Module):
@@ -28,8 +27,8 @@ class MergeSplitTNWrapper(nn.Module):
         self.module = module
 
     def forward(self, x_seq):
-        T = x_seq.shape[0]
-        x_seq = einops.rearrange(x_seq, "T N ... -> (T N) ...")
+        T, N = x_seq.shape[0], x_seq.shape[1]
+        x_seq = x_seq.flatten(0, 1)
         x_seq = self.module(x_seq)
-        x_seq = einops.rearrange(x_seq, "(T N) ... -> T N ...", T=T)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return x_seq

@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.autograd as autograd
 import torch.nn.functional as F
 from spikingjelly.activation_based import surrogate, neuron, functional
-import einops
 
 from utils import *
 from .kernels import *

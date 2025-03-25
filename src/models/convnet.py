@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import einops
 from spikingjelly.activation_based import layer, functional
 
 from .blocks import get_block
@@ -73,10 +72,11 @@ class MESequentialCIFARNet(nn.Module):
         self.decode = nn.Linear(channels * 8 // 4, num_classes)
 
     def forward(self, x: torch.Tensor):
-        # x.shape = [T, N, C, L]
+        # x.shape = [T, N, Cin, L]
         y = self.conv(x)
-        y = self.fc(einops.rearrange(y, "T N C L -> T N (C L)"))
-        y = einops.reduce(y, "T N C -> N C", "mean")
+        y = y.flatten(start_dim=-2)  # [T, N, C*L]
+        y = self.fc(y)  # [T, N, C']
+        y = y.mean(dim=0)  # [N, C']
         y = self.decode(y)
         return y
 
@@ -131,9 +131,10 @@ class SequentialCIFARNet(nn.Module):
         functional.set_step_mode(self, "m")
 
     def forward(self, x: torch.Tensor):
-        # x.shape = [T, N, C, L]
+        # x.shape = [T, N, Cin, L]
         y = self.conv(x)
-        y = self.fc(einops.rearrange(y, "T N C L -> T N (C L)"))
-        y = einops.reduce(y, "T N C -> N C", "mean")
+        y = y.flatten(start_dim=-2)  # [T, N, C*L]
+        y = self.fc(y)  # [T, N, C']
+        y = y.mean(dim=0)  # [N, C']
         y = self.decode(y)
         return y
