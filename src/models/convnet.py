@@ -3,7 +3,7 @@ import torch.nn as nn
 import einops
 from spikingjelly.activation_based import layer, functional
 
-from .block import get_block
+from .blocks import get_block
 from .neuron import get_neuron
 from .compress import get_spike_compressor
 from .merge_split import *
@@ -52,7 +52,10 @@ class MESequentialCIFARNet(nn.Module):
                     ),
                     bn=nn.BatchNorm1d(channels),
                     neuron=get_neuron(neuron_type, **kwargs),
-                    spike_compressor=get_spike_compressor(spike_compressor),
+                    spike_compressor=get_spike_compressor(
+                        spike_compressor if len(conv) >
+                        0 else "IdentitySpikeCompressor"
+                    ),
                 )
                 conv.append(conv_block)
             conv.append(MergeSplitTNWrapper(nn.AvgPool1d(2, 2)))

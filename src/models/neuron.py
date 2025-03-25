@@ -10,6 +10,7 @@ from spikingjelly.activation_based import surrogate, neuron, functional
 import einops
 
 from utils import *
+from .compiled import *
 
 try:
     import cupy
@@ -80,10 +81,7 @@ class SJPSN(neuron.PSN):
 
     @staticmethod
     def forward_function(x_seq, weight, bias):
-        # x_seq.shape = [T, N, ...]; weight.shape = [T, T]; bias.shape = [T, 1]
-        h_seq = torch.addmm(bias, weight, x_seq.flatten(1))
-        s_seq = surrogate.atan.apply(h_seq, 2.)
-        return s_seq.reshape(x_seq.shape)
+        return psn_forward_compiled(x_seq, weight, bias)
 
 
 class SJSlidingPSN(neuron.SlidingPSN):
@@ -111,14 +109,7 @@ class SJSlidingPSN(neuron.SlidingPSN):
 
     @staticmethod
     def forward_function(x_seq, weight, bias, k):
-        # x_seq.shape = [T, N, ...]; weight.shape = [k], bias.shape = []
-        x_seq_shape = x_seq.shape
-        x_seq = einops.rearrange(x_seq, "T N ... -> (N ...) 1 T")
-        x_seq = F.pad(x_seq, pad=(k - 1, 0), mode="constant", value=0.)
-        weight = einops.rearrange(weight, "k -> 1 1 k")
-        x_seq = F.conv1d(x_seq, weight, stride=1)
-        x_seq = einops.rearrange(x_seq, "N 1 T -> T N").reshape(x_seq_shape)
-        return surrogate.atan.apply(x_seq + bias, 2.)
+        return sliding_psn_forward_compiled(x_seq, weight, bias, k)
 
 
 # ================ Hand-written Multistep LIF neuron ================
@@ -126,25 +117,10 @@ class _BaseHandWrittenLIFAutogradFunction(autograd.Function):
 
     @staticmethod
     def forward(ctx, x_seq, decay_lambda):
-        T = x_seq.shape[0]
-        v = torch.zeros_like(x_seq[0])  # hidden state
-        s_seq = []
-        h_seq = []
-        for t in range(T):
-            x = x_seq[t]
-
-            # core
-            h = decay_lambda*v + x
-            s = surrogate.heaviside(h - 1.)
-            v = h * (1.-s)
-
-            s_seq.append(s)
-            h_seq.append(h)
-        s_seq = torch.stack(s_seq, dim=0)
-        h_seq = torch.stack(h_seq, dim=0)
+        s_seq, h_seq = handwritten_lif_forward_compiled(x_seq, decay_lambda)
         ctx.save_for_backward(h_seq)  # internal states
         ctx.decay_lambda = decay_lambda
-        ctx.T = T
+        ctx.T = x_seq.shape[0]
         return s_seq
 
     @staticmethod
@@ -158,19 +134,10 @@ class _HandWrittenLIFAutogradFunctionNotDetached(
 
     @staticmethod
     def backward(ctx, grad_s_seq):
-        decay_lambda = ctx.decay_lambda
         h_seq = ctx.saved_tensors[0]
-
-        grad_x_seq = torch.empty_like(grad_s_seq)
-        grad_v = 0.
-        for t in range(ctx.T - 1, -1, -1):
-            grad_s = grad_s_seq[t]
-            h = h_seq[t]
-            grad_v = ((grad_s - grad_v*h) * atan_derivative(h - 1) + grad_v *
-                      (1 - surrogate.heaviside(h - 1.)))
-            grad_x_seq[t] = grad_v
-            grad_v *= decay_lambda
-
+        grad_x_seq = handwritten_lif_backward_not_detached_compiled(
+            grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
+        )
         return grad_x_seq, None
 
 
@@ -180,21 +147,10 @@ class _HandWrittenLIFAutogradFunctionDetached(
 
     @staticmethod
     def backward(ctx, grad_s_seq):
-        decay_lambda = ctx.decay_lambda
         h_seq = ctx.saved_tensors[0]
-
-        grad_x_seq = torch.empty_like(grad_s_seq)
-        grad_v = 0.
-        for t in range(ctx.T - 1, -1, -1):
-            grad_s = grad_s_seq[t]
-            h = h_seq[t]
-            grad_v = (
-                grad_s * atan_derivative(h - 1.) + grad_v *
-                (1 - surrogate.heaviside(h - 1.))
-            )
-            grad_x_seq[t] = grad_v
-            grad_v *= decay_lambda
-
+        grad_x_seq = handwritten_lif_backward_detached_compiled(
+            grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
+        )
         return grad_x_seq, None
 
 
