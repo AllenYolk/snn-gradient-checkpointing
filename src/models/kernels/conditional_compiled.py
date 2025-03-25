@@ -64,7 +64,7 @@ def linear_bn_forward_compiled(
         training=training,
         momentum=momentum
     )
-    y_seq = y_seq.reshape(T, N, *x_seq.shape[1:])
+    y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
     return y_seq
 
 
