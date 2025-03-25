@@ -4,7 +4,7 @@ import torch.autograd as autograd
 
 from ..compress import *
 from ..neuron import SJSlidingPSN, SJPSN
-from ..compiled import *
+from ..kernels import *
 
 
 class _Conv1dLIFAutogradFunction(autograd.Function):
@@ -25,7 +25,7 @@ class _Conv1dLIFAutogradFunction(autograd.Function):
             ctx.neuron = neuron
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = conv1d_forward_compiled(
+        x_seq = conv1d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
         )
         return neuron(x_seq)
@@ -50,7 +50,7 @@ class _Conv1dLIFAutogradFunction(autograd.Function):
                 x_seq = x_seq.detach().requires_grad_(True)
                 weight = weight.detach().requires_grad_(True)
                 bias = bias.detach().requires_grad_(True)
-                y_seq = conv1d_forward_compiled(
+                y_seq = conv1d_forward(
                     x_seq, weight, bias, stride, padding, dilation, groups
                 )
                 s_seq = neuron(y_seq)
@@ -113,7 +113,7 @@ class _Conv1dPSNAutogradFunction(autograd.Function):
             ctx.groups = groups
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = conv1d_forward_compiled(
+        x_seq = conv1d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
         )
         return SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
@@ -140,7 +140,7 @@ class _Conv1dPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = conv1d_forward_compiled(
+                y_seq = conv1d_forward(
                     x_seq, weight, bias, stride, padding, dilation, groups
                 )
                 s_seq = SJPSN.forward_function(
@@ -211,7 +211,7 @@ class _Conv1dSlidingPSNAutogradFunction(autograd.Function):
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
             ctx.neuron_k = neuron_k
-        x_seq = conv1d_forward_compiled(
+        x_seq = conv1d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
         )
         return SJSlidingPSN.forward_function(
@@ -241,7 +241,7 @@ class _Conv1dSlidingPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = conv1d_forward_compiled(
+                y_seq = conv1d_forward(
                     x_seq, weight, bias, stride, padding, dilation, groups
                 )
                 s_seq = SJSlidingPSN.forward_function(
@@ -320,7 +320,7 @@ class _Conv1dBNLIFAutogradFunction(autograd.Function):
             ctx.neuron = neuron
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = conv1d_bn_forward_compiled(
+        x_seq = conv1d_bn_forward(
             x_seq,
             weight,
             bias,
@@ -363,7 +363,7 @@ class _Conv1dBNLIFAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                y_seq = conv1d_bn_forward_compiled(
+                y_seq = conv1d_bn_forward(
                     x_seq,
                     weight,
                     bias,
@@ -408,8 +408,8 @@ class Conv1dBNLIF(nn.Module):
     ):
         super().__init__()
         self.proj = proj
-        self.neuron = neuron
         self.bn = bn
+        self.neuron = neuron
         self.spike_compressor = spike_compressor
 
     def forward(self, x_seq: torch.Tensor):
@@ -458,7 +458,7 @@ class _Conv1dBNPSNAutogradFunction(autograd.Function):
             ctx.training = training
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = conv1d_bn_forward_compiled(
+        x_seq = conv1d_bn_forward(
             x_seq,
             weight,
             bias,
@@ -504,7 +504,7 @@ class _Conv1dBNPSNAutogradFunction(autograd.Function):
                 bn_bias = bn_bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = conv1d_bn_forward_compiled(
+                y_seq = conv1d_bn_forward(
                     x_seq,
                     weight,
                     bias,
@@ -608,7 +608,7 @@ class _Conv1dBNSlidingPSNAutogradFunction(autograd.Function):
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
             ctx.neuron_k = neuron_k
-        x_seq = conv1d_bn_forward_compiled(
+        x_seq = conv1d_bn_forward(
             x_seq,
             weight,
             bias,
@@ -657,7 +657,7 @@ class _Conv1dBNSlidingPSNAutogradFunction(autograd.Function):
                 bn_bias = bn_bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = conv1d_bn_forward_compiled(
+                y_seq = conv1d_bn_forward(
                     x_seq,
                     weight,
                     bias,

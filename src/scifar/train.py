@@ -290,6 +290,8 @@ def main():
         spike_compressor=args.spike_compressor,
         num_classes=args.num_classes,
         decay_lambda=args.decay_lambda,
+        T=32,  # for PSN
+        k=8,  # for SlidingPSN
     )
     print(net)
     net = net.to(args.device)

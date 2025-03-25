@@ -1,0 +1,54 @@
+from .conditional_compiled import *
+from .triton_kernels import *
+
+# api dict
+api = {
+    "linear_forward":
+        linear_forward_compiled,
+    "linear_bn_forward":
+        linear_bn_forward_compiled,
+    "conv1d_forward":
+        conv1d_forward_compiled,
+    "conv1d_bn_forward":
+        conv1d_bn_forward_compiled,
+    "conv2d_forward":
+        conv2d_forward_compiled,
+    "conv2d_bn_forward":
+        conv2d_bn_forward_compiled,
+    "handwritten_lif_forward":
+        handwritten_lif_forward_compiled,
+    "handwritten_lif_backward_not_detached":
+        handwritten_lif_backward_not_detached_compiled,
+    "handwritten_lif_backward_detached":
+        handwritten_lif_backward_detached_compiled,
+    "psn_forward":
+        psn_forward_compiled,
+    "sliding_psn_forward":
+        sliding_psn_forward_compiled,
+}
+
+if TRITON_AVAILABLE:
+    print("Using Triton kernels for HandWrittenLIF.")
+    api["handwritten_lif_forward"] = handwritten_lif_forward_triton
+    api["handwritten_lif_backward_not_detached"] = (
+        handwritten_lif_backward_not_detached_triton
+    )
+    api["handwritten_lif_backward_detached"] = (
+        handwritten_lif_backward_detached_triton
+    )
+
+linear_forward = api["linear_forward"]
+linear_bn_forward = api["linear_bn_forward"]
+conv1d_forward = api["conv1d_forward"]
+conv1d_bn_forward = api["conv1d_bn_forward"]
+conv2d_forward = api["conv2d_forward"]
+conv2d_bn_forward = api["conv2d_bn_forward"]
+handwritten_lif_forward = api["handwritten_lif_forward"]
+handwritten_lif_backward_not_detached = (
+    api["handwritten_lif_backward_not_detached"]
+)
+handwritten_lif_backward_detached = api["handwritten_lif_backward_detached"]
+psn_forward = api["psn_forward"]
+sliding_psn_forward = api["sliding_psn_forward"]
+
+__all__ = [k for k in api.keys()]

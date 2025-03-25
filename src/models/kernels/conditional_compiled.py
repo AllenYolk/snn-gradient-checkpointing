@@ -6,10 +6,17 @@ import einops
 from spikingjelly.activation_based import surrogate
 
 TORCH_VERSION = torch.__version__.split('.')[0]
+
 DISABLE_COMPILE = int(TORCH_VERSION) < 2
-print(f"TORCH_VERSION={torch.__version__}, DISABLE_COMPILE={DISABLE_COMPILE}")
+print(
+    f"TORCH_VERSION={torch.__version__}, "
+    f"DISABLE_COMPILE should be {DISABLE_COMPILE}"
+)
+DISABLE_COMPILE = True
+print(f"DISABLE_COMPILE is manually set to {DISABLE_COMPILE}. ")
 
 DEFAULT_BACKEND = "inductor"
+print(f"DEFAULT_BACKEND is manually set to {DEFAULT_BACKEND}. ")
 
 
 def _conditional_compile(
@@ -129,7 +136,7 @@ def conv2d_bn_forward_compiled(
 #===============================================================================
 #                           Spiking Neurons                                    =
 #===============================================================================
-@_conditional_compile(disable=False)
+@_conditional_compile()
 def handwritten_lif_forward_compiled(x_seq, decay_lambda):
     T = x_seq.shape[0]
     v = torch.zeros_like(x_seq[0])  # hidden state
@@ -148,7 +155,7 @@ def handwritten_lif_forward_compiled(x_seq, decay_lambda):
     return s_seq, h_seq
 
 
-@_conditional_compile(disable=False)
+@_conditional_compile()
 def handwritten_lif_backward_not_detached_compiled(
     grad_s_seq, h_seq, decay_lambda, T
 ):
@@ -164,7 +171,7 @@ def handwritten_lif_backward_not_detached_compiled(
     return grad_x_seq
 
 
-@_conditional_compile(disable=False)
+@_conditional_compile()
 def handwritten_lif_backward_detached_compiled(
     grad_s_seq, h_seq, decay_lambda, T
 ):

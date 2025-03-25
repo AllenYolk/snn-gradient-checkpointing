@@ -4,7 +4,7 @@ import torch.autograd as autograd
 
 from ..compress import *
 from ..neuron import SJSlidingPSN, SJPSN
-from ..compiled import *
+from ..kernels import *
 
 
 class _LinearLIFAutogradFunction(autograd.Function):
@@ -18,7 +18,7 @@ class _LinearLIFAutogradFunction(autograd.Function):
             ctx.neuron = neuron
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        return neuron(linear_forward_compiled(x_seq, weight, bias))
+        return neuron(linear_forward(x_seq, weight, bias))
 
     @staticmethod
     def backward(ctx, grad_s_seq):
@@ -37,7 +37,7 @@ class _LinearLIFAutogradFunction(autograd.Function):
                 x_seq = x_seq.detach().requires_grad_(True)
                 weight = weight.detach().requires_grad_(True)
                 bias = bias.detach().requires_grad_(True)
-                y_seq = linear_forward_compiled(x_seq, weight, bias)
+                y_seq = linear_forward(x_seq, weight, bias)
                 s_seq = neuron(y_seq)
                 s_seq.backward(grad_s_seq)
 
@@ -86,7 +86,7 @@ class _LinearPSNAutogradFunction(autograd.Function):
             )
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = linear_forward_compiled(x_seq, weight, bias)
+        x_seq = linear_forward(x_seq, weight, bias)
         s_seq = SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
         return s_seq
 
@@ -109,7 +109,7 @@ class _LinearPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = linear_forward_compiled(x_seq, weight, bias)
+                y_seq = linear_forward(x_seq, weight, bias)
                 s_seq = SJPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias
                 )
@@ -170,7 +170,7 @@ class _LinearSlidingPSNAutogradFunction(autograd.Function):
             ctx.neuron_k = neuron_k
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
-        x_seq = linear_forward_compiled(x_seq, weight, bias)
+        x_seq = linear_forward(x_seq, weight, bias)
         s_seq = SJSlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -196,7 +196,7 @@ class _LinearSlidingPSNAutogradFunction(autograd.Function):
                 bias = bias.detach().requires_grad_(True)
                 neuron_weight = neuron_weight.detach().requires_grad_(True)
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = linear_forward_compiled(x_seq, weight, bias)
+                y_seq = linear_forward(x_seq, weight, bias)
                 s_seq = SJSlidingPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias, neuron_k
                 )
@@ -265,7 +265,7 @@ class _LinearBNLIFAutogradFunction(autograd.Function):
             ctx.x_seq_shape = x_seq.shape
             ctx.training = training
 
-        x_seq = linear_bn_forward_compiled(
+        x_seq = linear_bn_forward(
             x_seq,
             weight,
             bias,
@@ -302,7 +302,7 @@ class _LinearBNLIFAutogradFunction(autograd.Function):
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
 
-                y_seq = linear_bn_forward_compiled(
+                y_seq = linear_bn_forward(
                     x_seq,
                     weight,
                     bias,
@@ -378,7 +378,7 @@ class _LinearBNPSNAutogradFunction(autograd.Function):
             ctx.spike_compressor = spike_compressor
             ctx.x_seq_shape = x_seq.shape
             ctx.training = training
-        x_seq = linear_bn_forward_compiled(
+        x_seq = linear_bn_forward(
             x_seq,
             weight,
             bias,
@@ -418,7 +418,7 @@ class _LinearBNPSNAutogradFunction(autograd.Function):
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                y_seq = linear_bn_forward_compiled(
+                y_seq = linear_bn_forward(
                     x_seq,
                     weight,
                     bias,
@@ -503,7 +503,7 @@ class _LinearBNSlidingPSNAutogradFunction(autograd.Function):
             ctx.x_seq_shape = x_seq.shape
             ctx.training = training
             ctx.neuron_k = neuron_k
-        x_seq = linear_bn_forward_compiled(
+        x_seq = linear_bn_forward(
             x_seq,
             weight,
             bias,
@@ -546,7 +546,7 @@ class _LinearBNSlidingPSNAutogradFunction(autograd.Function):
                 neuron_bias = neuron_bias.detach().requires_grad_(True)
                 bn_weight = bn_weight.detach().requires_grad_(True)
                 bn_bias = bn_bias.detach().requires_grad_(True)
-                y_seq = linear_bn_forward_compiled(
+                y_seq = linear_bn_forward(
                     x_seq,
                     weight,
                     bias,

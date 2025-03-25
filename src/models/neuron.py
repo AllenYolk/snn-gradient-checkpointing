@@ -10,14 +10,14 @@ from spikingjelly.activation_based import surrogate, neuron, functional
 import einops
 
 from utils import *
-from .compiled import *
+from .kernels import *
 
 try:
     import cupy
     DEFAULT_SJ_BACKEND = "cupy"
 except Exception:
     DEFAULT_SJ_BACKEND = "torch"
-print(f"Using {DEFAULT_SJ_BACKEND} backend by default.")
+print(f"Using {DEFAULT_SJ_BACKEND} backend for spikingjelly by default.")
 
 
 def get_neuron(neuron_type: str, **kwargs):
@@ -81,7 +81,7 @@ class SJPSN(neuron.PSN):
 
     @staticmethod
     def forward_function(x_seq, weight, bias):
-        return psn_forward_compiled(x_seq, weight, bias)
+        return psn_forward(x_seq, weight, bias)
 
 
 class SJSlidingPSN(neuron.SlidingPSN):
@@ -109,7 +109,7 @@ class SJSlidingPSN(neuron.SlidingPSN):
 
     @staticmethod
     def forward_function(x_seq, weight, bias, k):
-        return sliding_psn_forward_compiled(x_seq, weight, bias, k)
+        return sliding_psn_forward(x_seq, weight, bias, k)
 
 
 # ================ Hand-written Multistep LIF neuron ================
@@ -117,7 +117,7 @@ class _BaseHandWrittenLIFAutogradFunction(autograd.Function):
 
     @staticmethod
     def forward(ctx, x_seq, decay_lambda):
-        s_seq, h_seq = handwritten_lif_forward_compiled(x_seq, decay_lambda)
+        s_seq, h_seq = handwritten_lif_forward(x_seq, decay_lambda)
         ctx.save_for_backward(h_seq)  # internal states
         ctx.decay_lambda = decay_lambda
         ctx.T = x_seq.shape[0]
@@ -135,7 +135,7 @@ class _HandWrittenLIFAutogradFunctionNotDetached(
     @staticmethod
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
-        grad_x_seq = handwritten_lif_backward_not_detached_compiled(
+        grad_x_seq = handwritten_lif_backward_not_detached(
             grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
         )
         return grad_x_seq, None
@@ -148,7 +148,7 @@ class _HandWrittenLIFAutogradFunctionDetached(
     @staticmethod
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
-        grad_x_seq = handwritten_lif_backward_detached_compiled(
+        grad_x_seq = handwritten_lif_backward_detached(
             grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
         )
         return grad_x_seq, None
