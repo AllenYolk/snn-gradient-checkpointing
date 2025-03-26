@@ -313,7 +313,7 @@ class AvgPool1dFlattenLinearLIF(nn.Module):
         neuron,
         in_backward=False
     ):
-        y_seq = avgpool1d_flatten_linear_forward_compiled(
+        y_seq = avgpool1d_flatten_linear_forward(
             x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
         )
         return neuron(y_seq)
@@ -359,7 +359,7 @@ class AvgPool1dFlattenLinearPSN(nn.Module):
         neuron_bias,
         in_backward=False
     ):
-        y_seq = avgpool1d_flatten_linear_forward_compiled(
+        y_seq = avgpool1d_flatten_linear_forward(
             x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
         )
         return SJPSN.forward_function(y_seq, neuron_weight, neuron_bias)
@@ -407,7 +407,7 @@ class AvgPool1dFlattenLinearSlidingPSN(nn.Module):
         neuron_k,
         in_backward=False
     ):
-        y_seq = avgpool1d_flatten_linear_forward_compiled(
+        y_seq = avgpool1d_flatten_linear_forward(
             x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
         )
         return SJSlidingPSN.forward_function(
