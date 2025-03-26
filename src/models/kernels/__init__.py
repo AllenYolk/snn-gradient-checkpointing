@@ -37,7 +37,7 @@ api = {
         sliding_psn_forward_compiled,
 }
 
-if TRITON_AVAILABLE and False:
+if TRITON_AVAILABLE:
     print("Using Triton kernels for HandWrittenLIF.")
     api["handwritten_lif_forward"] = handwritten_lif_forward_triton
     api["handwritten_lif_backward_not_detached"] = (
