@@ -1,19 +1,19 @@
 from .linear import *
 from .conv1d import *
 from .conv2d import *
+from .checkpointing import SNNCheckpointingBlock
 
 
-def get_block(proj_type: str, neuron_type: str, need_bn: bool, **kwargs):
-    proj_type = proj_type[0].upper() + proj_type[1:].lower()
+def get_block(block_type, **kwargs):
+    return globals()[block_type](**kwargs)
 
+
+def neuron_type_to_str(neuron_type):
     if "SlidingPSN" in neuron_type:
-        neuron_type = "SlidingPSN"
+        return "SlidingPSN"
     elif "PSN" in neuron_type:
-        neuron_type = "PSN"
+        return "PSN"
     elif "LIF" in neuron_type:
-        neuron_type = "LIF"
+        return "LIF"
 
-    bn_str = "BN" if need_bn else ""
-
-    class_name = f"{proj_type}{bn_str}{neuron_type}"
-    return globals()[class_name](**kwargs)
+    raise ValueError(f"neuron_type {neuron_type} not supported")

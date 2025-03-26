@@ -1,53 +1,11 @@
 import torch
 import torch.nn as nn
-import torch.autograd as autograd
+import torch.nn.functional as F
 
 from ..compress import *
 from ..neuron import SJSlidingPSN, SJPSN
 from ..kernels import *
-
-
-class _LinearLIFAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(ctx, x_seq, weight, bias, neuron, spike_compressor):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq), weight, bias
-            )
-            ctx.neuron = neuron
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-        return neuron(linear_forward(x_seq, weight, bias))
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-
-        if any(ctx.needs_input_grad):
-            neuron = ctx.neuron
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            x_seq, weight, bias = ctx.saved_tensors
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                y_seq = linear_forward(x_seq, weight, bias)
-                s_seq = neuron(y_seq)
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-        return grad_x_seq, grad_weight, grad_bias, None, None
+from .checkpointing import SNNCheckpointingBlock
 
 
 class LinearLIF(nn.Module):
@@ -56,78 +14,26 @@ class LinearLIF(nn.Module):
         self,
         proj: nn.Linear,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BooleanSpikeCompressor(),
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.proj = proj
         self.neuron = neuron
         self.spike_compressor = spike_compressor
 
+    @staticmethod
+    def conventional_forward(x_seq, weight, bias, neuron, in_backward=False):
+        y_seq = linear_forward(x_seq, weight, bias)
+        return neuron(y_seq)
+
     def forward(self, x_seq: torch.Tensor):
-        return _LinearLIFAutogradFunction.apply(
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
             x_seq,
             self.proj.weight,
             self.proj.bias,
             self.neuron,
-            self.spike_compressor,
-        )
-
-
-class _LinearPSNAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, neuron_weight, neuron_bias, spike_compressor
-    ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq), weight, bias, neuron_weight,
-                neuron_bias
-            )
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-        x_seq = linear_forward(x_seq, weight, bias)
-        s_seq = SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
-        return s_seq
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_neuron_weight, grad_neuron_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            x_seq, weight, bias, neuron_weight, neuron_bias = ctx.saved_tensors
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                neuron_weight = neuron_weight.detach().requires_grad_(True)
-                neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = linear_forward(x_seq, weight, bias)
-                s_seq = SJPSN.forward_function(
-                    y_seq, neuron_weight, neuron_bias
-                )
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[3]:
-                grad_neuron_weight = neuron_weight.grad
-            if ctx.needs_input_grad[4]:
-                grad_neuron_bias = neuron_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, grad_neuron_weight,
-            grad_neuron_bias, None
         )
 
 
@@ -137,84 +43,25 @@ class LinearPSN(nn.Module):
         self,
         proj: nn.Linear,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BooleanSpikeCompressor(),
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.proj = proj
         self.neuron = neuron
         self.spike_compressor = spike_compressor
 
-    def forward(self, x_seq: torch.Tensor):
-        return _LinearPSNAutogradFunction.apply(
-            x_seq,
-            self.proj.weight,
-            self.proj.bias,
-            self.neuron.weight,
-            self.neuron.bias,
-            self.spike_compressor,
-        )
-
-
-class _LinearSlidingPSNAutogradFunction(autograd.Function):
-
     @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, neuron_weight, neuron_bias, neuron_k,
-        spike_compressor
+    def conventional_forward(
+        x_seq, weight, bias, neuron_weight, neuron_bias, in_backward=False
     ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq), weight, bias, neuron_weight,
-                neuron_bias
-            )
-            ctx.neuron_k = neuron_k
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-        x_seq = linear_forward(x_seq, weight, bias)
-        s_seq = SJSlidingPSN.forward_function(
-            x_seq, neuron_weight, neuron_bias, neuron_k
-        )
-        return s_seq
+        y_seq = linear_forward(x_seq, weight, bias)
+        return SJPSN.forward_function(y_seq, neuron_weight, neuron_bias)
 
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_neuron_weight, grad_neuron_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            neuron_k = ctx.neuron_k
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            x_seq, weight, bias, neuron_weight, neuron_bias = ctx.saved_tensors
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                neuron_weight = neuron_weight.detach().requires_grad_(True)
-                neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = linear_forward(x_seq, weight, bias)
-                s_seq = SJSlidingPSN.forward_function(
-                    y_seq, neuron_weight, neuron_bias, neuron_k
-                )
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[3]:
-                grad_neuron_weight = neuron_weight.grad
-            if ctx.needs_input_grad[4]:
-                grad_neuron_bias = neuron_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, grad_neuron_weight,
-            grad_neuron_bias, None, None
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward, self.spike_compressor, x_seq,
+            self.proj.weight, self.proj.bias, self.neuron.weight,
+            self.neuron.bias
         )
 
 
@@ -224,111 +71,38 @@ class LinearSlidingPSN(nn.Module):
         self,
         proj: nn.Linear,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BooleanSpikeCompressor(),
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.proj = proj
         self.neuron = neuron
         self.spike_compressor = spike_compressor
 
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        in_backward=False
+    ):
+        y_seq = linear_forward(x_seq, weight, bias)
+        return SJSlidingPSN.forward_function(
+            y_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
     def forward(self, x_seq: torch.Tensor):
-        return _LinearSlidingPSNAutogradFunction.apply(
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
             x_seq,
             self.proj.weight,
             self.proj.bias,
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
-            self.spike_compressor,
-        )
-
-
-class _LinearBNLIFAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean,
-        bn_running_var, training, neuron, spike_compressor
-    ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq),
-                weight,
-                bias,
-                bn_weight,
-                bn_bias,
-                bn_running_mean,
-                bn_running_var,
-            )
-            ctx.neuron = neuron
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-            ctx.training = training
-
-        x_seq = linear_bn_forward(
-            x_seq,
-            weight,
-            bias,
-            bn_weight,
-            bn_bias,
-            bn_running_mean,
-            bn_running_var,
-            training,
-            momentum=0.  # disable running stats update
-        )
-        return neuron(x_seq)
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_bn_weight, grad_bn_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            training = ctx.training
-            neuron = ctx.neuron
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            x_seq, weight, bias = ctx.saved_tensors[:3]
-            bn_weight, bn_bias = ctx.saved_tensors[3:5]
-            bn_running_mean, bn_running_var = ctx.saved_tensors[5:]
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                bn_weight = bn_weight.detach().requires_grad_(True)
-                bn_bias = bn_bias.detach().requires_grad_(True)
-
-                y_seq = linear_bn_forward(
-                    x_seq,
-                    weight,
-                    bias,
-                    bn_weight,
-                    bn_bias,
-                    bn_running_mean,
-                    bn_running_var,
-                    training,
-                    momentum=0.1
-                )
-                s_seq = neuron(y_seq)
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[3]:
-                grad_bn_weight = bn_weight.grad
-            if ctx.needs_input_grad[4]:
-                grad_bn_bias = bn_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, grad_bn_weight, grad_bn_bias,
-            None, None, None, None, None
         )
 
 
@@ -339,7 +113,7 @@ class LinearBNLIF(nn.Module):
         proj: nn.Linear,
         bn: nn.BatchNorm1d,  # actually, not necessarily 1d
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BooleanSpikeCompressor(),
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.proj = proj
@@ -347,8 +121,36 @@ class LinearBNLIF(nn.Module):
         self.neuron = neuron
         self.spike_compressor = spike_compressor
 
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron,
+        in_backward=False
+    ):
+        y_seq = linear_bn_forward(
+            x_seq,
+            weight,
+            bias,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        return neuron(y_seq)
+
     def forward(self, x_seq: torch.Tensor):
-        return _LinearBNLIFAutogradFunction.apply(
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
             x_seq,
             self.proj.weight,
             self.proj.bias,
@@ -358,99 +160,6 @@ class LinearBNLIF(nn.Module):
             self.bn.running_var,
             self.bn.training,
             self.neuron,
-            self.spike_compressor,
-        )
-
-
-class _LinearBNPSNAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean,
-        bn_running_var, training, neuron_weight, neuron_bias, spike_compressor
-    ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq), weight, bias, bn_weight,
-                bn_bias, bn_running_mean, bn_running_var, neuron_weight,
-                neuron_bias
-            )
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-            ctx.training = training
-        x_seq = linear_bn_forward(
-            x_seq,
-            weight,
-            bias,
-            bn_weight,
-            bn_bias,
-            bn_running_mean,
-            bn_running_var,
-            training,
-            momentum=0.  # disable running stats update
-        )
-        s_seq = SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
-        return s_seq
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_bn_weight, grad_bn_bias = None, None
-        grad_neuron_weight, grad_neuron_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            training = ctx.training
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            x_seq, weight, bias = ctx.saved_tensors[:3]
-            bn_weight, bn_bias = ctx.saved_tensors[3:5]
-            bn_running_mean, bn_running_var = ctx.saved_tensors[5:7]
-            neuron_weight, neuron_bias = ctx.saved_tensors[7:]
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                neuron_weight = neuron_weight.detach().requires_grad_(True)
-                neuron_bias = neuron_bias.detach().requires_grad_(True)
-                bn_weight = bn_weight.detach().requires_grad_(True)
-                bn_bias = bn_bias.detach().requires_grad_(True)
-                y_seq = linear_bn_forward(
-                    x_seq,
-                    weight,
-                    bias,
-                    bn_weight,
-                    bn_bias,
-                    bn_running_mean,
-                    bn_running_var,
-                    training,
-                    momentum=0.1
-                )
-                s_seq = SJPSN.forward_function(
-                    y_seq, neuron_weight, neuron_bias
-                )
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[3]:
-                grad_bn_weight = bn_weight.grad
-            if ctx.needs_input_grad[4]:
-                grad_bn_bias = bn_bias.grad
-            if ctx.needs_input_grad[8]:
-                grad_neuron_weight = neuron_weight.grad
-            if ctx.needs_input_grad[9]:
-                grad_neuron_bias = neuron_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, grad_bn_weight, grad_bn_bias,
-            None, None, None, grad_neuron_weight, grad_neuron_bias, None
         )
 
 
@@ -461,7 +170,7 @@ class LinearBNPSN(nn.Module):
         proj: nn.Linear,
         bn: nn.BatchNorm1d,  # actually, not necessarily 1d
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BooleanSpikeCompressor(),
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.proj = proj
@@ -469,8 +178,37 @@ class LinearBNPSN(nn.Module):
         self.neuron = neuron
         self.spike_compressor = spike_compressor
 
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron_weight,
+        neuron_bias,
+        in_backward=False
+    ):
+        x_seq = linear_bn_forward(
+            x_seq,
+            weight,
+            bias,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        return SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
+
     def forward(self, x_seq: torch.Tensor):
-        return _LinearBNPSNAutogradFunction.apply(
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
             x_seq,
             self.proj.weight,
             self.proj.bias,
@@ -481,104 +219,6 @@ class LinearBNPSN(nn.Module):
             self.bn.training,
             self.neuron.weight,
             self.neuron.bias,
-            self.spike_compressor,
-        )
-
-
-class _LinearBNSlidingPSNAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, bn_weight, bn_bias, bn_running_mean,
-        bn_running_var, training, neuron_weight, neuron_bias, neuron_k,
-        spike_compressor
-    ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq), weight, bias, bn_weight,
-                bn_bias, bn_running_mean, bn_running_var, neuron_weight,
-                neuron_bias
-            )
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-            ctx.training = training
-            ctx.neuron_k = neuron_k
-        x_seq = linear_bn_forward(
-            x_seq,
-            weight,
-            bias,
-            bn_weight,
-            bn_bias,
-            bn_running_mean,
-            bn_running_var,
-            training,
-            momentum=0.  # disable running stats update
-        )
-        s_seq = SJSlidingPSN.forward_function(
-            x_seq, neuron_weight, neuron_bias, neuron_k
-        )
-        return s_seq
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_bn_weight, grad_bn_bias = None, None
-        grad_neuron_weight, grad_neuron_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            training = ctx.training
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            neuron_k = ctx.neuron_k
-            x_seq, weight, bias = ctx.saved_tensors[:3]
-            bn_weight, bn_bias = ctx.saved_tensors[3:5]
-            bn_running_mean, bn_running_var = ctx.saved_tensors[5:7]
-            neuron_weight, neuron_bias = ctx.saved_tensors[7:]
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                neuron_weight = neuron_weight.detach().requires_grad_(True)
-                neuron_bias = neuron_bias.detach().requires_grad_(True)
-                bn_weight = bn_weight.detach().requires_grad_(True)
-                bn_bias = bn_bias.detach().requires_grad_(True)
-                y_seq = linear_bn_forward(
-                    x_seq,
-                    weight,
-                    bias,
-                    bn_weight,
-                    bn_bias,
-                    bn_running_mean,
-                    bn_running_var,
-                    training,
-                    momentum=0.1
-                )
-                s_seq = SJSlidingPSN.forward_function(
-                    y_seq, neuron_weight, neuron_bias, neuron_k
-                )
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[3]:
-                grad_bn_weight = bn_weight.grad
-            if ctx.needs_input_grad[4]:
-                grad_bn_bias = bn_bias.grad
-            if ctx.needs_input_grad[8]:
-                grad_neuron_weight = neuron_weight.grad
-            if ctx.needs_input_grad[9]:
-                grad_neuron_bias = neuron_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, grad_bn_weight, grad_bn_bias,
-            None, None, None, grad_neuron_weight, grad_neuron_bias, None, None
         )
 
 
@@ -589,7 +229,7 @@ class LinearBNSlidingPSN(nn.Module):
         proj: nn.Linear,
         bn: nn.BatchNorm1d,  # actually, not necessarily 1d
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BooleanSpikeCompressor(),
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.proj = proj
@@ -597,8 +237,41 @@ class LinearBNSlidingPSN(nn.Module):
         self.neuron = neuron
         self.spike_compressor = spike_compressor
 
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        spike_compressor,
+        in_backward=False
+    ):
+        x_seq = linear_bn_forward(
+            x_seq,
+            weight,
+            bias,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        return SJSlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
     def forward(self, x_seq: torch.Tensor):
-        return _LinearBNSlidingPSNAutogradFunction.apply(
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
             x_seq,
             self.proj.weight,
             self.proj.bias,
@@ -611,4 +284,147 @@ class LinearBNSlidingPSN(nn.Module):
             self.neuron.bias,
             self.neuron.k,
             self.spike_compressor,
+        )
+
+
+class AvgPool1dFlattenLinearLIF(nn.Module):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool1d,
+        proj: nn.Linear,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        neuron,
+        in_backward=False
+    ):
+        y_seq = avgpool1d_flatten_linear_forward_compiled(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
+        )
+        return neuron(y_seq)
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size[0],
+            self.pool.stride[0],
+            self.pool.padding[0],
+            self.proj.weight,
+            self.proj.bias,
+            self.neuron,
+        )
+
+
+class AvgPool1dFlattenLinearPSN(nn.Module):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool1d,
+        proj: nn.Linear,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        neuron_weight,
+        neuron_bias,
+        in_backward=False
+    ):
+        y_seq = avgpool1d_flatten_linear_forward_compiled(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
+        )
+        return SJPSN.forward_function(y_seq, neuron_weight, neuron_bias)
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size[0],
+            self.pool.stride[0],
+            self.pool.padding[0],
+            self.proj.weight,
+            self.proj.bias,
+            self.neuron.weight,
+            self.neuron.bias,
+        )
+
+
+class AvgPool1dFlattenLinearSlidingPSN(nn.Module):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool1d,
+        proj: nn.Linear,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        in_backward=False
+    ):
+        y_seq = avgpool1d_flatten_linear_forward_compiled(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
+        )
+        return SJSlidingPSN.forward_function(
+            y_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlock.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size[0],
+            self.pool.stride[0],
+            self.pool.padding[0],
+            self.proj.weight,
+            self.proj.bias,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
         )

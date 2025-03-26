@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from spikingjelly.activation_based import layer, functional
 
-from .blocks import get_block
+from .blocks import get_block, neuron_type_to_str
 from .neuron import get_neuron
-from .compress import get_spike_compressor
+from .compress import *
 from .merge_split import *
 
 
@@ -29,54 +30,78 @@ class MESequentialCIFARNet(nn.Module):
                 `src/models/neuron.py` for details.
         """
         super().__init__()
+        neuron_str = neuron_type_to_str(neuron_type)
 
         conv = []
-        for _ in range(2):
-            for _ in range(3):
+        for i in range(2):
+            for j in range(3):
                 if len(conv) == 0:
                     in_channels = 3
                 else:
                     in_channels = channels
 
-                conv_block = get_block(
-                    proj_type="Conv1d",
-                    neuron_type=neuron_type,
-                    need_bn=True,
-                    proj=nn.Conv1d(
-                        in_channels,
-                        channels,
-                        kernel_size=3,
-                        padding=1,
-                        bias=True
-                    ),
-                    bn=nn.BatchNorm1d(channels),
-                    neuron=get_neuron(neuron_type, **kwargs),
-                    spike_compressor=get_spike_compressor(
-                        spike_compressor if len(conv) >
-                        0 else "IdentitySpikeCompressor"
-                    ),
-                )
+                if i == 0 and j == 0:
+                    conv_block = get_block(
+                        block_type=f"Conv1dBN{neuron_str}",
+                        proj=nn.Conv1d(
+                            in_channels,
+                            channels,
+                            kernel_size=3,
+                            padding=1,
+                            bias=True
+                        ),
+                        bn=nn.BatchNorm1d(channels),
+                        neuron=get_neuron(neuron_type, **kwargs),
+                        spike_compressor=get_spike_compressor(
+                            "IdentitySpikeCompressor"
+                        ),
+                    )
+                elif j == 0:
+                    conv_block = get_block(
+                        block_type=f"AvgPool1dConv1dBN{neuron_str}",
+                        pool=nn.AvgPool1d(2, 2),
+                        proj=nn.Conv1d(
+                            in_channels,
+                            channels,
+                            kernel_size=3,
+                            padding=1,
+                            bias=True
+                        ),
+                        bn=nn.BatchNorm1d(channels),
+                        neuron=get_neuron(neuron_type, **kwargs),
+                        spike_compressor=get_spike_compressor(spike_compressor),
+                    )
+                else:
+                    conv_block = get_block(
+                        block_type=f"Conv1dBN{neuron_str}",
+                        proj=nn.Conv1d(
+                            in_channels,
+                            channels,
+                            kernel_size=3,
+                            padding=1,
+                            bias=True
+                        ),
+                        bn=nn.BatchNorm1d(channels),
+                        neuron=get_neuron(neuron_type, **kwargs),
+                        spike_compressor=get_spike_compressor(spike_compressor),
+                    )
                 conv.append(conv_block)
-            conv.append(MergeSplitTNWrapper(nn.AvgPool1d(2, 2)))
 
         self.conv = nn.Sequential(*conv)
-
         self.fc = get_block(
-            proj_type="Linear",
-            neuron_type=neuron_type,
-            need_bn=False,
+            block_type=f"AvgPool1dFlattenLinear{neuron_str}",
+            pool=nn.AvgPool1d(2, 2),
             proj=nn.Linear(channels * 8, channels * 8 // 4),
             neuron=get_neuron(neuron_type, **kwargs),
-            spike_compressor=get_spike_compressor(spike_compressor),
+            spike_compressor=get_spike_compressor(spike_compressor)
         )
         self.decode = nn.Linear(channels * 8 // 4, num_classes)
 
     def forward(self, x: torch.Tensor):
         # x.shape = [T, N, Cin, L]
         y = self.conv(x)
-        y = y.flatten(start_dim=-2)  # [T, N, C*L]
-        y = self.fc(y)  # [T, N, C']
-        y = y.mean(dim=0)  # [N, C']
+        y = self.fc(y)
+        y = y.mean(dim=0)  # [N, C]
         y = self.decode(y)
         return y
 

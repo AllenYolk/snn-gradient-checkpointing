@@ -1,4 +1,10 @@
-from .conditional_compiled import *
+"""Compiled / Triton computational kernels for accelerating training.
+
+Two types of kernels are provided:
+1. (pool) + weight + (BN)
+2. spiking neurons
+"""
+from .compiled_kernels import *
 from .triton_kernels import *
 
 # api dict
@@ -7,10 +13,14 @@ api = {
         linear_forward_compiled,
     "linear_bn_forward":
         linear_bn_forward_compiled,
+    "avgpool1d_flatten_linear_forward":
+        avgpool1d_flatten_linear_forward_compiled,
     "conv1d_forward":
         conv1d_forward_compiled,
     "conv1d_bn_forward":
         conv1d_bn_forward_compiled,
+    "avgpool1d_conv1d_bn_forward":
+        avgpool1d_conv1d_bn_forward_compiled,
     "conv2d_forward":
         conv2d_forward_compiled,
     "conv2d_bn_forward":
@@ -27,7 +37,7 @@ api = {
         sliding_psn_forward_compiled,
 }
 
-if TRITON_AVAILABLE:
+if TRITON_AVAILABLE and False:
     print("Using Triton kernels for HandWrittenLIF.")
     api["handwritten_lif_forward"] = handwritten_lif_forward_triton
     api["handwritten_lif_backward_not_detached"] = (
@@ -39,8 +49,10 @@ if TRITON_AVAILABLE:
 
 linear_forward = api["linear_forward"]
 linear_bn_forward = api["linear_bn_forward"]
+avgpool1d_flatten_linear_forward = api["avgpool1d_flatten_linear_forward"]
 conv1d_forward = api["conv1d_forward"]
 conv1d_bn_forward = api["conv1d_bn_forward"]
+avgpool1d_conv1d_bn_forward = api["avgpool1d_conv1d_bn_forward"]
 conv2d_forward = api["conv2d_forward"]
 conv2d_bn_forward = api["conv2d_bn_forward"]
 handwritten_lif_forward = api["handwritten_lif_forward"]
