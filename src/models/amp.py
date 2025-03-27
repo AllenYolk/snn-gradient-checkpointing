@@ -26,4 +26,10 @@ def get_autocast_context(enabled: bool):
 
 
 def is_autocast_enabled():
-    return torch.is_autocast_enabled("cpu") or torch.is_autocast_enabled("cuda")
+    if USE_CUDA_DOT_AMP:
+        return torch.is_autocast_enabled()
+    else:
+        return (
+            torch.is_autocast_enabled("cpu") or
+            torch.is_autocast_enabled("cuda")
+        )
