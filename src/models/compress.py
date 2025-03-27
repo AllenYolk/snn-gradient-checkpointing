@@ -1,6 +1,8 @@
 import abc
 import torch
 
+from .amp import AUTOCAST_DTYPE, is_autocast_enabled
+
 
 def get_spike_compressor(spike_compressor: str):
     return globals()[spike_compressor]()
@@ -12,12 +14,20 @@ class BaseSpikeCompressor(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         pass
 
     @abc.abstractmethod
-    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
         pass
+
+    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            return self._compress(s_seq)
+
+    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+        with torch.no_grad():
+            return self._decompress(s_seq, shape)
 
 
 class IdentitySpikeCompressor(BaseSpikeCompressor):
@@ -25,11 +35,13 @@ class IdentitySpikeCompressor(BaseSpikeCompressor):
     def __init__(self):
         super().__init__()
 
-    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         return s_seq
 
-    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
-        return s_seq
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
+        return s_seq.to(dtype=decompressed_type)
 
 
 class BooleanSpikeCompressor(BaseSpikeCompressor):
@@ -37,11 +49,13 @@ class BooleanSpikeCompressor(BaseSpikeCompressor):
     def __init__(self):
         super().__init__()
 
-    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         return s_seq.to(dtype=torch.bool)
 
-    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
-        return s_seq.to(dtype=torch.float32).reshape(shape)
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
+        return s_seq.to(dtype=decompressed_type).reshape(shape)
 
 
 class Uint8SpikeCompressor(BaseSpikeCompressor):
@@ -49,11 +63,13 @@ class Uint8SpikeCompressor(BaseSpikeCompressor):
     def __init__(self):
         super().__init__()
 
-    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         return s_seq.to(dtype=torch.uint8)
 
-    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
-        return s_seq.to(dtype=torch.float32).reshape(shape)
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
+        return s_seq.to(dtype=decompressed_type).reshape(shape)
 
 
 class BitSpikeCompressor(BaseSpikeCompressor):
@@ -61,7 +77,7 @@ class BitSpikeCompressor(BaseSpikeCompressor):
     def __init__(self):
         super().__init__()
 
-    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         s_seq = s_seq.to(dtype=torch.bool).reshape(-1)
         compressed_shape = (s_seq.numel() + 7) // 8
         s_seq_compressed = torch.zeros(
@@ -74,7 +90,7 @@ class BitSpikeCompressor(BaseSpikeCompressor):
                 s_seq_compressed[:sliced_len] |= (sliced << i)
         return s_seq_compressed
 
-    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
         decompressed_len = shape.numel()
         s_seq_decompressed = torch.zeros(
             decompressed_len, dtype=torch.bool, device=s_seq.device
@@ -83,10 +99,11 @@ class BitSpikeCompressor(BaseSpikeCompressor):
             sliced_len = (decompressed_len-i+7) // 8
             sliced = ((s_seq >> i) & 1)[:sliced_len]
             s_seq_decompressed[i::8] = sliced
-        s_seq_decompressed = s_seq_decompressed.reshape(shape).to(
-            dtype=torch.float32
-        )
-        return s_seq_decompressed
+        s_seq_compressed = s_seq_decompressed.reshape(shape)
+
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
+        return s_seq_compressed.to(dtype=decompressed_type)
 
 
 class SparseSpikeCompressor(BaseSpikeCompressor):
@@ -95,16 +112,17 @@ class SparseSpikeCompressor(BaseSpikeCompressor):
         super().__init__()
         self.dtype = dtype
 
-    def compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         indices = torch.nonzero(s_seq.reshape(-1))
         return indices.to(dtype=self.dtype)
 
-    def decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
         s_seq_decompressed = torch.zeros(
-            shape.numel(), dtype=torch.float32, device=s_seq.device
+            shape.numel(), dtype=decompressed_type, device=s_seq.device
         )
-        s_seq_decompressed = torch.scatter(
-            s_seq_decompressed,
+        s_seq_decompressed = s_seq_decompressed.scatter_(
             dim=0,
             index=s_seq.to(dtype=torch.int64).reshape(-1),
             value=1,

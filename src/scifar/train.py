@@ -9,7 +9,6 @@ sys.path.append("./src/scifar")
 import wandb
 import torch
 import torch.nn.functional as F
-from torch.cuda import amp
 import torch.utils.data as data
 from torch.utils.data.dataloader import default_collate
 from utils import use_torch_npu
@@ -32,6 +31,7 @@ from augmentation import CIFAR100_MEAN, CIFAR100_STD
 from augmentation import CIFAR10_MEAN, CIFAR10_STD
 from utils.transforms import RandomMixup, RandomCutmix
 import models
+from models import get_autocast_context, GradScaler
 
 
 def prepare_dataloaders(args):
@@ -180,7 +180,7 @@ def parse_args():
 
 
 def train_step(
-    net, train_data_loader, optimizer, lr_scheduler, device, use_amp, scaler,
+    net, train_data_loader, optimizer, lr_scheduler, device, scaler,
     current_epoch, total_epoch
 ):
     epoch_start_time = time.time()
@@ -188,6 +188,7 @@ def train_step(
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+    use_amp = scaler is not None
 
     with tqdm(
         train_data_loader,
@@ -199,11 +200,11 @@ def train_step(
             img, label = img.float().to(device), label.to(device)
             img = img.permute(3, 0, 1, 2)  # [W, N, C, H]; W acts as T
 
-            with amp.autocast(enabled=use_amp):
+            with get_autocast_context(use_amp):
                 y = net(img)
                 batch_loss = F.cross_entropy(y, label)
 
-            if scaler is not None:
+            if use_amp:
                 scaler.scale(batch_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -300,7 +301,7 @@ def main():
 
     scaler = None
     if args.amp:
-        scaler = amp.GradScaler()
+        scaler = GradScaler()
 
     max_val_accuracy = 0.
     if args.monitor_memory:
@@ -312,7 +313,6 @@ def main():
             optimizer,
             lr_scheduler,
             args.device,
-            args.amp,
             scaler,
             epoch,
             args.epochs,

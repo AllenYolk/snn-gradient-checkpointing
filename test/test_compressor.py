@@ -3,6 +3,8 @@ import random
 
 sys.path.insert(0, "./src")
 
+import torch
+
 from models import *
 
 
@@ -28,22 +30,33 @@ def test_compressor():
     _test_compressor(BitSpikeCompressor())
 
 
+def test_compressor_autocast():
+    with torch.amp.autocast(
+        device_type="cuda", enabled=True, dtype=torch.bfloat16
+    ):
+        _test_compressor(IdentitySpikeCompressor())
+        _test_compressor(SparseSpikeCompressor(dtype=torch.int64))
+        _test_compressor(BooleanSpikeCompressor())
+        _test_compressor(Uint8SpikeCompressor())
+        _test_compressor(BitSpikeCompressor())
+
+
 def test_bit_compressor():
     compressor = BitSpikeCompressor()
 
     s = torch.rand([7])
     s = (s >= 0.8).to(dtype=torch.float32, device="cuda")
 
-    compressed_s = compressor.compress(s)
-    decompressed_s = compressor.decompress(compressed_s, s.shape)
+    compressed_s = compressor._compress(s)
+    decompressed_s = compressor._decompress(compressed_s, s.shape)
 
     assert (s == decompressed_s).all()
 
     s = torch.rand([7, 9, 3, 11, 191])
     s = (s >= 0.5).to(dtype=torch.float32, device="cuda")
 
-    compressed_s = compressor.compress(s)
-    decompressed_s = compressor.decompress(compressed_s, s.shape)
+    compressed_s = compressor._compress(s)
+    decompressed_s = compressor._decompress(compressed_s, s.shape)
 
     assert (s == decompressed_s).all()
 
@@ -51,3 +64,4 @@ def test_bit_compressor():
 if __name__ == "__main__":
     test_bit_compressor()
     test_compressor()
+    test_compressor_autocast()

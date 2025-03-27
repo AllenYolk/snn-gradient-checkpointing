@@ -1,6 +1,9 @@
 import torch
 import torch.autograd as autograd
 
+from ..amp import get_autocast_context
+from ..compress import is_autocast_enabled
+
 
 class SNNCheckpointingBlock(autograd.Function):
     """Reference:
@@ -26,7 +29,9 @@ class SNNCheckpointingBlock(autograd.Function):
             ctx.input_args = input_args
             ctx.tensor_args_indices = tensor_args_indices
             ctx.x_seq_shape = x_seq.shape
+            ctx.is_autocast_enabled = is_autocast_enabled()
 
+        # depend on external autocast context
         with torch.no_grad():
             y_seq = forward_function(x_seq, *args, in_backward=False)
         return y_seq
@@ -41,17 +46,20 @@ class SNNCheckpointingBlock(autograd.Function):
             tensor_args_indices = ctx.tensor_args_indices
             args = ctx.input_args
             x_seq_shape = ctx.x_seq_shape
-            x_seq = ctx.x_compressor.decompress(x_seq_compressed, x_seq_shape)
 
             with torch.set_grad_enabled(True):
-                x_seq = x_seq.detach().requires_grad_(True)
-                for i, idx in enumerate(tensor_args_indices):
-                    rg = (
-                        ctx.needs_input_grad[idx + 3] and
-                        tensor_args[i].requires_grad
+                with get_autocast_context(ctx.is_autocast_enabled):
+                    x_seq = ctx.x_compressor.decompress(
+                        x_seq_compressed, x_seq_shape
                     )
-                    args[idx] = tensor_args[i].detach().requires_grad_(rg)
-                y_seq = ctx.forward_function(x_seq, *args, in_backward=True)
+                    x_seq = x_seq.detach().requires_grad_(True)
+                    for i, idx in enumerate(tensor_args_indices):
+                        rg = (
+                            ctx.needs_input_grad[idx + 3] and
+                            tensor_args[i].requires_grad
+                        )
+                        args[idx] = tensor_args[i].detach().requires_grad_(rg)
+                    y_seq = ctx.forward_function(x_seq, *args, in_backward=True)
                 y_seq.backward(grad_y_seq)
 
             if ctx.needs_input_grad[2]:
