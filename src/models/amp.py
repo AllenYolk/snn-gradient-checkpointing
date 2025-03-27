@@ -9,7 +9,7 @@ except Exception:
     USE_CUDA_DOT_AMP = True
     print("torch.amp is not available. Use torch.cuda.amp instead.")
 
-AUTOCAST_DTYPE = torch.bfloat16
+AUTOCAST_DTYPE = torch.float16
 CACHE_ENABLED = False
 
 
