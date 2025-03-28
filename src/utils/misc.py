@@ -185,3 +185,7 @@ def move_state_dict_to_cpu(path):
 
     cpu_sd = {k: v.cpu() for k, v in sd.items()}
     torch.save(cpu_sd, path)
+
+
+def tensor_size(x: torch.Tensor):  # in bytes
+    return x.element_size() * x.numel()

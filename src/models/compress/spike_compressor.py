@@ -1,7 +1,7 @@
 import abc
 import torch
 
-from .amp import AUTOCAST_DTYPE, is_autocast_enabled
+from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
 
 
 def get_spike_compressor(spike_compressor: str):
