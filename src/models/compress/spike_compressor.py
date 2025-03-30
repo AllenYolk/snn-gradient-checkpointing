@@ -1,3 +1,5 @@
+"""Lossless spike compression tools.
+"""
 import abc
 import torch
 
@@ -30,7 +32,35 @@ class BaseSpikeCompressor(abc.ABC):
             return self._decompress(s_seq, shape)
 
 
+class NullSpikeCompressor(BaseSpikeCompressor):
+    """Similar to IdentitySpikeCompressor, but the decompressed tensor must have
+    the same dtype as the original one. 
+    
+    NullSpikeCompressor is used for dealing with non-binary tensors. It is the 
+    only "spike compressor" module that can deal with non-binary tensors 
+    losslessly (actually, we shouldn't call is a "spike" compressor). For 
+    instance, the input layer should always use NullSpikeCompressor, as its 
+    input is a float tensor rather than a spike tensor.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
+        return s_seq
+
+    def _decompress(self, s_seq: torch.Tensor) -> torch.Tensor:
+        return s_seq
+
+
 class IdentitySpikeCompressor(BaseSpikeCompressor):
+    """Similar to NullSpikeCompressor, but the decompressed tensor might have
+    a dtype that is different from the original tensor. 
+    
+    IdentitySpikeCompressor is more memory-efficient than NullSpikeCompressor 
+    if amp is enabled, as it decompresses the tensor to low-precision float even
+    if the original tensor is with float32 dtype.
+    """
 
     def __init__(self):
         super().__init__()

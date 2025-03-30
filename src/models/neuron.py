@@ -10,6 +10,7 @@ from spikingjelly.activation_based import surrogate, neuron, functional
 
 from utils import *
 from .kernels import *
+from .compress.h_quantizer import ClampFloatHQuantizer
 
 try:
     import cupy
@@ -176,6 +177,47 @@ class HandWrittenLIF(nn.Module):
 
     def forward(self, x_seq):
         return self.core(x_seq, self.decay_lambda)
+
+
+class _BaseHandWrittenHQLIFAutogradFunction(autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x_seq, decay_lambda):
+        s_seq, h_seq = handwritten_lif_forward(x_seq, decay_lambda)
+        ctx.save_for_backward(h_seq)  # internal states
+        ctx.decay_lambda = decay_lambda
+        ctx.T = x_seq.shape[0]
+        return s_seq
+
+    @staticmethod
+    def backward(ctx, grad_s_seq):
+        raise NotImplementedError('`backward` method should be implemented.')
+
+
+class _HandWrittenHQLIFAutogradFunctionNotDetached(
+    _BaseHandWrittenHQLIFAutogradFunction
+):
+
+    @staticmethod
+    def backward(ctx, grad_s_seq):
+        h_seq = ctx.saved_tensors[0]
+        grad_x_seq = handwritten_lif_backward_not_detached(
+            grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
+        )
+        return grad_x_seq, None
+
+
+class _HandWrittenLIFHQAutogradFunctionDetached(
+    _BaseHandWrittenHQLIFAutogradFunction
+):
+
+    @staticmethod
+    def backward(ctx, grad_s_seq):
+        h_seq = ctx.saved_tensors[0]
+        grad_x_seq = handwritten_lif_backward_detached(
+            grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
+        )
+        return grad_x_seq, None
 
 
 # ================== LIF with O(1) internal state for BPTT ==================
