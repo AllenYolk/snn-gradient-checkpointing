@@ -6,7 +6,7 @@ from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
 
 MIN_POS_FLOAT = {
     torch.float8_e4m3fn: 2**(-9),
-    torch.float8_e5m2: 0,
+    torch.float8_e5m2: 2**(-16),
 }
 
 
@@ -70,7 +70,10 @@ class ClampProjHQuantizer(BaseHQuantizer):
         )
 
         if verbose:
-            print(dtype_info, f"clamp_abs: {self.clamp_abs}")
+            print(dtype_info)
+            print(f"clamp_abs: {self.clamp_abs}")
+            print(f"dtype_abs: {self.dtype_abs}")
+            print(f"shift: {self.shift}")
 
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
         self.original_dtype = x_seq.dtype
@@ -78,18 +81,20 @@ class ClampProjHQuantizer(BaseHQuantizer):
         x_seq = x_seq - self.shift
         # clamp
         x_seq = torch.clamp(x_seq, -self.clamp_abs, self.clamp_abs)
-        # project
-        x_seq = (x_seq + self.clamp_abs) / (2 * self.clamp_abs)
-        x_seq = x_seq * 2 * self.dtype_abs - self.dtype_abs
+        # project (use simplified formulation to avoid numerical issues)
+        # x_seq = (x_seq + self.clamp_abs) / (2 * self.clamp_abs)
+        # x_seq = x_seq * 2 * self.dtype_abs - self.dtype_abs
+        x_seq = x_seq * self.dtype_abs / self.clamp_abs
         # cast to dtype
         return x_seq.to(dtype=self.dtype)
 
     def _dequantize(self, x_seq: torch.Tensor) -> torch.Tensor:
         # cast to original dtype
         x_seq = x_seq.to(dtype=self.original_dtype)
-        # inverse project
-        x_seq = (x_seq + self.dtype_abs) / (2 * self.dtype_abs)
-        x_seq = x_seq * (2 * self.clamp_abs) - self.clamp_abs
+        # inverse project (use simplified formulation to avoid numerical issues)
+        # x_seq = (x_seq + self.dtype_abs) / (2 * self.dtype_abs)
+        # x_seq = x_seq * (2 * self.clamp_abs) - self.clamp_abs
+        x_seq = x_seq * self.clamp_abs / self.dtype_abs
         # inverse shift
         x_seq = x_seq + self.shift
         return x_seq
