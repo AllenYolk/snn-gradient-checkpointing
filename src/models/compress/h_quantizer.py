@@ -1,9 +1,13 @@
 import abc
-from typing import Tuple
 
 import torch
 
 from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
+
+MIN_POS_FLOAT = {
+    torch.float8_e4m3fn: 2**(-9),
+    torch.float8_e5m2: 0,
+}
 
 
 class BaseHQuantizer(abc.ABC):
@@ -40,65 +44,52 @@ class IdentityHQuantizer(BaseHQuantizer):
         return x_seq
 
 
-class ClampFloatHQuantizer(BaseHQuantizer):
+class ClampProjHQuantizer(BaseHQuantizer):
 
     def __init__(
-        self, clamp_range: Tuple[float, float], dtype=torch.float8_e4m3fn
+        self, clamp_abs: float, dtype=torch.float8_e4m3fn, verbose=False
     ):
         super().__init__()
-        self.clamp_min = clamp_range[0]
-        self.clamp_max = clamp_range[1]
-        assert self.clamp_min < self.clamp_max
+        self.clamp_abs = clamp_abs
+        assert self.clamp_abs > 0
 
         self.dtype = dtype
-        dtype_info = torch.finfo(dtype)
-        self.dtype_min = dtype_info.min
-        self.dtype_max = dtype_info.max
-        print(dtype_info)
+        if torch.is_floating_point(torch.tensor(0, dtype=dtype)):
+            dtype_info = torch.finfo(dtype)
+        else:
+            raise TypeError(
+                f"Unsupported h-quantization dtype {dtype}. "
+                f"Only floating point types are supported."
+            )
+        dtype_min, dtype_max = dtype_info.min, dtype_info.max
+        assert dtype_min + dtype_max == 0
+        self.dtype_abs = dtype_max
+
+        self.shift = MIN_POS_FLOAT[dtype] * self.clamp_abs / (
+            2 * self.dtype_abs
+        )
+
+        if verbose:
+            print(dtype_info, f"clamp_abs: {self.clamp_abs}")
 
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
         self.original_dtype = x_seq.dtype
-        x_seq = torch.clamp(x_seq, self.clamp_min, self.clamp_max)
-        # proj: [clamp_min, clamp_max] -> [dtype_min, dtype_max]
-        x_seq = (x_seq - self.clamp_min) / (self.clamp_max - self.clamp_min)
-        x_seq = x_seq * (self.dtype_max - self.dtype_min) + self.dtype_min
+        # shift
+        x_seq = x_seq - self.shift
+        # clamp
+        x_seq = torch.clamp(x_seq, -self.clamp_abs, self.clamp_abs)
+        # project
+        x_seq = (x_seq + self.clamp_abs) / (2 * self.clamp_abs)
+        x_seq = x_seq * 2 * self.dtype_abs - self.dtype_abs
         # cast to dtype
         return x_seq.to(dtype=self.dtype)
 
     def _dequantize(self, x_seq: torch.Tensor) -> torch.Tensor:
+        # cast to original dtype
         x_seq = x_seq.to(dtype=self.original_dtype)
-        # proj: [dtype_min, dtype_max] -> [clamp_min, clamp_max]
-        x_seq = (x_seq - self.dtype_min) / (self.dtype_max - self.dtype_min)
-        x_seq = x_seq * (self.clamp_max - self.clamp_min) + self.clamp_min
-        return x_seq
-
-
-class ClampIntHQuantizer(BaseHQuantizer):
-
-    def __init__(self, clamp_range: Tuple[float, float], dtype=torch.uint8):
-        super().__init__()
-        self.clamp_min = clamp_range[0]
-        self.clamp_max = clamp_range[1]
-        assert self.clamp_min < self.clamp_max
-
-        self.dtype = dtype
-        dtype_info = torch.iinfo(dtype)
-        self.dtype_min = dtype_info.min
-        self.dtype_max = dtype_info.max
-        print(dtype_info)
-
-    def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
-        self.original_dtype = x_seq.dtype
-        x_seq = torch.clamp(x_seq, self.clamp_min, self.clamp_max)
-        # proj: [clamp_min, clamp_max] -> [dtype_min, dtype_max]
-        x_seq = (x_seq - self.clamp_min) / (self.clamp_max - self.clamp_min)
-        x_seq = x_seq * (self.dtype_max - self.dtype_min) + self.dtype_min
-        # cast to dtype
-        return x_seq.to(dtype=self.dtype)
-
-    def _dequantize(self, x_seq: torch.Tensor) -> torch.Tensor:
-        x_seq = x_seq.to(dtype=self.original_dtype)
-        # proj: [dtype_min, dtype_max] -> [clamp_min, clamp_max]
-        x_seq = (x_seq - self.dtype_min) / (self.dtype_max - self.dtype_min)
-        x_seq = x_seq * (self.clamp_max - self.clamp_min) + self.clamp_min
+        # inverse project
+        x_seq = (x_seq + self.dtype_abs) / (2 * self.dtype_abs)
+        x_seq = x_seq * (2 * self.clamp_abs) - self.clamp_abs
+        # inverse shift
+        x_seq = x_seq + self.shift
         return x_seq

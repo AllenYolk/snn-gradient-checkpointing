@@ -10,7 +10,7 @@ from spikingjelly.activation_based import surrogate, neuron, functional
 
 from utils import *
 from .kernels import *
-from .compress.h_quantizer import ClampFloatHQuantizer
+from .compress.h_quantizer import ClampProjHQuantizer
 
 try:
     import cupy
