@@ -209,6 +209,14 @@ class HandWrittenLIF(nn.Module):
     * ATan surrogate function
     Experiments show that HandWrittenLIFNode consumes much less memory than
     SJLIF, while its computational efficiency is nearly the same.
+
+    Args:
+        decay_lambda (float): the neuronal decay factor. Should be in
+            the range [0, 1].
+        detach_reset (bool): Whether to detach the reset operation from the
+            computational graph.
+        h_quantizer (BaseHQuantizer): Quantizer for the hidden state. Set it to
+            None to disable quantization. Default is None.
     """
 
     def __init__(
@@ -248,7 +256,7 @@ class HandWrittenLIF(nn.Module):
     def forward(self, x_seq):
         return self.forward_function(x_seq)
 
-    def __extra_repr__(self):
+    def extra_repr(self):
         return (
             f"decay_lambda={self.decay_lambda}, "
             f"detach_reset={self.detach_reset}, "

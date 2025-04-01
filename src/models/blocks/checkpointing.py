@@ -1,8 +1,7 @@
 import torch
 import torch.autograd as autograd
 
-from ..amp import get_autocast_context
-from ..compress import is_autocast_enabled
+from ..amp import get_autocast_context, is_autocast_enabled
 
 
 class SNNCheckpointingBlock(autograd.Function):
