@@ -38,7 +38,7 @@ class BaseHQuantizer(abc.ABC):
 
 class IdentityHQuantizer(BaseHQuantizer):
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         super().__init__()
 
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:

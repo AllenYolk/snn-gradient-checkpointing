@@ -248,6 +248,13 @@ class HandWrittenLIF(nn.Module):
     def forward(self, x_seq):
         return self.forward_function(x_seq)
 
+    def __extra_repr__(self):
+        return (
+            f"decay_lambda={self.decay_lambda}, "
+            f"detach_reset={self.detach_reset}, "
+            f"h_quantizer={self.h_quantizer}, "
+        )
+
 
 # ================== LIF with O(1) internal state for BPTT ==================
 class _BaseMELIFAutogradFunction(autograd.Function):

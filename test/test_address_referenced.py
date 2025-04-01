@@ -38,25 +38,34 @@ def test_linear_lif_address_referenced():
     x = torch.randn(T, N, C) + 0.6
     print(f"network input: {x.data_ptr()}")
 
+    h_quantizer_type = "IdentityHQuantizer"
     net = nn.Sequential(
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(),
+            neuron=HandWrittenLIF(
+                h_quantizer=get_h_quantizer(h_quantizer_type)
+            ),
             spike_compressor=Uint8SpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(),
+            neuron=HandWrittenLIF(
+                h_quantizer=get_h_quantizer(h_quantizer_type)
+            ),
             spike_compressor=BooleanSpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(),
+            neuron=HandWrittenLIF(
+                h_quantizer=get_h_quantizer(h_quantizer_type)
+            ),
             spike_compressor=BitSpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(),
+            neuron=HandWrittenLIF(
+                h_quantizer=get_h_quantizer(h_quantizer_type)
+            ),
             spike_compressor=SparseSpikeCompressor(),
         )
     )
@@ -64,7 +73,9 @@ def test_linear_lif_address_referenced():
 
     s = net(x)
     loss = s.sum()
+    print("End of FP")
     get_all_addresses_referenced_by_tensor(verbose=True)
+    print("Begin of BP")
     loss.backward()
 
     print(f"network output: {s.data_ptr()}")
