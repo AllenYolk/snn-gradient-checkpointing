@@ -4,10 +4,15 @@ import torch
 
 from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
 
-MIN_POS_FLOAT = {
-    torch.float8_e4m3fn: 2**(-9),
-    torch.float8_e5m2: 2**(-16),
-}
+MIN_POS_FLOAT = {}
+if hasattr(torch, "float8_e4m3fn"):
+    FLOAT8_AVAILABLE = True
+    MIN_POS_FLOAT.update({
+        torch.float8_e4m3fn: 2**(-9),
+        torch.float8_e5m2: 2**(-16),
+    })
+else:
+    FLOAT8_AVAILABLE = False
 
 
 def get_h_quantizer(h_quantizer: str, **kwargs):
