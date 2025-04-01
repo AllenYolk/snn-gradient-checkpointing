@@ -6,8 +6,8 @@ try:
 
     NVCOMP_AVAILABLE = True
 
-    def get_nvcomp_compressor(general_compressor: str):
-        return globals()[general_compressor]()
+    def get_nvcomp_compressor(nvcomp_compressor: str):
+        return globals()[nvcomp_compressor]()
 
     NVCOMP_TYPE_DICT = {
         torch.float16: "<f2",

@@ -31,7 +31,7 @@ from augmentation import CIFAR100_MEAN, CIFAR100_STD
 from augmentation import CIFAR10_MEAN, CIFAR10_STD
 from utils.transforms import RandomMixup, RandomCutmix
 import models
-from models import get_autocast_context, GradScaler
+from models import get_autocast_context, GradScaler, get_h_quantizer
 
 
 def prepare_dataloaders(args):
@@ -174,6 +174,7 @@ def parse_args():
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-mm", "--monitor_memory", action='store_true')
+    parser.add_argument("-hq", "--h_quantization", action='store_true')
 
     args = parser.parse_args()
     return args
@@ -293,6 +294,10 @@ def main():
         decay_lambda=args.decay_lambda,
         T=32,  # for PSN
         k=8,  # for SlidingPSN
+        h_quantizer=(
+            get_h_quantizer("ClampProjHQuantizer")
+            if args.h_quantization else None
+        ),
     )
     print(net)
     net = net.to(args.device)

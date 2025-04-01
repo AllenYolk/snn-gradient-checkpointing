@@ -82,7 +82,7 @@ def test_zero_neighborhood():
         dtype=torch.float8_e4m3fn,
     )
 
-    H = torch.tensor(-1e-7)
+    H = torch.tensor(-1e-12)
     QH = h_quantizer.quantize(H)
     HH = h_quantizer.dequantize(QH)
     print(H, QH, HH)
@@ -176,7 +176,11 @@ def search_best_clamp_range():
         if max_sg_error < min_error:
             min_error = max_sg_error
             best_u_abs = u_abs
+    res1_torch = torch.tensor(res1)
+    tok_5_idx = torch.topk(-res1_torch, 5).indices
+    top_5_u_abs = u_abs_array[tok_5_idx]
     print("\tBest u_abs:", best_u_abs, "Min error:", min_error)
+    print("\tTop 5 u_abs:", top_5_u_abs)
 
     print("For torch.float8_e5m2:")
     res2 = []
@@ -192,7 +196,11 @@ def search_best_clamp_range():
         if max_sg_error < min_error:
             min_error = max_sg_error
             best_u_abs = u_abs
+    res2_torch = torch.tensor(res2)
+    top_5_idx = torch.topk(-res2_torch, 5).indices
+    top_5_u_abs = u_abs_array[top_5_idx]
     print("\tBest u_abs:", best_u_abs, "Min error:", min_error)
+    print("\tTop 5 u_abs:", top_5_u_abs)
 
     plt.figure(
         figsize=(
@@ -200,8 +208,8 @@ def search_best_clamp_range():
             plt.rcParams["figure.figsize"][1]
         )
     )
-    plt.plot(u_abs_array, res1, label="float8$\_$e4m3fn", linewidth=1)
-    plt.plot(u_abs_array, res2, label="float8$\_$e5m2", linewidth=1)
+    plt.plot(u_abs_array, res1, label=r"float8$\_$e4m3fn", linewidth=1)
+    plt.plot(u_abs_array, res2, label=r"float8$\_$e5m2", linewidth=1)
     plt.xlabel(r"$u_{\mathrm{abs}}$")
     plt.ylabel("SG max abs error")
     plt.legend()
@@ -213,7 +221,7 @@ if __name__ == "__main__":
     #test_numerics()
     # print_atan_gradient_values()
     # test_quantization_error()
-    # test_zero_neighborhood()
+    test_zero_neighborhood()
     #test_rounding()
     # test_casting()
-    search_best_clamp_range()
+    #search_best_clamp_range()

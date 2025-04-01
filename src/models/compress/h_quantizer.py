@@ -10,6 +10,10 @@ MIN_POS_FLOAT = {
 }
 
 
+def get_h_quantizer(h_quantizer: str, **kwargs):
+    return globals()[h_quantizer](**kwargs)
+
+
 class BaseHQuantizer(abc.ABC):
 
     def __init__(self):
@@ -47,7 +51,10 @@ class IdentityHQuantizer(BaseHQuantizer):
 class ClampProjHQuantizer(BaseHQuantizer):
 
     def __init__(
-        self, clamp_abs: float, dtype=torch.float8_e4m3fn, verbose=False
+        self,
+        clamp_abs: float = 12.223,  # searched optimal value
+        dtype=torch.float8_e4m3fn,
+        verbose=False
     ):
         super().__init__()
         self.clamp_abs = clamp_abs
@@ -65,9 +72,10 @@ class ClampProjHQuantizer(BaseHQuantizer):
         assert dtype_min + dtype_max == 0
         self.dtype_abs = dtype_max
 
-        self.shift = MIN_POS_FLOAT[dtype] * self.clamp_abs / (
-            2 * self.dtype_abs
+        self.shift = (
+            self.clamp_abs / (2 * self.dtype_abs) * MIN_POS_FLOAT[dtype]
         )
+        self.scale = self.dtype_abs / self.clamp_abs
 
         if verbose:
             print(dtype_info)
@@ -84,7 +92,7 @@ class ClampProjHQuantizer(BaseHQuantizer):
         # project (use simplified formulation to avoid numerical issues)
         # x_seq = (x_seq + self.clamp_abs) / (2 * self.clamp_abs)
         # x_seq = x_seq * 2 * self.dtype_abs - self.dtype_abs
-        x_seq = x_seq * self.dtype_abs / self.clamp_abs
+        x_seq = x_seq * self.scale
         # cast to dtype
         return x_seq.to(dtype=self.dtype)
 
@@ -94,7 +102,7 @@ class ClampProjHQuantizer(BaseHQuantizer):
         # inverse project (use simplified formulation to avoid numerical issues)
         # x_seq = (x_seq + self.dtype_abs) / (2 * self.dtype_abs)
         # x_seq = x_seq * (2 * self.clamp_abs) - self.clamp_abs
-        x_seq = x_seq * self.clamp_abs / self.dtype_abs
+        x_seq = x_seq / self.scale
         # inverse shift
         x_seq = x_seq + self.shift
         return x_seq

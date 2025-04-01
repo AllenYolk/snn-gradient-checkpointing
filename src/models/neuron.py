@@ -118,9 +118,10 @@ class _BaseHandWrittenLIFAutogradFunction(autograd.Function):
     @staticmethod
     def forward(ctx, x_seq, decay_lambda):
         s_seq, h_seq = handwritten_lif_forward(x_seq, decay_lambda)
-        ctx.save_for_backward(h_seq)  # internal states
-        ctx.decay_lambda = decay_lambda
-        ctx.T = x_seq.shape[0]
+        if any(ctx.needs_input_grad):
+            ctx.save_for_backward(h_seq)  # internal states
+            ctx.decay_lambda = decay_lambda
+            ctx.T = x_seq.shape[0]
         return s_seq
 
     @staticmethod
@@ -154,39 +155,17 @@ class _HandWrittenLIFAutogradFunctionDetached(
         return grad_x_seq, None
 
 
-class HandWrittenLIF(nn.Module):
-    """Multi-step handwritten LIF neuron with:
-    * decay_input=False
-    * v_threshold = 1.
-    * hard_reset, v_reset = 0.
-    * ATan surrogate function
-    Experiments show that HandWrittenLIFNode consumes much less memory than
-    SJLIF, while its computational efficiency is nearly the same.
-    """
-
-    def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
-        super().__init__()
-        if decay_lambda < 0. or decay_lambda > 1.:
-            raise ValueError('`decay_lambda` should be in the range [0, 1).')
-        self.decay_lambda = decay_lambda
-        self.detach_reset = detach_reset
-        if detach_reset:
-            self.core = _HandWrittenLIFAutogradFunctionDetached.apply
-        else:
-            self.core = _HandWrittenLIFAutogradFunctionNotDetached.apply
-
-    def forward(self, x_seq):
-        return self.core(x_seq, self.decay_lambda)
-
-
 class _BaseHandWrittenHQLIFAutogradFunction(autograd.Function):
 
     @staticmethod
-    def forward(ctx, x_seq, decay_lambda):
+    def forward(ctx, x_seq, decay_lambda, h_quantizer):
         s_seq, h_seq = handwritten_lif_forward(x_seq, decay_lambda)
-        ctx.save_for_backward(h_seq)  # internal states
-        ctx.decay_lambda = decay_lambda
-        ctx.T = x_seq.shape[0]
+        if any(ctx.needs_input_grad):
+            h_seq = h_quantizer.quantize(h_seq)
+            ctx.save_for_backward(h_seq)  # internal states
+            ctx.decay_lambda = decay_lambda
+            ctx.h_quantizer = h_quantizer
+            ctx.T = x_seq.shape[0]
         return s_seq
 
     @staticmethod
@@ -201,23 +180,73 @@ class _HandWrittenHQLIFAutogradFunctionNotDetached(
     @staticmethod
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
+        h_seq = ctx.h_quantizer.dequantize(h_seq)
         grad_x_seq = handwritten_lif_backward_not_detached(
             grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
         )
-        return grad_x_seq, None
+        return grad_x_seq, None, None
 
 
-class _HandWrittenLIFHQAutogradFunctionDetached(
+class _HandWrittenHQLIFAutogradFunctionDetached(
     _BaseHandWrittenHQLIFAutogradFunction
 ):
 
     @staticmethod
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
+        h_seq = ctx.h_quantizer.dequantize(h_seq)
         grad_x_seq = handwritten_lif_backward_detached(
             grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
         )
-        return grad_x_seq, None
+        return grad_x_seq, None, None
+
+
+class HandWrittenLIF(nn.Module):
+    """Multi-step handwritten LIF neuron with:
+    * decay_input=False
+    * v_threshold = 1.
+    * hard_reset, v_reset = 0.
+    * ATan surrogate function
+    Experiments show that HandWrittenLIFNode consumes much less memory than
+    SJLIF, while its computational efficiency is nearly the same.
+    """
+
+    def __init__(
+        self,
+        decay_lambda=0.5,
+        detach_reset=True,
+        h_quantizer=None,
+        *args,
+        **kwargs
+    ):
+        super().__init__()
+        if decay_lambda < 0. or decay_lambda > 1.:
+            raise ValueError('`decay_lambda` should be in the range [0, 1).')
+        self.decay_lambda = decay_lambda
+        self.detach_reset = detach_reset
+        self.h_quantizer = h_quantizer
+
+        if self.h_quantizer is None:
+            if detach_reset:
+                self.core = _HandWrittenLIFAutogradFunctionDetached.apply
+            else:
+                self.core = _HandWrittenLIFAutogradFunctionNotDetached.apply
+            self.forward_function = self._forward_lif
+        else:
+            if detach_reset:
+                self.core = _HandWrittenHQLIFAutogradFunctionDetached.apply
+            else:
+                self.core = _HandWrittenHQLIFAutogradFunctionNotDetached.apply
+            self.forward_function = self._forward_hqlif
+
+    def _forward_lif(self, x_seq):
+        return self.core(x_seq, self.decay_lambda)
+
+    def _forward_hqlif(self, x_seq):
+        return self.core(x_seq, self.decay_lambda, self.h_quantizer)
+
+    def forward(self, x_seq):
+        return self.forward_function(x_seq)
 
 
 # ================== LIF with O(1) internal state for BPTT ==================

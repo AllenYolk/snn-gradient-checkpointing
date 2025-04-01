@@ -49,7 +49,7 @@ class NullSpikeCompressor(BaseSpikeCompressor):
     def _compress(self, s_seq: torch.Tensor) -> torch.Tensor:
         return s_seq
 
-    def _decompress(self, s_seq: torch.Tensor) -> torch.Tensor:
+    def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
         return s_seq
 
 
