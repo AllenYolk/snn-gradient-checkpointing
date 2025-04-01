@@ -85,9 +85,7 @@ def test_class():
     x_comp = compressor.compress(x_i64)
     print("Compressed nvcomp size (bytes):", x_comp.buffer_size)
 
-    x_reconstruct = compressor.decompress(
-        x_comp, x_i64.shape, x_i64.dtype, "Zstd"
-    )
+    x_reconstruct = compressor.decompress(x_comp, x_i64.shape, x_i64.dtype)
 
     print("Restored equal to original?", torch.allclose(x_i64, x_reconstruct))
 
