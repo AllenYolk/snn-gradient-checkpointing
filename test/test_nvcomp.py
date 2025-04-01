@@ -5,7 +5,7 @@ sys.path.append("./src")
 import torch
 from nvidia import nvcomp
 
-from models.compress import nvcomp_compress, nvcomp_decompress
+from models.compress import nvcomp_compress, nvcomp_decompress, NVCOMPCompressor
 
 
 def test_manual():
@@ -61,15 +61,9 @@ def test_manual():
 
 
 def test_function():
-    torch.manual_seed(2025)
-    x_f32 = torch.randn((31, 1024), device='cuda', dtype=torch.float32)
-    print(x_f32[:10])
-    print("Original dtype:", x_f32.dtype)
-    print("Original size (bytes):", x_f32.numel() * 4)
-    print("Original data_ptr:", x_f32.data_ptr())
-    print("Original shape:", x_f32.shape)
-    print("Original size (elements):", x_f32.numel())
-    print("Original storage offset:", x_f32.storage_offset())
+    torch.manual_seed(2023)
+    x_f32 = torch.randn((31, 81), device='cuda', dtype=torch.float32)
+    print("Original size (bytes):", x_f32.numel() * x_f32.element_size())
 
     x_comp = nvcomp_compress(x_f32, algorithm="Zstd")
     print("Compressed nvcomp size (bytes):", x_comp.buffer_size)
@@ -79,6 +73,26 @@ def test_function():
     print("Restored equal to original?", torch.allclose(x_f32, x_reconstruct))
 
 
+def test_class():
+    torch.manual_seed(2025)
+    x_f32 = torch.rand((31, 1024), device='cuda', dtype=torch.float32)
+    x_i64 = (x_f32 > 0.8).to(torch.int64)
+    print("Original dtype:", x_i64.dtype)
+    print("Original size (bytes):", x_i64.numel() * x_i64.element_size())
+
+    compressor = NVCOMPCompressor("Zstd", torch.uint8)
+
+    x_comp = compressor.compress(x_i64)
+    print("Compressed nvcomp size (bytes):", x_comp.buffer_size)
+
+    x_reconstruct = compressor.decompress(
+        x_comp, x_i64.shape, x_i64.dtype, "Zstd"
+    )
+
+    print("Restored equal to original?", torch.allclose(x_i64, x_reconstruct))
+
+
 if __name__ == "__main__":
     test_manual()
     test_function()
+    test_class()

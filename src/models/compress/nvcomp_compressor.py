@@ -50,5 +50,39 @@ try:
         )
         return y.reshape(target_shape)
 
+    class NVCOMPCompressor:
+
+        def __init__(
+            self, algorithm: str = "Zstd", compressed_dtype=torch.uint8
+        ):
+            self.algorithm = algorithm
+            self.compressed_dtype = compressed_dtype
+            self.codec = nvcomp.Codec(
+                algorithm=algorithm,
+                bitstream_kind=nvcomp.BitstreamKind.RAW,
+            )
+
+        def compress(self, x: torch.Tensor) -> nvcomp.Array:
+            y = torch.tensor((), device=x.device, dtype=self.compressed_dtype)
+            y = y.set_(
+                x.untyped_storage(),
+                x.storage_offset(),
+                (x.numel() * x.element_size() // y.element_size(),),
+            )
+            y = nvcomp.as_array(y)
+
+            return self.codec.encode(y)
+
+        def decompress(self, x: nvcomp.Array, target_shape, target_dtype):
+            x = self.codec.decode(x)
+            x = torch.from_dlpack(x.to_dlpack())
+            y = torch.tensor((), dtype=target_dtype, device=x.device)
+            y = y.set_(
+                x.untyped_storage(),
+                x.storage_offset(),
+                (x.numel() * x.element_size() // y.element_size(),),
+            )
+            return y.reshape(target_shape)
+
 except Exception:
     NVCOMP_AVAILABLE = False
