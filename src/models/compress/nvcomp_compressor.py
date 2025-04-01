@@ -22,7 +22,7 @@ try:
         x = torch.tensor((), device=x.device, dtype=torch.uint8).set_(
             x.untyped_storage(),
             x.storage_offset(),
-            x.numel() * x.element_size(),
+            (x.numel() * x.element_size(),),
         )
         x = nvcomp.as_array(x)
 
