@@ -4,15 +4,19 @@ import torch
 
 from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
 
-MIN_POS_FLOAT = {}
+MIN_POS_FLOAT = {
+    torch.float16: 2**(-24),
+}
 if hasattr(torch, "float8_e4m3fn"):
     FLOAT8_AVAILABLE = True
     MIN_POS_FLOAT.update({
         torch.float8_e4m3fn: 2**(-9),
         torch.float8_e5m2: 2**(-16),
     })
+    DEFAULT_HQ_DTYPE = torch.float8_e4m3fn
 else:
     FLOAT8_AVAILABLE = False
+    DEFAULT_HQ_DTYPE = torch.float16
 
 
 def get_h_quantizer(h_quantizer: str, **kwargs):
@@ -58,7 +62,7 @@ class ClampProjHQuantizer(BaseHQuantizer):
     def __init__(
         self,
         clamp_abs: float = 12.223,  # searched optimal value
-        dtype=torch.float8_e4m3fn,
+        dtype=DEFAULT_HQ_DTYPE,
         verbose=False
     ):
         super().__init__()
