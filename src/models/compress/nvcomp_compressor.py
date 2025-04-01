@@ -6,9 +6,6 @@ try:
 
     NVCOMP_AVAILABLE = True
 
-    def get_nvcomp_compressor(nvcomp_compressor: str):
-        return globals()[nvcomp_compressor]()
-
     NVCOMP_TYPE_DICT = {
         torch.float16: "<f2",
         torch.int64: "<i8",
@@ -21,73 +18,37 @@ try:
     def torch_type_to_nvcomp_type(dtype):
         return NVCOMP_TYPE_DICT.get(dtype, dtype)
 
-    class BaseNvcompCompressor(abc.ABC):
+    def nvcomp_compress(x: torch.Tensor, algorithm: str = "Zstd"):
+        x = torch.tensor((), device=x.device, dtype=torch.uint8).set_(
+            x.untyped_storage(),
+            x.storage_offset(),
+            x.numel() * x.element_size(),
+        )
+        x = nvcomp.as_array(x)
 
-        def __init__(self):
-            pass
+        return nvcomp.Codec(
+            algorithm=algorithm,
+            bitstream_kind=nvcomp.BitstreamKind.RAW,
+        ).encode(x)
 
-        @property
-        def supported_devices(self):
-            return ["cpu", "cuda"]
-
-        @property
-        def supported_dtypes(self):
-            return [
-                torch.float32,
-                torch.float16,
-            ]
-
-        @abc.abstractmethod
-        def _compress(self, x: torch.Tensor) -> nvcomp.Array:
-            pass
-
-        @abc.abstractmethod
-        def _decompress(self, x_nv: nvcomp.Array, shape, dtype) -> torch.Tensor:
-            pass
-
-        def compress(self, x: torch.Tensor) -> nvcomp.Array:
-            with torch.no_grad():
-                return self._compress(x)
-
-        def decompress(self, x_nv: nvcomp.Array, shape, dtype) -> torch.Tensor:
-            with torch.no_grad():
-                return self._decompress(x_nv, shape, dtype)
-
-    class IdentityNvcompCompressor(BaseNvcompCompressor):
-
-        def __init__(self):
-            super().__init__()
-            self.codec = nvcomp.Codec(
-                algorithm="LZ4", bitstream_kind=nvcomp.BitstreamKind.RAW
-            )
-
-        def _compress(self, x: torch.Tensor) -> nvcomp.Array:
-            x_nv = nvcomp.as_array(x)
-            return x_nv
-
-        def _decompress(self, x_nv: nvcomp.Array, shape, dtype) -> nvcomp.Array:
-            x = torch.from_dlpack(x_nv.to_dlpack())
-            return x.reshape(shape)
-
-    class Lz4NvcompCompressor(BaseNvcompCompressor):
-
-        def __init__(self):
-            super().__init__()
-            self.codec = nvcomp.Codec(
-                algorithm="LZ4", bitstream_kind=nvcomp.BitstreamKind.RAW
-            )
-
-        def _compress(self, x: torch.Tensor) -> nvcomp.Array:
-            x_nv = nvcomp.as_array(x)
-            x_nv_comp = self.codec.encode(x_nv)
-            return x_nv_comp
-
-        def _decompress(self, x_nv: nvcomp.Array, shape, dtype) -> nvcomp.Array:
-            x_nv_decomp = self.codec.decode(
-                x_nv, data_type=torch_type_to_nvcomp_type(dtype)
-            )
-            x_decomp = torch.from_dlpack(x_nv_decomp.to_dlpack())
-            return x_decomp.reshape(shape)
+    def nvcomp_decompress(
+        x: nvcomp.Array,
+        target_shape,
+        target_dtype=torch.float32,
+        algorithm: str = "Zstd",
+    ):
+        x = nvcomp.Codec(
+            algorithm=algorithm,
+            bitstream_kind=nvcomp.BitstreamKind.RAW,
+        ).decode(x)
+        x = torch.from_dlpack(x.to_dlpack())
+        y = torch.tensor((), dtype=target_dtype, device=x.device)
+        y = y.set_(
+            x.untyped_storage(),
+            x.storage_offset(),
+            (x.numel() * x.element_size() // y.element_size(),),
+        )
+        return y.reshape(target_shape)
 
 except Exception:
     NVCOMP_AVAILABLE = False

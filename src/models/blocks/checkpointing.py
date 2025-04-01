@@ -1,7 +1,10 @@
 import torch
 import torch.autograd as autograd
+from nvidia import nvcomp
 
 from ..amp import get_autocast_context, is_autocast_enabled
+
+CODEC = nvcomp.Codec(algorithm="Zstd", bitstream_kind=nvcomp.BitstreamKind.RAW)
 
 
 class SNNCheckpointingBlock(autograd.Function):
