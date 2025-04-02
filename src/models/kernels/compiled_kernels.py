@@ -231,26 +231,26 @@ def handwritten_hqlif_forward_compiled(x_seq, decay_lambda, h_quantizer):
     T = x_seq.shape[0]
 
     v = torch.zeros_like(x_seq[0])  # hidden state
-    hq_seq = torch.empty_like(x_seq, dtype=h_quantizer.dtype)
+    ot_seq = torch.empty_like(x_seq, dtype=h_quantizer.dtype)  # over_threshold
     s_seq = torch.empty_like(x_seq)
     for t in range(T):
         x = x_seq[t]
         v = decay_lambda*v + x
-        hq_seq[t] = h_quantizer.quantize(v)
+        ot_seq[t] = h_quantizer.quantize(v - 1.)
         s_seq[t] = (v >= 1.).to(v)
         v = v * (1. - s_seq[t])
-    return s_seq, hq_seq
+    return s_seq, ot_seq
 
 
 @_conditional_compile()
 def handwritten_hqlif_backward_not_detached_compiled(
-    grad_s_seq, hq_seq, decay_lambda, T, h_quantizer
+    grad_s_seq, ot_seq, decay_lambda, T, h_quantizer
 ):
     grad_x_seq = torch.empty_like(grad_s_seq)
     grad_v = 0.
     for t in range(T - 1, -1, -1):
         grad_s = grad_s_seq[t]
-        h = h_quantizer.dequantize(hq_seq[t])
+        h = h_quantizer.dequantize(ot_seq[t]) + 1.
         grad_v = ((grad_s - grad_v*h) / (1. + (torch.pi * (h-1.)).pow_(2)) +
                   grad_v * (1 - (h >= 1.).to(h)))
         grad_x_seq[t] = grad_v
@@ -260,13 +260,13 @@ def handwritten_hqlif_backward_not_detached_compiled(
 
 @_conditional_compile()
 def handwritten_hqlif_backward_detached_compiled(
-    grad_s_seq, hq_seq, decay_lambda, T, h_quantizer
+    grad_s_seq, ot_seq, decay_lambda, T, h_quantizer
 ):
     grad_x_seq = torch.empty_like(grad_s_seq)
     grad_v = 0.
     for t in range(T - 1, -1, -1):
         grad_s = grad_s_seq[t]
-        h = h_quantizer.dequantize(hq_seq[t])
+        h = h_quantizer.dequantize(ot_seq[t]) + 1.
         grad_v = (
             grad_s / (1. + (torch.pi * (h-1.)).pow_(2)) + grad_v *
             (1 - (h >= 1.).to(h))

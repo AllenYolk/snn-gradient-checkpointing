@@ -4,6 +4,7 @@ import abc
 import torch
 
 from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
+from .nvcomp_compressor import *
 
 
 def get_spike_compressor(spike_compressor: str):
@@ -121,6 +122,47 @@ class BitSpikeCompressor(BaseSpikeCompressor):
         return s_seq_compressed
 
     def _decompress(self, s_seq: torch.Tensor, shape) -> torch.Tensor:
+        decompressed_len = shape.numel()
+        s_seq_decompressed = torch.zeros(
+            decompressed_len, dtype=torch.bool, device=s_seq.device
+        )
+        for i in range(8):
+            sliced_len = (decompressed_len-i+7) // 8
+            sliced = ((s_seq >> i) & 1)[:sliced_len]
+            s_seq_decompressed[i::8] = sliced
+        s_seq_compressed = s_seq_decompressed.reshape(shape)
+
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
+        return s_seq_compressed.to(dtype=decompressed_type)
+
+
+class BitNvcompSpikeCompressor(BaseSpikeCompressor):
+
+    def __init__(self):
+        super().__init__()
+        self.codec = NvcompCompressor(
+            algorithm="Zstd", compressed_dtype=torch.uint8
+        )
+
+    def _compress(self, s_seq: torch.Tensor) -> nvcomp.Array:
+        s_seq = s_seq.to(dtype=torch.bool).reshape(-1)
+        compressed_shape = (s_seq.numel() + 7) // 8
+        s_seq_compressed = torch.zeros(
+            compressed_shape, dtype=torch.uint8, device=s_seq.device
+        )
+        for i in range(8):
+            sliced = s_seq[i::8].to(dtype=torch.uint8)
+            sliced_len = sliced.numel()
+            if sliced_len > 0:
+                s_seq_compressed[:sliced_len] |= (sliced << i)
+        s_seq_compressed = self.codec.compress(s_seq_compressed)
+        return s_seq_compressed
+
+    def _decompress(self, s_seq: nvcomp.Array, shape) -> torch.Tensor:
+        s_seq = self.codec.decompress(
+            s_seq, target_shape=(-1,), target_dtype=torch.uint8
+        )
         decompressed_len = shape.numel()
         s_seq_decompressed = torch.zeros(
             decompressed_len, dtype=torch.bool, device=s_seq.device

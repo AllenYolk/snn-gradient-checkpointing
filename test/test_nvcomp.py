@@ -5,7 +5,7 @@ sys.path.append("./src")
 import torch
 from nvidia import nvcomp
 
-from models.compress import nvcomp_compress, nvcomp_decompress, NVCOMPCompressor
+from models.compress import nvcomp_compress, nvcomp_decompress, NvcompCompressor
 
 
 def test_manual():
@@ -80,7 +80,7 @@ def test_class():
     print("Original dtype:", x_i64.dtype)
     print("Original size (bytes):", x_i64.numel() * x_i64.element_size())
 
-    compressor = NVCOMPCompressor("Zstd", torch.uint8)
+    compressor = NvcompCompressor("Zstd", torch.uint8)
 
     x_comp = compressor.compress(x_i64)
     print("Compressed nvcomp size (bytes):", x_comp.buffer_size)

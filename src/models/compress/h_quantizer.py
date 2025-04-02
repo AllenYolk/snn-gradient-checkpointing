@@ -17,6 +17,7 @@ if hasattr(torch, "float8_e4m3fn"):
 else:
     FLOAT8_AVAILABLE = False
     DEFAULT_HQ_DTYPE = torch.float16
+print("DEFAULT_HQ_DTYPE:", DEFAULT_HQ_DTYPE)
 
 
 def get_h_quantizer(h_quantizer: str, **kwargs):
@@ -49,7 +50,7 @@ class NullHQuantizer(BaseHQuantizer):
 
     def __init__(self, *args, **kwargs):
         super().__init__()
-        self.dtype = torch.float32 if is_autocast_enabled() else AUTOCAST_DTYPE
+        self.dtype = AUTOCAST_DTYPE if is_autocast_enabled() else torch.float32
 
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
         return x_seq

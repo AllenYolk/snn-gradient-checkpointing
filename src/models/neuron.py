@@ -198,11 +198,11 @@ class _BaseHandWrittenHQLIFAutogradFunction(autograd.Function):
 
     @staticmethod
     def forward(ctx, x_seq, decay_lambda, h_quantizer):
-        s_seq, hq_seq = handwritten_hqlif_forward(
+        s_seq, ot_seq = handwritten_hqlif_forward(
             x_seq, decay_lambda, h_quantizer
-        )
+        )  # ot: over_threshold
         if any(ctx.needs_input_grad):
-            ctx.save_for_backward(hq_seq)  # internal states
+            ctx.save_for_backward(ot_seq)  # internal states
             ctx.decay_lambda = decay_lambda
             ctx.h_quantizer = h_quantizer
             ctx.T = x_seq.shape[0]
@@ -219,9 +219,9 @@ class _HandWrittenHQLIFAutogradFunctionNotDetached(
 
     @staticmethod
     def backward(ctx, grad_s_seq):
-        hq_seq = ctx.saved_tensors[0]
+        ot_seq = ctx.saved_tensors[0]
         grad_x_seq = handwritten_hqlif_backward_not_detached(
-            grad_s_seq, hq_seq, ctx.decay_lambda, ctx.T, ctx.h_quantizer
+            grad_s_seq, ot_seq, ctx.decay_lambda, ctx.T, ctx.h_quantizer
         )
         return grad_x_seq, None, None
 
@@ -232,9 +232,9 @@ class _HandWrittenHQLIFAutogradFunctionDetached(
 
     @staticmethod
     def backward(ctx, grad_s_seq):
-        hq_seq = ctx.saved_tensors[0]
+        ot_seq = ctx.saved_tensors[0]
         grad_x_seq = handwritten_hqlif_backward_detached(
-            grad_s_seq, hq_seq, ctx.decay_lambda, ctx.T, ctx.h_quantizer
+            grad_s_seq, ot_seq, ctx.decay_lambda, ctx.T, ctx.h_quantizer
         )
         return grad_x_seq, None, None
 

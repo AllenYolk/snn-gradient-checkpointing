@@ -50,7 +50,7 @@ try:
         )
         return y.reshape(target_shape)
 
-    class NVCOMPCompressor:
+    class NvcompCompressor:
 
         def __init__(
             self, algorithm: str = "Zstd", compressed_dtype=torch.uint8
