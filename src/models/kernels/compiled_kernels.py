@@ -186,12 +186,12 @@ def handwritten_lif_forward_compiled(x_seq, decay_lambda):
         x = x_seq[t]
 
         # core
-        h = decay_lambda*v + x
-        s = (h >= 1.).to(h)
-        v = h * (1.-s)
-
+        v = decay_lambda*v + x
+        h_seq[t] = v
+        s = (v >= 1.).to(v)
+        v = v * (1.-s)
         s_seq[t] = s
-        h_seq[t] = h
+
     return s_seq, h_seq
 
 
@@ -236,11 +236,11 @@ def handwritten_hqlif_forward_compiled(x_seq, decay_lambda, h_quantizer):
     s_seq = torch.empty_like(x_seq)
     for t in range(T):
         x = x_seq[t]
-        h = decay_lambda*v + x
-        s = (h >= 1.).to(h)
-        v = h * (1.-s)
+        v = decay_lambda*v + x
+        hq_seq[t] = h_quantizer.quantize(v)
+        s = (v >= 1.).to(v)
+        v = v * (1.-s)
         s_seq[t] = s
-        hq_seq[t] = h_quantizer.quantize(h)
     return s_seq, hq_seq
 
 

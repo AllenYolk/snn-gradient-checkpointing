@@ -169,8 +169,6 @@ class HandWrittenLIF(nn.Module):
             the range [0, 1].
         detach_reset (bool): Whether to detach the reset operation from the
             computational graph.
-        h_quantizer (BaseHQuantizer): Quantizer for the hidden state. Set it to
-            None to disable quantization. Default is None.
     """
 
     def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
