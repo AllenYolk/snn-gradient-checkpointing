@@ -16,17 +16,19 @@ def is_address_referenced_by_tensor(addr):
     return False
 
 
-def get_all_addresses_referenced_by_tensor(verbose=False):
+def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
     id_to_name = {}
     current_frame = inspect.currentframe().f_back
 
-    while current_frame:
+    d = 0
+    while current_frame and d < depth:
         frame_name = current_frame.f_code.co_name
         locals_dict = current_frame.f_locals
         for obj_name, obj in locals_dict.items():
             if isinstance(obj, torch.Tensor):
                 id_to_name[id(obj)] = f"{frame_name}.{obj_name}"
         current_frame = current_frame.f_back
+        d += 1
 
     addr_to_tensor = DefaultDict(list)
     for obj in gc.get_objects():
