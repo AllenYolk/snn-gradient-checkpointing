@@ -5,7 +5,6 @@ from nvidia import nvcomp
 from ..amp import get_autocast_context, is_autocast_enabled
 
 
-# TODO: make it compatible with nvcomp.Array as x_seq
 class SNNCheckpointingBlock(autograd.Function):
     """Reference:
     https://github.com/pytorch/pytorch/blob/v2.6.0/torch/utils/checkpoint.py
@@ -19,20 +18,19 @@ class SNNCheckpointingBlock(autograd.Function):
             ctx.x_seq_shape = x_seq.shape
             ctx.is_autocast_enabled = is_autocast_enabled()
 
-            input_args = []  # (x_seq, *args), with tensors replaced by None
-            tensor_args = []  # tensors in (x_seq, *args)
-            tensor_args_indices = []  # indices of the tensors in (x_seq, *args)
+            input_args = []  # (x_seq_compressed, *args); tensors -> None
+            tensor_args = []  # tensors in (x_seq_compressed, *args)
+            tensor_args_indices = []  # indices of the tensors in (*args,)
             x_seq_compressed = x_compressor.compress(x_seq)
             if torch.is_tensor(x_seq_compressed):
                 tensor_args.append(x_seq_compressed)
-                tensor_args_indices.append(0)
                 input_args.append(None)
             else:
                 input_args.append(x_seq_compressed)
             for i, arg in enumerate(args):
                 if torch.is_tensor(arg):
                     tensor_args.append(arg)
-                    tensor_args_indices.append(i + 1)
+                    tensor_args_indices.append(i)
                     input_args.append(None)
                 else:
                     input_args.append(arg)
@@ -51,13 +49,12 @@ class SNNCheckpointingBlock(autograd.Function):
         grads = [None] * cnt_input
 
         if any(ctx.needs_input_grad):
-            if ctx.input_args[0] is None:  # x_seq_compressed is a tensor
+            x_seq_compressed, *args = ctx.input_args
+            if x_seq_compressed is None:  # x_seq_compressed is a tensor
                 x_seq_compressed, *tensor_args = ctx.saved_tensors
             else:
-                x_seq_compressed = ctx.input_args[0]
-                tensor_args = ctx.saved_tensors
-            tensor_args_indices = ctx.tensor_args_indices
-            args = ctx.input_args
+                tensor_args = ctx.saved_tensors  # tensors in (*args,)
+            tensor_args_indices = ctx.tensor_args_indices  # idx of the tensors in (*args,)
             x_seq_shape = ctx.x_seq_shape
 
             with torch.set_grad_enabled(True):
@@ -67,14 +64,11 @@ class SNNCheckpointingBlock(autograd.Function):
                     )
                     x_seq = x_seq.detach().requires_grad_(True)
                     for i, idx in enumerate(tensor_args_indices):
-                        if idx == 0:  # x_seq_compressed, skip
-                            continue
                         rg = (
                             ctx.needs_input_grad[idx + 3] and
                             tensor_args[i].requires_grad
                         )
-                        args[idx -
-                             1] = tensor_args[i].detach().requires_grad_(rg)
+                        args[idx] = tensor_args[i].detach().requires_grad_(rg)
                     y_seq = ctx.forward_function(x_seq, *args, in_backward=True)
                 y_seq.backward(grad_y_seq)
 
