@@ -38,7 +38,7 @@ def test_linear_lif_address_referenced():
     x = torch.randn(T, N, C) + 0.6
     print(f"network input: {x.data_ptr()}")
 
-    h_quantizer_type = "IdentityHQuantizer"
+    h_quantizer_type = "NullHQuantizer"
     net = nn.Sequential(
         LinearLIF(
             proj=nn.Linear(C, C),

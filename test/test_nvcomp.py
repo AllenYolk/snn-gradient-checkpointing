@@ -75,7 +75,7 @@ def test_function():
 
 def test_class():
     torch.manual_seed(2025)
-    x_f32 = torch.rand((31, 1024), device='cuda', dtype=torch.float32)
+    x_f32 = torch.rand((31, 23), device='cuda', dtype=torch.float32)
     x_i64 = (x_f32 > 0.8).to(torch.int64)
     print("Original dtype:", x_i64.dtype)
     print("Original size (bytes):", x_i64.numel() * x_i64.element_size())
@@ -91,6 +91,6 @@ def test_class():
 
 
 if __name__ == "__main__":
-    test_manual()
+    # test_manual()
     test_function()
     test_class()

@@ -25,8 +25,8 @@ def get_h_quantizer(h_quantizer: str, **kwargs):
 
 class BaseHQuantizer(abc.ABC):
 
-    def __init__(self):
-        pass
+    def __init__(self, dtype=DEFAULT_HQ_DTYPE):
+        self.dtype = dtype
 
     @abc.abstractmethod
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
@@ -45,7 +45,7 @@ class BaseHQuantizer(abc.ABC):
             return self._dequantize(x_seq)
 
 
-class IdentityHQuantizer(BaseHQuantizer):
+class NullHQuantizer(BaseHQuantizer):
 
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -57,6 +57,19 @@ class IdentityHQuantizer(BaseHQuantizer):
         return x_seq
 
 
+class TypecastHQuantizer(BaseHQuantizer):
+
+    def __init__(self, dtype, *args, **kwargs):
+        super().__init__(dtype=dtype)
+
+    def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
+        self.original_dtype = x_seq.dtype
+        return x_seq.to(dtype=self.dtype)
+
+    def _dequantize(self, x_seq: torch.Tensor) -> torch.Tensor:
+        return x_seq.to(dtype=self.original_dtype)
+
+
 class ClampProjHQuantizer(BaseHQuantizer):
 
     def __init__(
@@ -65,11 +78,10 @@ class ClampProjHQuantizer(BaseHQuantizer):
         dtype=DEFAULT_HQ_DTYPE,
         verbose=False
     ):
-        super().__init__()
+        super().__init__(dtype=dtype)
         self.clamp_abs = clamp_abs
         assert self.clamp_abs > 0
 
-        self.dtype = dtype
         if torch.is_floating_point(torch.tensor(0, dtype=dtype)):
             dtype_info = torch.finfo(dtype)
         else:
