@@ -174,7 +174,6 @@ def parse_args():
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-mm", "--monitor_memory", action='store_true')
-    parser.add_argument("-hq", "--h_quantization", action='store_true')
 
     args = parser.parse_args()
     return args
@@ -294,10 +293,6 @@ def main():
         decay_lambda=args.decay_lambda,
         T=32,  # for PSN
         k=8,  # for SlidingPSN
-        h_quantizer=(
-            get_h_quantizer("ClampProjHQuantizer")
-            if args.h_quantization else None
-        ),
     )
     print(net)
     net = net.to(args.device)

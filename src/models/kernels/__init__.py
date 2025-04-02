@@ -31,6 +31,12 @@ api = {
         handwritten_lif_backward_not_detached_compiled,
     "handwritten_lif_backward_detached":
         handwritten_lif_backward_detached_compiled,
+    "handwritten_hqlif_forward":
+        handwritten_hqlif_forward_compiled,
+    "handwritten_hqlif_backward_not_detached":
+        handwritten_hqlif_backward_not_detached_compiled,
+    "handwritten_hqlif_backward_detached":
+        handwritten_hqlif_backward_detached_compiled,
     "psn_forward":
         psn_forward_compiled,
     "sliding_psn_forward":
@@ -60,6 +66,11 @@ handwritten_lif_backward_not_detached = (
     api["handwritten_lif_backward_not_detached"]
 )
 handwritten_lif_backward_detached = api["handwritten_lif_backward_detached"]
+handwritten_hqlif_forward = api["handwritten_hqlif_forward"]
+handwritten_hqlif_backward_not_detached = (
+    api["handwritten_hqlif_backward_not_detached"]
+)
+handwritten_hqlif_backward_detached = api["handwritten_hqlif_backward_detached"]
 psn_forward = api["psn_forward"]
 sliding_psn_forward = api["sliding_psn_forward"]
 

@@ -228,6 +228,55 @@ def handwritten_lif_backward_detached_compiled(
 
 
 @_conditional_compile()
+def handwritten_hqlif_forward_compiled(x_seq, decay_lambda, h_quantizer):
+    T = x_seq.shape[0]
+
+    v = torch.zeros_like(x_seq[0])  # hidden state
+    hq_seq = torch.empty_like(x_seq, dtype=h_quantizer.dtype)
+    s_seq = torch.empty_like(x_seq)
+    for t in range(T):
+        x = x_seq[t]
+        h = decay_lambda*v + x
+        s = (h >= 1.).to(h)
+        v = h * (1.-s)
+        s_seq[t] = s
+        hq_seq[t] = h_quantizer.quantize(h)
+    return s_seq, hq_seq
+
+
+@_conditional_compile()
+def handwritten_hqlif_backward_not_detached_compiled(
+    grad_s_seq, hq_seq, decay_lambda, T, h_quantizer
+):
+    grad_x_seq = torch.empty_like(grad_s_seq)
+    grad_v = 0.
+    for t in range(T - 1, -1, -1):
+        grad_s = grad_s_seq[t]
+        h = h_quantizer.dequantize(hq_seq[t])
+        sg = 1. / (1. + (torch.pi * (h-1.)).pow_(2))
+        grad_v = (grad_s - grad_v*h) * sg + grad_v * (1 - (h >= 1.).to(h))
+        grad_x_seq[t] = grad_v
+        grad_v *= decay_lambda
+    return grad_x_seq
+
+
+@_conditional_compile()
+def handwritten_hqlif_backward_detached_compiled(
+    grad_s_seq, hq_seq, decay_lambda, T, h_quantizer
+):
+    grad_x_seq = torch.empty_like(grad_s_seq)
+    grad_v = 0.
+    for t in range(T - 1, -1, -1):
+        grad_s = grad_s_seq[t]
+        h = h_quantizer.dequantize(hq_seq[t])
+        sg = 1. / (1. + (torch.pi * (h-1.)).pow_(2))
+        grad_v = grad_s*sg + grad_v * (1 - (h >= 1.).to(h))
+        grad_x_seq[t] = grad_v
+        grad_v *= decay_lambda
+    return grad_x_seq
+
+
+@_conditional_compile()
 def psn_forward_compiled(x_seq, weight, bias):
     # x_seq.shape = [T, N, ...]; weight.shape = [T, T]; bias.shape = [T, 1]
     h_seq = torch.addmm(bias, weight, x_seq.flatten(1))

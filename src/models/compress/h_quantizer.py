@@ -49,6 +49,7 @@ class NullHQuantizer(BaseHQuantizer):
 
     def __init__(self, *args, **kwargs):
         super().__init__()
+        self.dtype = torch.float32 if is_autocast_enabled() else AUTOCAST_DTYPE
 
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
         return x_seq
@@ -59,7 +60,7 @@ class NullHQuantizer(BaseHQuantizer):
 
 class TypecastHQuantizer(BaseHQuantizer):
 
-    def __init__(self, dtype, *args, **kwargs):
+    def __init__(self, dtype=DEFAULT_HQ_DTYPE, *args, **kwargs):
         super().__init__(dtype=dtype)
 
     def _quantize(self, x_seq: torch.Tensor) -> torch.Tensor:
@@ -127,3 +128,12 @@ class ClampProjHQuantizer(BaseHQuantizer):
         # inverse shift
         x_seq = x_seq + self.shift
         return x_seq
+
+    def __repr__(self):
+        return (
+            f"ClampProjHQuantizer(clamp_abs={self.clamp_abs}, "
+            f"dtype={self.dtype})"
+        )
+
+    def __str__(self):
+        return self.__repr__()
