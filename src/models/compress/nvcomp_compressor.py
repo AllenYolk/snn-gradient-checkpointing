@@ -17,13 +17,15 @@ try:
     def torch_type_to_nvcomp_type(dtype):
         return NVCOMP_TYPE_DICT.get(dtype, dtype)
 
-    DEFAULT_NVCOMP_CODEC_ALGORITHM = "Zstd"
+    DEFAULT_NVCOMP_CODEC_ALGORITHM = "LZ4"
     DEFAULT_NVCOMP_CODEC_KWARGS = {}
 
     NVCOMP_CHUNK_SIZE_BYTES = 16777216
     NVCOMP_NEED_CHUNK = {
-        "Zstd": True,
+        "LZ4": True,
+        "Zstd": False,
         "ANS": True,
+        "Bitcomp": True,
     }
 
     # ===================== functional interface ======================
@@ -106,19 +108,39 @@ try:
             )
 
         def compress(self, x: torch.Tensor) -> nvcomp.Array:
+            x_size_byte = x.numel() * x.element_size()
             y = torch.tensor((), device=x.device, dtype=self.compressed_dtype)
             y = y.set_(
                 x.untyped_storage(),
                 x.storage_offset(),
-                (x.numel() * x.element_size() // y.element_size(),),
+                (x_size_byte // y.element_size(),),
             )
-            y = nvcomp.as_array(y)
+
+            if (
+                x_size_byte > NVCOMP_CHUNK_SIZE_BYTES and
+                NVCOMP_NEED_CHUNK[self.algorithm]
+            ):
+                y = torch.split(y, NVCOMP_CHUNK_SIZE_BYTES)
+                y = [nvcomp.as_array(chunk) for chunk in y]
+            else:
+                y = nvcomp.as_array(y)
 
             return self.codec.encode(y)
 
-        def decompress(self, x: nvcomp.Array, target_shape, target_dtype):
+        def decompress(
+            self,
+            x: Union[nvcomp.Array, Sequence[nvcomp.Array]],
+            target_shape,
+            target_dtype,
+        ):
             x = self.codec.decode(x)
-            x = torch.from_dlpack(x.to_dlpack())
+
+            if isinstance(x, nvcomp.Array):
+                x = torch.from_dlpack(x.to_dlpack())
+            else:
+                x = [torch.from_dlpack(chunk.to_dlpack()) for chunk in x]
+                x = torch.cat(x, dim=0)
+
             y = torch.tensor((), dtype=target_dtype, device=x.device)
             y = y.set_(
                 x.untyped_storage(),

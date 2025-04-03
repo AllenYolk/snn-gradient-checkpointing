@@ -137,12 +137,39 @@ class BitSpikeCompressor(BaseSpikeCompressor):
         return s_seq_compressed.to(dtype=decompressed_type)
 
 
+class NvcompSpikeCompressor(BaseSpikeCompressor):
+
+    def __init__(self):
+        super().__init__()
+        self.codec = NvcompCompressor(
+            algorithm=DEFAULT_NVCOMP_CODEC_ALGORITHM,
+            compressed_dtype=torch.uint8
+        )
+
+    def _compress(self, s_seq: torch.Tensor) -> nvcomp.Array:
+        s_seq = s_seq.reshape(-1)
+        self.target_dtype = s_seq.dtype
+        s_seq_compressed = self.codec.compress(s_seq)
+        return s_seq_compressed
+
+    def _decompress(self, s_seq: nvcomp.Array, shape) -> torch.Tensor:
+        s_seq = self.codec.decompress(
+            s_seq, target_shape=(-1,), target_dtype=self.target_dtype
+        )
+        s_seq_compressed = s_seq.reshape(shape)
+
+        ac = is_autocast_enabled()
+        decompressed_type = AUTOCAST_DTYPE if ac else torch.float32
+        return s_seq_compressed.to(dtype=decompressed_type)
+
+
 class BitNvcompSpikeCompressor(BaseSpikeCompressor):
 
     def __init__(self):
         super().__init__()
         self.codec = NvcompCompressor(
-            algorithm="Zstd", compressed_dtype=torch.uint8
+            algorithm=DEFAULT_NVCOMP_CODEC_ALGORITHM,
+            compressed_dtype=torch.uint8
         )
 
     def _compress(self, s_seq: torch.Tensor) -> nvcomp.Array:
