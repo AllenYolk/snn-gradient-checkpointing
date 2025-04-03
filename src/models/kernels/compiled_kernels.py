@@ -250,9 +250,9 @@ def handwritten_hqlif_backward_not_detached_compiled(
     grad_v = 0.
     for t in range(T - 1, -1, -1):
         grad_s = grad_s_seq[t]
-        h = h_quantizer.dequantize(ot_seq[t]) + 1.
-        grad_v = ((grad_s - grad_v*h) / (1. + (torch.pi * (h-1.)).pow_(2)) +
-                  grad_v * (1 - (h >= 1.).to(h)))
+        ot = h_quantizer.dequantize(ot_seq[t])
+        grad_v = ((grad_s - grad_v * (ot+1.)) / (1. + (torch.pi * ot).pow_(2)) +
+                  grad_v * (1 - (ot >= 0.).to(ot)))
         grad_x_seq[t] = grad_v
         grad_v *= decay_lambda
     return grad_x_seq
@@ -266,10 +266,10 @@ def handwritten_hqlif_backward_detached_compiled(
     grad_v = 0.
     for t in range(T - 1, -1, -1):
         grad_s = grad_s_seq[t]
-        h = h_quantizer.dequantize(ot_seq[t]) + 1.
+        ot = h_quantizer.dequantize(ot_seq[t])
         grad_v = (
-            grad_s / (1. + (torch.pi * (h-1.)).pow_(2)) + grad_v *
-            (1 - (h >= 1.).to(h))
+            grad_s / (1. + (torch.pi * ot).pow_(2)) + grad_v *
+            (1 - (ot >= 0.).to(ot))
         )
         grad_x_seq[t] = grad_v
         grad_v *= decay_lambda
