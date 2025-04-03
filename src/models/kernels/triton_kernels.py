@@ -450,10 +450,8 @@ try:
         BLOCK_NCL: tl.constexpr,
     ):
         pid_ncl = tl.program_id(0)
-        ncl_indices = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
-
-        x_offsets_per_time_step = ncl_indices
-        mask_x = ncl_indices < NCL
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
 
         v = tl.zeros([BLOCK_NCL], dtype=tl.float32)
         for t in range(0, T, 1):
@@ -488,10 +486,8 @@ try:
         BLOCK_NCL: tl.constexpr,
     ):
         pid_ncl = tl.program_id(0)
-        ncl_indices = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
-
-        x_offsets_per_time_step = ncl_indices
-        mask_x = ncl_indices < NCL
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
 
         v = tl.zeros([BLOCK_NCL], dtype=tl.float32)
         for t in range(0, T, 1):
@@ -513,6 +509,172 @@ try:
             tl.store(ot_ptrs, ot, mask=mask_x)
 
     @triton.jit
+    def _handwritten_hqlif_forward_triton_float16_float16(
+        x_seq_ptr,
+        s_seq_ptr,
+        ot_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        clamp_abs,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        v = tl.zeros([BLOCK_NCL], dtype=tl.float16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.float16)
+        one = tl.full([1], 1., dtype=tl.float16)
+        scale = tl.full([1], scale, dtype=tl.float16)
+        shift = tl.full([1], shift, dtype=tl.float16)
+        clamp_abs = tl.full([1], clamp_abs, dtype=tl.float16)
+        for t in range(0, T, 1):
+            x_ptrs = x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            x = tl.load(x_ptrs, mask=mask_x, other=0.)
+
+            h = decay_lambda*v + x
+            s = tl.where(h >= 1., 1., 0).to(tl.float16)
+            v = h * (one-s)
+
+            s_ptrs = s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(s_ptrs, s, mask=mask_x)
+
+            ot = h - one
+            ot = tl.clamp(ot - shift, -clamp_abs, clamp_abs) * scale
+            ot = tl.cast(ot, tl.float16)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(ot_ptrs, ot, mask=mask_x)
+
+    @triton.jit
+    def _handwritten_hqlif_forward_triton_float16_float8e4m3fn(
+        x_seq_ptr,
+        s_seq_ptr,
+        ot_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        clamp_abs,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        v = tl.zeros([BLOCK_NCL], dtype=tl.float16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.float16)
+        one = tl.full([1], 1., dtype=tl.float16)
+        scale = tl.full([1], scale, dtype=tl.float16)
+        shift = tl.full([1], shift, dtype=tl.float16)
+        clamp_abs = tl.full([1], clamp_abs, dtype=tl.float16)
+        for t in range(0, T, 1):
+            x_ptrs = x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            x = tl.load(x_ptrs, mask=mask_x, other=0.)
+
+            h = decay_lambda*v + x
+            s = tl.where(h >= 1., 1., 0).to(tl.float16)
+            v = h * (one-s)
+
+            s_ptrs = s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(s_ptrs, s, mask=mask_x)
+
+            # quantize ot
+            ot = h - one
+            ot = tl.clamp(ot - shift, -clamp_abs, clamp_abs) * scale
+            ot = tl.cast(ot, tl.float8e4b8)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(ot_ptrs, ot, mask=mask_x)
+
+    @triton.jit
+    def _handwritten_hqlif_forward_triton_bfloat16_float16(
+        x_seq_ptr,
+        s_seq_ptr,
+        ot_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        clamp_abs,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        v = tl.zeros([BLOCK_NCL], dtype=tl.bfloat16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.bfloat16)
+        one = tl.full([1], 1., dtype=tl.bfloat16)
+        scale = tl.full([1], scale, dtype=tl.bfloat16)
+        shift = tl.full([1], shift, dtype=tl.bfloat16)
+        clamp_abs = tl.full([1], clamp_abs, dtype=tl.bfloat16)
+        for t in range(0, T, 1):
+            x_ptrs = x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            x = tl.load(x_ptrs, mask=mask_x, other=0.)
+
+            h = decay_lambda*v + x
+            s = tl.where(h >= 1., 1., 0).to(tl.bfloat16)
+            v = h * (one-s)
+
+            s_ptrs = s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(s_ptrs, s, mask=mask_x)
+
+            ot = h - one
+            ot = tl.clamp(ot - shift, -clamp_abs, clamp_abs) * scale
+            ot = tl.cast(ot, tl.float16)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(ot_ptrs, ot, mask=mask_x)
+
+    @triton.jit
+    def _handwritten_hqlif_forward_triton_bfloat16_float8e4m3fn(
+        x_seq_ptr,
+        s_seq_ptr,
+        ot_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        clamp_abs,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        v = tl.zeros([BLOCK_NCL], dtype=tl.bfloat16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.bfloat16)
+        one = tl.full([1], 1., dtype=tl.bfloat16)
+        scale = tl.full([1], scale, dtype=tl.bfloat16)
+        shift = tl.full([1], shift, dtype=tl.bfloat16)
+        clamp_abs = tl.full([1], clamp_abs, dtype=tl.bfloat16)
+        for t in range(0, T, 1):
+            x_ptrs = x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            x = tl.load(x_ptrs, mask=mask_x, other=0.)
+
+            h = decay_lambda*v + x
+            s = tl.where(h >= 1., 1., 0).to(tl.bfloat16)
+            v = h * (one-s)
+
+            s_ptrs = s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(s_ptrs, s, mask=mask_x)
+
+            # quantize ot
+            ot = h - one
+            ot = tl.clamp(ot - shift, -clamp_abs, clamp_abs) * scale
+            ot = tl.cast(ot, tl.float8e4b8)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(ot_ptrs, ot, mask=mask_x)
+
+    @triton.jit
     def _handwritten_hqlif_backward_not_detached_triton_float32(
         grad_s_seq_ptr,
         ot_seq_ptr,
@@ -527,10 +689,8 @@ try:
         BLOCK_NCL: tl.constexpr,
     ):
         pid_ncl = tl.program_id(0)
-        ncl_indices = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
-
-        x_offsets_per_time_step = ncl_indices
-        mask_x = ncl_indices < NCL
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
 
         grad_v = tl.zeros([BLOCK_NCL], dtype=tl.float32)
         for t in range(T - 1, -1, -1):
@@ -547,6 +707,92 @@ try:
 
             sg = pi * ot
             grad_v = (grad_s - grad_v * (ot+1.)) / (1. + sg*sg) + grad_v * (1-s)
+
+            grad_x_ptrs = grad_x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(grad_x_ptrs, grad_v, mask=mask_x)
+            grad_v = grad_v * decay_lambda
+
+    @triton.jit
+    def _handwritten_hqlif_backward_not_detached_triton_float16(
+        grad_s_seq_ptr,
+        ot_seq_ptr,
+        grad_x_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        pi,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        grad_v = tl.zeros([BLOCK_NCL], dtype=tl.float16)
+        pi = tl.full([1], pi, dtype=tl.float16)
+        one = tl.full([1], 1., dtype=tl.float16)
+        scale = tl.full([1], scale, dtype=tl.float16)
+        shift = tl.full([1], shift, dtype=tl.float16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.float16)
+        for t in range(T - 1, -1, -1):
+            grad_s_ptrs = grad_s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            grad_s = tl.load(grad_s_ptrs, mask=mask_x, other=0.)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            ot = tl.load(ot_ptrs, mask=mask_x, other=0.)
+            # dequantize ot
+            ot = tl.cast(ot, tl.float16)
+            ot = (ot/scale) + shift
+
+            s = tl.where(ot >= 0., 1., 0.).to(tl.float16)
+
+            sg = pi * ot
+            sg = (one / (one + sg*sg)).to(tl.float16)
+            grad_v = (grad_s - grad_v * (ot+one)) * sg + grad_v * (one-s)
+
+            grad_x_ptrs = grad_x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(grad_x_ptrs, grad_v, mask=mask_x)
+            grad_v = grad_v * decay_lambda
+
+    @triton.jit
+    def _handwritten_hqlif_backward_not_detached_triton_bfloat16(
+        grad_s_seq_ptr,
+        ot_seq_ptr,
+        grad_x_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        pi,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        grad_v = tl.zeros([BLOCK_NCL], dtype=tl.bfloat16)
+        pi = tl.full([1], pi, dtype=tl.bfloat16)
+        one = tl.full([1], 1., dtype=tl.bfloat16)
+        scale = tl.full([1], scale, dtype=tl.bfloat16)
+        shift = tl.full([1], shift, dtype=tl.bfloat16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.bfloat16)
+        for t in range(T - 1, -1, -1):
+            grad_s_ptrs = grad_s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            grad_s = tl.load(grad_s_ptrs, mask=mask_x, other=0.)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            ot = tl.load(ot_ptrs, mask=mask_x, other=0.)
+            # dequantize ot
+            ot = tl.cast(ot, tl.bfloat16)
+            ot = (ot/scale) + shift
+
+            s = tl.where(ot >= 0., 1., 0.).to(tl.bfloat16)
+
+            sg = pi * ot
+            sg = (one / (one + sg*sg)).to(tl.bfloat16)
+            grad_v = (grad_s - grad_v * (ot+one)) * sg + grad_v * (one-s)
 
             grad_x_ptrs = grad_x_seq_ptr + t*T_stride + x_offsets_per_time_step
             tl.store(grad_x_ptrs, grad_v, mask=mask_x)
@@ -592,22 +838,123 @@ try:
             tl.store(grad_x_ptrs, grad_v, mask=mask_x)
             grad_v = grad_v * decay_lambda
 
+    @triton.jit
+    def _handwritten_hqlif_backward_detached_triton_float16(
+        grad_s_seq_ptr,
+        ot_seq_ptr,
+        grad_x_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        pi,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        grad_v = tl.zeros([BLOCK_NCL], dtype=tl.float16)
+        pi = tl.full([1], pi, dtype=tl.float16)
+        one = tl.full([1], 1., dtype=tl.float16)
+        scale = tl.full([1], scale, dtype=tl.float16)
+        shift = tl.full([1], shift, dtype=tl.float16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.float16)
+        for t in range(T - 1, -1, -1):
+            grad_s_ptrs = grad_s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            grad_s = tl.load(grad_s_ptrs, mask=mask_x, other=0.)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            ot = tl.load(ot_ptrs, mask=mask_x, other=0.)
+            # dequantize ot
+            ot = tl.cast(ot, tl.float16)
+            ot = (ot/scale) + shift
+
+            s = tl.where(ot >= 0., 1., 0.).to(tl.float16)
+
+            sg = pi * ot
+            sg = (one / (one + sg*sg)).to(tl.float16)
+            grad_v = grad_s*sg + grad_v * (one-s)
+
+            grad_x_ptrs = grad_x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(grad_x_ptrs, grad_v, mask=mask_x)
+            grad_v = grad_v * decay_lambda
+
+    @triton.jit
+    def _handwritten_hqlif_backward_detached_triton_bfloat16(
+        grad_s_seq_ptr,
+        ot_seq_ptr,
+        grad_x_seq_ptr,
+        T,
+        NCL,
+        T_stride,
+        decay_lambda,
+        pi,
+        shift,
+        scale,
+        BLOCK_NCL: tl.constexpr,
+    ):
+        pid_ncl = tl.program_id(0)
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        mask_x = x_offsets_per_time_step < NCL
+
+        grad_v = tl.zeros([BLOCK_NCL], dtype=tl.bfloat16)
+        pi = tl.full([1], pi, dtype=tl.bfloat16)
+        one = tl.full([1], 1., dtype=tl.bfloat16)
+        scale = tl.full([1], scale, dtype=tl.bfloat16)
+        shift = tl.full([1], shift, dtype=tl.bfloat16)
+        decay_lambda = tl.full([1], decay_lambda, dtype=tl.bfloat16)
+        for t in range(T - 1, -1, -1):
+            grad_s_ptrs = grad_s_seq_ptr + t*T_stride + x_offsets_per_time_step
+            grad_s = tl.load(grad_s_ptrs, mask=mask_x, other=0.)
+            ot_ptrs = ot_seq_ptr + t*T_stride + x_offsets_per_time_step
+            ot = tl.load(ot_ptrs, mask=mask_x, other=0.)
+            # dequantize ot
+            ot = tl.cast(ot, tl.bfloat16)
+            ot = (ot/scale) + shift
+
+            s = tl.where(ot >= 0., 1., 0.).to(tl.bfloat16)
+
+            sg = pi * ot
+            sg = (one / (one + sg*sg)).to(tl.bfloat16)
+            grad_v = grad_s*sg + grad_v * (one-s)
+
+            grad_x_ptrs = grad_x_seq_ptr + t*T_stride + x_offsets_per_time_step
+            tl.store(grad_x_ptrs, grad_v, mask=mask_x)
+            grad_v = grad_v * decay_lambda
+
     _handwritten_hqlif_forward_triton_kernel = {
         (torch.float32, torch.float16):
             _handwritten_hqlif_forward_triton_float32_float16,
+        (torch.float16, torch.float16):
+            _handwritten_hqlif_forward_triton_float16_float16,
+        (torch.bfloat16, torch.float16):
+            _handwritten_hqlif_forward_triton_bfloat16_float16,
     }
     if FLOAT8_AVAILABLE:
         _handwritten_hqlif_forward_triton_kernel.update({
             (torch.float32, torch.float8_e4m3fn):
                 _handwritten_hqlif_forward_triton_float32_float8e4m3fn,
+            (torch.float16, torch.float8_e4m3fn):
+                _handwritten_hqlif_forward_triton_float16_float8e4m3fn,
+            (torch.bfloat16, torch.float8_e4m3fn):
+                _handwritten_hqlif_forward_triton_bfloat16_float8e4m3fn,
         })
 
     _handwritten_hqlif_backward_not_detached_triton_kernel = {
-        torch.float32: _handwritten_hqlif_backward_not_detached_triton_float32,
+        torch.float32:
+            _handwritten_hqlif_backward_not_detached_triton_float32,
+        torch.float16:
+            _handwritten_hqlif_backward_not_detached_triton_float16,
+        torch.bfloat16:
+            _handwritten_hqlif_backward_not_detached_triton_bfloat16,
     }
 
     _handwritten_hqlif_backward_detached_triton_kernel = {
         torch.float32: _handwritten_hqlif_backward_detached_triton_float32,
+        torch.float16: _handwritten_hqlif_backward_detached_triton_float16,
+        torch.bfloat16: _handwritten_hqlif_backward_detached_triton_bfloat16,
     }
 
     def handwritten_hqlif_forward_triton(
