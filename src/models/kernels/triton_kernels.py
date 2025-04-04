@@ -12,7 +12,7 @@ try:
         torch.float16: tl.float16,
     }
     dc = torch.cuda.get_device_capability()
-    if dc[0] < 8:
+    if dc[0] < 8 or not hasattr(tl, "bfloat16"):
         print(
             "Triton kernel with bfloat16 is not supported on devices "
             "with compute capability < 8.0. "
@@ -22,7 +22,7 @@ try:
     else:
         TRITON_BFLOAT16_AVAILABLE = True
         type_dict[torch.bfloat16] = tl.bfloat16
-    if float(f"{dc[0]}.{dc[1]}") < 8.9:
+    if float(f"{dc[0]}.{dc[1]}") < 8.9 or not hasattr(tl, "float8e4b8"):
         print(
             "Triton kernel with float8e4b8 (float8_e4m3fn) is not supported on "
             "devices with compute capability < 8.9. "
@@ -164,7 +164,7 @@ try:
                 NCL,
                 x_seq.stride(0),
                 decay_lambda,
-                dtype,
+                type_dict[dtype],
                 BLOCK_NCL=block_ncl
             )
         return s_seq, h_seq
