@@ -54,7 +54,7 @@ if TRITON_AVAILABLE:
         handwritten_lif_backward_detached_triton
     )
 
-    if DEFAULT_HQ_DTYPE == torch.float16 or TRITON_BFLOAT8E4B8_AVAILABLE:
+    if DEFAULT_HQ_DTYPE == torch.float16 or TRITON_FLOAT8E4B8_AVAILABLE:
         print("Using Triton kernels for HQLIF.")
         api["handwritten_hqlif_forward"] = handwritten_hqlif_forward_triton
         api["handwritten_hqlif_backward_not_detached"] = (

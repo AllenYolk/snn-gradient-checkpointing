@@ -7,6 +7,10 @@ try:
 
     TRITON_AVAILABLE = True
 
+    type_dict = {
+        torch.float32: tl.float32,
+        torch.float16: tl.float16,
+    }
     dc = torch.cuda.get_device_capability()
     if dc[0] < 8:
         print(
@@ -17,15 +21,17 @@ try:
         TRITON_BFLOAT16_AVAILABLE = False
     else:
         TRITON_BFLOAT16_AVAILABLE = True
+        type_dict[torch.bfloat16] = tl.bfloat16
     if float(f"{dc[0]}.{dc[1]}") < 8.9:
         print(
             "Triton kernel with float8e4b8 (float8_e4m3fn) is not supported on "
             "devices with compute capability < 8.9. "
             f"Your devices's capability is: {dc}."
         )
-        TRITON_BFLOAT8E4B8_AVAILABLE = False
+        TRITON_FLOAT8E4B8_AVAILABLE = False
     else:
-        TRITON_BFLOAT8E4B8_AVAILABLE = True
+        TRITON_FLOAT8E4B8_AVAILABLE = True
+        type_dict[torch.float8_e4m3fn] = tl.float8e4b8
 
     @triton.jit
     def _handwritten_lif_forward_triton(
@@ -187,7 +193,7 @@ try:
                 grad_s_seq.stride(0),
                 decay_lambda,
                 torch.pi,
-                dtype,
+                type_dict[dtype],
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
@@ -216,7 +222,7 @@ try:
                 grad_s_seq.stride(0),
                 decay_lambda,
                 torch.pi,
-                dtype,
+                type_dict[dtype],
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
@@ -393,8 +399,8 @@ try:
                 h_quantizer.clamp_abs,
                 h_quantizer.shift,
                 h_quantizer.scale,
-                dtype,
-                cdtype,
+                type_dict[dtype],
+                type_dict[cdtype],
                 BLOCK_NCL=block_ncl
             )
         return s_seq, ot_seq
@@ -425,7 +431,7 @@ try:
                 torch.pi,
                 h_quantizer.shift,
                 h_quantizer.scale,
-                dtype,
+                type_dict[dtype],
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
@@ -456,7 +462,7 @@ try:
                 torch.pi,
                 h_quantizer.shift,
                 h_quantizer.scale,
-                dtype,
+                type_dict[dtype],
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
