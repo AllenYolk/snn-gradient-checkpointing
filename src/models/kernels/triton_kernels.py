@@ -22,17 +22,17 @@ try:
         type_dict[torch.bfloat16] = tl.bfloat16
 
     TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
-    if float(f"{dc[0]}.{dc[1]}") < 8.9 or not hasattr(tl, "float8e4b8"):
+    if float(f"{dc[0]}.{dc[1]}") < 8.9 or not hasattr(tl, "float8e4nv"):
         print(
-            "Triton kernel with float8e4b8 (float8_e4m3fn) is not supported on "
+            "Triton kernel with float8e4nv (float8_e4m3fn) is not supported on "
             "devices with compute capability < 8.9. "
             f"Your devices's capability is: {dc}."
         )
-        TRITON_FLOAT8E4B8_AVAILABLE = False
+        TRITON_FLOAT8E4NV_AVAILABLE = False
     else:
-        TRITON_FLOAT8E4B8_AVAILABLE = True
+        TRITON_FLOAT8E4NV_AVAILABLE = True
         if TORCH_FLOAT8E4M3FN_AVAILABLE:
-            type_dict[torch.float8_e4m3fn] = tl.float8e4b8
+            type_dict[torch.float8_e4m3fn] = tl.float8e4nv
 
     DEFAULT_BLOCK_SIZE = 512
     assert DEFAULT_BLOCK_SIZE % 8 == 0, "BLOCK_SIZE must be dividable by 8"
@@ -275,7 +275,7 @@ try:
             # quantize ot
             ot = h - one
             ot = tl.clamp(ot - shift, -clamp_abs, clamp_abs) * scale
-            ot = ot.to(compressed_dtype)
+            ot = ot.to(compressed_dtype, fp_downcast_rounding="rtne")
             ot_ptrs = ot_seq_ptr + x_offsets
             tl.store(ot_ptrs, ot, mask=mask_x)
 
@@ -590,6 +590,6 @@ try:
 except Exception as e:
     TRITON_AVAILABLE = False
     TRITON_BFLOAT16_AVAILABLE = False
-    TRITON_FLOAT8E4B8_AVAILABLE = False
+    TRITON_FLOAT8E4NV_AVAILABLE = False
     TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
     print(f"triton is not available. {e}")

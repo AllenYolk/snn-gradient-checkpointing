@@ -64,7 +64,7 @@ else:
     print("Using torch kernels for BitSpikeCompressor.")
     print("Using torch kernels for HandWrittenLIF.")
 
-if TRITON_FLOAT8E4B8_AVAILABLE or (
+if TRITON_FLOAT8E4NV_AVAILABLE or (
     TRITON_AVAILABLE and (not TORCH_FLOAT8E4M3FN_AVAILABLE)
 ):
     print("Using Triton kernels for HQLIF.")
