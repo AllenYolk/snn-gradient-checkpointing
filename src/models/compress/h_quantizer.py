@@ -7,15 +7,14 @@ from ..amp import AUTOCAST_DTYPE, is_autocast_enabled
 MIN_POS_FLOAT = {
     torch.float16: 2**(-24),
 }
-if hasattr(torch, "float8_e4m3fn"):
-    FLOAT8_AVAILABLE = True
+TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
+if TORCH_FLOAT8E4M3FN_AVAILABLE:
     MIN_POS_FLOAT.update({
         torch.float8_e4m3fn: 2**(-9),
         torch.float8_e5m2: 2**(-16),
     })
     DEFAULT_HQ_DTYPE = torch.float8_e4m3fn
 else:
-    FLOAT8_AVAILABLE = False
     DEFAULT_HQ_DTYPE = torch.float16
 print("DEFAULT_HQ_DTYPE:", DEFAULT_HQ_DTYPE)
 

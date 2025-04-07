@@ -3,8 +3,6 @@ try:
     import triton.language as tl
     import torch
 
-    from ..compress import ClampProjHQuantizer, FLOAT8_AVAILABLE
-
     TRITON_AVAILABLE = True
 
     type_dict = {
@@ -22,6 +20,8 @@ try:
     else:
         TRITON_BFLOAT16_AVAILABLE = True
         type_dict[torch.bfloat16] = tl.bfloat16
+
+    TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
     if float(f"{dc[0]}.{dc[1]}") < 8.9 or not hasattr(tl, "float8e4b8"):
         print(
             "Triton kernel with float8e4b8 (float8_e4m3fn) is not supported on "
@@ -31,7 +31,8 @@ try:
         TRITON_FLOAT8E4B8_AVAILABLE = False
     else:
         TRITON_FLOAT8E4B8_AVAILABLE = True
-        type_dict[torch.float8_e4m3fn] = tl.float8e4b8
+        if TORCH_FLOAT8E4M3FN_AVAILABLE:
+            type_dict[torch.float8_e4m3fn] = tl.float8e4b8
 
     @triton.jit
     def _handwritten_lif_forward_triton(
@@ -373,7 +374,7 @@ try:
         s_seq = torch.empty_like(x_seq)
         ot_seq = torch.empty_like(x_seq, dtype=h_quantizer.dtype)
 
-        if not isinstance(h_quantizer, ClampProjHQuantizer):
+        if not hasattr(h_quantizer, "clamp_abs"):
             raise ValueError(
                 "Only ClampProjHQuantizer is supported for Triton kernel."
             )
@@ -469,4 +470,7 @@ try:
 
 except Exception as e:
     TRITON_AVAILABLE = False
+    TRITON_BFLOAT16_AVAILABLE = False
+    TRITON_FLOAT8E4B8_AVAILABLE = False
+    TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
     print(f"triton is not available. {e}")

@@ -6,7 +6,6 @@ Two types of kernels are provided:
 """
 from .compiled_kernels import *
 from .triton_kernels import *
-from ..compress import DEFAULT_HQ_DTYPE
 
 # api dict
 api = {
@@ -53,16 +52,22 @@ if TRITON_AVAILABLE:
     api["handwritten_lif_backward_detached"] = (
         handwritten_lif_backward_detached_triton
     )
+else:
+    print("Using torch kernels for HandWrittenLIF.")
 
-    if DEFAULT_HQ_DTYPE == torch.float16 or TRITON_FLOAT8E4B8_AVAILABLE:
-        print("Using Triton kernels for HQLIF.")
-        api["handwritten_hqlif_forward"] = handwritten_hqlif_forward_triton
-        api["handwritten_hqlif_backward_not_detached"] = (
-            handwritten_hqlif_backward_not_detached_triton
-        )
-        api["handwritten_hqlif_backward_detached"] = (
-            handwritten_hqlif_backward_detached_triton
-        )
+if TRITON_FLOAT8E4B8_AVAILABLE or (
+    TRITON_AVAILABLE and (not TORCH_FLOAT8E4M3FN_AVAILABLE)
+):
+    print("Using Triton kernels for HQLIF.")
+    api["handwritten_hqlif_forward"] = handwritten_hqlif_forward_triton
+    api["handwritten_hqlif_backward_not_detached"] = (
+        handwritten_hqlif_backward_not_detached_triton
+    )
+    api["handwritten_hqlif_backward_detached"] = (
+        handwritten_hqlif_backward_detached_triton
+    )
+else:
+    print("Using torch kernels for HQLIF.")
 
 linear_forward = api["linear_forward"]
 linear_bn_forward = api["linear_bn_forward"]
