@@ -34,6 +34,9 @@ try:
         if TORCH_FLOAT8E4M3FN_AVAILABLE:
             type_dict[torch.float8_e4m3fn] = tl.float8e4b8
 
+    DEFAULT_BLOCK_SIZE = 512
+    assert DEFAULT_BLOCK_SIZE % 8 == 0, "BLOCK_SIZE must be dividable by 8"
+
     @triton.jit
     def _handwritten_lif_forward_triton(
         x_seq_ptr,
@@ -142,7 +145,9 @@ try:
             tl.store(grad_x_ptrs, grad_v, mask=mask_x)
             grad_v = grad_v * decay_lambda
 
-    def handwritten_lif_forward_triton(x_seq, decay_lambda, block_ncl=512):
+    def handwritten_lif_forward_triton(
+        x_seq, decay_lambda, block_ncl=DEFAULT_BLOCK_SIZE
+    ):
         T = x_seq.shape[0]
         NCL = x_seq[0].numel()
         grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
@@ -171,7 +176,7 @@ try:
         return s_seq, h_seq
 
     def handwritten_lif_backward_not_detached_triton(
-        grad_s_seq, h_seq, decay_lambda, T, block_ncl=512
+        grad_s_seq, h_seq, decay_lambda, T, block_ncl=DEFAULT_BLOCK_SIZE
     ):
         NCL = grad_s_seq[0].numel()
         grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
@@ -200,7 +205,7 @@ try:
         return grad_x_seq
 
     def handwritten_lif_backward_detached_triton(
-        grad_s_seq, h_seq, decay_lambda, T, block_ncl=512
+        grad_s_seq, h_seq, decay_lambda, T, block_ncl=DEFAULT_BLOCK_SIZE
     ):
         NCL = grad_s_seq[0].numel()
         grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
@@ -365,7 +370,7 @@ try:
             grad_v = grad_v * decay_lambda
 
     def handwritten_hqlif_forward_triton(
-        x_seq, decay_lambda, h_quantizer, block_ncl=512
+        x_seq, decay_lambda, h_quantizer, block_ncl=DEFAULT_BLOCK_SIZE
     ):
         T = x_seq.shape[0]
         NCL = x_seq[0].numel()
@@ -407,7 +412,12 @@ try:
         return s_seq, ot_seq
 
     def handwritten_hqlif_backward_not_detached_triton(
-        grad_s_seq, ot_seq, decay_lambda, T, h_quantizer, block_ncl=512
+        grad_s_seq,
+        ot_seq,
+        decay_lambda,
+        T,
+        h_quantizer,
+        block_ncl=DEFAULT_BLOCK_SIZE
     ):
         NCL = grad_s_seq[0].numel()
         grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
@@ -438,7 +448,12 @@ try:
         return grad_x_seq
 
     def handwritten_hqlif_backward_detached_triton(
-        grad_s_seq, ot_seq, decay_lambda, T, h_quantizer, block_ncl=512
+        grad_s_seq,
+        ot_seq,
+        decay_lambda,
+        T,
+        h_quantizer,
+        block_ncl=DEFAULT_BLOCK_SIZE
     ):
         NCL = grad_s_seq[0].numel()
         grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
@@ -467,6 +482,110 @@ try:
                 BLOCK_NCL=block_ncl
             )
         return grad_x_seq
+
+    # =========================== BitSpikeCompressor ===========================
+    @triton.jit
+    def _bit_spike_compress_triton(
+        s_seq_ptr,  # fp32, 0 or 1
+        s_seq_compressed_ptr,
+        n_elements,
+        n_compressed_elements,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        pid = tl.program_id(0)
+        store_offsets = pid*BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        store_mask = store_offsets < n_compressed_elements
+
+        s_seq_compressed = tl.zeros([
+            BLOCK_SIZE,
+        ], dtype=tl.uint8)
+
+        for i in tl.static_range(8):
+            load_offsets = i + store_offsets*8
+            load_mask = load_offsets < n_elements
+            s_seq = tl.load(s_seq_ptr + load_offsets, mask=load_mask, other=0.)
+            s_seq = tl.cast(s_seq, tl.uint8)
+            s_seq_compressed = s_seq_compressed | (s_seq << i)
+
+        tl.store(
+            s_seq_compressed_ptr + store_offsets,
+            s_seq_compressed,
+            mask=store_mask
+        )
+
+    @triton.jit
+    def _bit_spike_decompress_triton(
+        s_seq_compressed_ptr,
+        s_seq_decompressed_ptr,
+        n_compressed_elements,
+        n_decompressed_elements,
+        BLOCK_SIZE: tl.constexpr,  # must be dividable by 8
+    ):
+        pid = tl.program_id(0)
+        load_offsets = pid*BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        load_mask = load_offsets < n_compressed_elements
+
+        s_seq_compressed = tl.load(
+            s_seq_compressed_ptr + load_offsets,
+            mask=load_mask,
+            other=0,
+        )
+
+        for i in tl.static_range(8):
+            store_offsets = i + load_offsets*8
+            store_mask = store_offsets < n_decompressed_elements
+            tl.store(
+                s_seq_decompressed_ptr + store_offsets,
+                (s_seq_compressed >> i) & 1,
+                mask=store_mask,
+            )
+
+    def bit_spike_compress_triton(s_seq, block_size=DEFAULT_BLOCK_SIZE // 8):
+        # s_seq: float32, ndim=1
+        s_seq = s_seq.reshape(-1)
+        n_elements = s_seq.numel()
+        n_compressed_elements = (n_elements+7) // 8
+        s_seq_compressed = torch.zeros(
+            n_compressed_elements, dtype=torch.uint8, device=s_seq.device
+        )
+        grid = lambda meta: (
+            triton.cdiv(n_compressed_elements, meta['BLOCK_SIZE']),
+        )
+
+        with torch.cuda.device(s_seq.device):
+            _bit_spike_compress_triton[grid](
+                s_seq,
+                s_seq_compressed,
+                n_elements,
+                n_compressed_elements,
+                BLOCK_SIZE=block_size
+            )
+        return s_seq_compressed
+
+    def bit_spike_decompress_triton(
+        s_seq_compressed, shape, block_size=DEFAULT_BLOCK_SIZE // 8
+    ):
+        # s_seq: uint8, ndim=1
+        n_compressed_elements = s_seq_compressed.numel()
+        n_decompressed_elements = shape.numel()
+        s_seq_decompressed = torch.zeros(
+            n_decompressed_elements,
+            dtype=torch.uint8,
+            device=s_seq_compressed.device
+        )
+        grid = lambda meta: (
+            triton.cdiv(n_compressed_elements, meta['BLOCK_SIZE']),
+        )
+
+        with torch.cuda.device(s_seq_compressed.device):
+            _bit_spike_decompress_triton[grid](
+                s_seq_compressed,
+                s_seq_decompressed,
+                n_compressed_elements,
+                n_decompressed_elements,
+                BLOCK_SIZE=block_size
+            )
+        return s_seq_decompressed.reshape(shape)
 
 except Exception as e:
     TRITON_AVAILABLE = False

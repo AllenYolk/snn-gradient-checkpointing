@@ -295,3 +295,38 @@ def sliding_psn_forward_compiled(x_seq, weight, bias, k):
         x_seq_shape
     )  # [(N*...), 1, T] -> [T, N, ...]
     return surrogate.atan.apply(x_seq + bias, 2.)
+
+
+#===============================================================================
+#                           Spike Compressor                                   =
+#===============================================================================
+@_conditional_compile()
+def bit_spike_compress_compiled(s_seq: torch.Tensor) -> torch.Tensor:
+    # s_seq: float32, ndim=1
+    s_seq = s_seq.to(dtype=torch.bool).reshape(-1)
+    compressed_shape = (s_seq.numel() + 7) // 8
+    s_seq_compressed = torch.zeros(
+        compressed_shape, dtype=torch.uint8, device=s_seq.device
+    )
+    for i in range(8):
+        sliced = s_seq[i::8].to(dtype=torch.uint8)
+        sliced_len = sliced.numel()
+        if sliced_len > 0:
+            s_seq_compressed[:sliced_len] |= (sliced << i)
+    return s_seq_compressed
+
+
+@_conditional_compile()
+def bit_spike_decompress_compiled(
+    s_seq_compressed: torch.Tensor, shape
+) -> torch.Tensor:
+
+    decompressed_len = shape.numel()
+    s_seq_decompressed = torch.zeros(
+        decompressed_len, dtype=torch.bool, device=s_seq_compressed.device
+    )
+    for i in range(8):
+        sliced_len = (decompressed_len-i+7) // 8
+        sliced = ((s_seq_compressed >> i) & 1)[:sliced_len]
+        s_seq_decompressed[i::8] = sliced
+    return s_seq_decompressed.reshape(shape)
