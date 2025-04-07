@@ -275,7 +275,7 @@ try:
             # quantize ot
             ot = h - one
             ot = tl.clamp(ot - shift, -clamp_abs, clamp_abs) * scale
-            ot = tl.cast(ot, compressed_dtype)
+            ot = ot.to(compressed_dtype)
             ot_ptrs = ot_seq_ptr + x_offsets
             tl.store(ot_ptrs, ot, mask=mask_x)
 
@@ -311,7 +311,7 @@ try:
             ot_ptrs = ot_seq_ptr + x_offsets
             ot = tl.load(ot_ptrs, mask=mask_x, other=0.)
             # dequantize ot
-            ot = tl.cast(ot, dtype)
+            ot = ot.to(dtype)
             ot = (ot/scale) + shift
 
             s = (ot >= 0.).to(dtype)
@@ -356,7 +356,7 @@ try:
             ot_ptrs = ot_seq_ptr + x_offsets
             ot = tl.load(ot_ptrs, mask=mask_x, other=0.)
             # dequantize ot
-            ot = tl.cast(ot, dtype)
+            ot = ot.to(dtype)
             ot = (ot/scale) + shift
 
             s = (ot >= 0.).to(dtype)
@@ -504,7 +504,7 @@ try:
             load_offsets = i + store_offsets*8
             load_mask = load_offsets < n_elements
             s_seq = tl.load(s_seq_ptr + load_offsets, mask=load_mask, other=0.)
-            s_seq = tl.cast(s_seq, tl.uint8)
+            s_seq = s_seq.to(tl.uint8)
             s_seq_compressed = s_seq_compressed | (s_seq << i)
 
         tl.store(
