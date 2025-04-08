@@ -25,6 +25,7 @@ from spikingjelly.activation_based import functional
 
 from utils import set_seed, AverageMeter
 from utils import accuracy, CategoryMemoryProfiler
+from utils import LayerWiseMemoryProfiler, MemoryProfilerList
 from augmentation import SequentialCIFARClassificationPresetTrain
 from augmentation import CIFAR100_MEAN, CIFAR100_STD
 from augmentation import CIFAR10_MEAN, CIFAR10_STD
@@ -182,6 +183,7 @@ def train_step(
             with get_autocast_context(use_amp):
                 y = net(img)
                 batch_loss = F.cross_entropy(y, label)
+                profiler.profile()
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
@@ -270,8 +272,11 @@ def main():
     if args.amp:
         scaler = GradScaler()
 
-    profiler = CategoryMemoryProfiler(
-        net, optimizer, filename='snn_memory.prof'
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename='snn_memory.prof'),
+        LayerWiseMemoryProfiler(
+            net, instances=(torch.nn.Module,), filename='snn_memory.prof'
+        ),
     )
     mem_stats = torch.cuda.memory_stats(args.device)
     peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)

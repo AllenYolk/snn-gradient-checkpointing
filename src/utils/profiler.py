@@ -1,18 +1,28 @@
-"""Memory profiler.
-"""
+import abc
 import gc
 import inspect
-import traceback as tb
-from typing import DefaultDict
+from typing import DefaultDict, Tuple
 import time
 from pathlib import Path
 import os
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 
 KB = 1024.
 MB = 1024. * 1024.
+
+
+def _get_caller_info(depth=1):
+    caller_frame = inspect.currentframe().f_back
+    for _ in range(depth - 1):
+        caller_frame = caller_frame.f_back
+    caller_file = caller_frame.f_code.co_filename
+    caller_lineno = caller_frame.f_lineno
+    caller_func = caller_frame.f_code.co_name
+    caller_str = f"{caller_file}:line{caller_lineno}, {caller_func}"
+    return caller_str
 
 
 def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
@@ -53,14 +63,11 @@ def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
     return addr_to_tensor
 
 
-class CategoryMemoryProfiler:
+class BaseMemoryProfiler(abc.ABC):
 
-    def __init__(self, model, optimizer, filename='snn_memory.prof'):
+    def __init__(self, model, filename):
         self.model = model
-        self.optimizer = optimizer
         self.filename = Path(filename)
-        self.device_count = torch.cuda.device_count()
-
         if self.filename.exists():
             os.remove(self.filename)
 
@@ -80,7 +87,24 @@ class CategoryMemoryProfiler:
             except Exception:
                 pass
 
-    def get_memory_stats(self):
+    @abc.abstractmethod
+    def profile(self):
+        pass
+
+
+class CategoryMemoryProfiler(BaseMemoryProfiler):
+
+    def __init__(
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        filename='snn_memory.prof'
+    ):
+        super().__init__(model, filename)
+        self.optimizer = optimizer
+        self.device_count = torch.cuda.device_count()
+
+    def _get_memory_stats(self):
         memory_usage = DefaultDict(float)  # KB
 
         # model weights
@@ -115,12 +139,14 @@ class CategoryMemoryProfiler:
         for x in self.cuda_tensors():
             if x.data_ptr() not in classified_tensors:
                 nbytes = x.element_size() * x.numel()
-                memory_usage["input_or_state"] = nbytes
+                memory_usage["input_or_state"] += nbytes
+                classified_tensors.add(x.data_ptr())
 
         return memory_usage
 
-    def profile(self):
-        memory_usage = self.get_memory_stats()
+    def profile(self, depth=1):
+        memory_usage = self._get_memory_stats()
+        caller_str = _get_caller_info(depth)
 
         total_mem = {}
         for device_id in range(self.device_count):
@@ -131,7 +157,11 @@ class CategoryMemoryProfiler:
                 }
 
         with open(self.filename, 'a') as f:
-            f.write(f"\n=== SNN Memory Stats ({time.ctime()}) ===\n")
+            f.write(
+                f"\n" + "="*5 + " " +
+                f"Category-wise Memory Stats ({time.ctime()}; {caller_str}) " +
+                f"="*5 + "\n"
+            )
             for device_id in range(self.device_count):
                 f.write(
                     f"cuda:{device_id} - "
@@ -145,25 +175,19 @@ class CategoryMemoryProfiler:
             f.write(
                 f"  Total Tracked: {sum(memory_usage.values()) / MB:.2f} MB\n"
             )
+            f.flush()
 
 
-def flatten_tuple_generator(nested_tuple):
-    for item in nested_tuple:
-        if isinstance(item, tuple):
-            yield from flatten_tuple_generator(item)
-        else:
-            yield item
+class LayerWiseMemoryProfiler(BaseMemoryProfiler):
 
+    def __init__(
+        self,
+        model: nn.Module,
+        instances: Tuple[nn.Module],
+        filename='layer_memory.prof'
+    ):
+        super().__init__(model, filename)
 
-def tensor_memory(x: torch.Tensor):
-    storage_size = x.untyped_storage().size()
-    element_size = x.element_size()
-    return storage_size * element_size
-
-
-class LayerWiseMemoryProfiler:
-
-    def __init__(self, model: nn.Module, instances):
         self.start_memory = {}
         self.peak_memory = {}
         self.module_str = {}
@@ -195,7 +219,7 @@ class LayerWiseMemoryProfiler:
                 m.register_forward_pre_hook(pre_hook_generator(name))
                 m.register_forward_hook(post_hook_generator(name))
 
-    def memory_info(self):
+    def profile(self, depth=1):
         results = []
         for name in self.peak_memory.keys():
             start_memory = self.start_memory[name]
@@ -207,8 +231,31 @@ class LayerWiseMemoryProfiler:
 
         results = sorted(results, key=lambda x: x[-1], reverse=True)
 
-        print('-----Memory Info (MB)-----')
-        for name, start_memory, computation_memory, peak_memory in results:
-            print(
-                f"{name}:{self.module_str[name]}\nstart_memory: {start_memory / MB:.3f}, computation: {computation_memory / MB:.3f}, peak_memory: {peak_memory / MB:.3f}"
+        caller_str = _get_caller_info(depth)
+
+        with open(self.filename, 'a') as f:
+            f.write(
+                f"\n" + "="*5 + " " +
+                f"Layer-wise Memory Stats ({time.ctime()}; {caller_str}) " +
+                f"="*5 + "\n"
             )
+            for name, start_memory, computation_memory, peak_memory in results:
+                f.write(
+                    f"{name}:{self.module_str[name]}\n"
+                    f"start_memory: {start_memory / MB:.2f} MB, "
+                    f"computation: {computation_memory / MB:.2f} MB, "
+                    f"peak_memory: {peak_memory / MB:.2f} MB\n"
+                )
+            f.flush()
+
+
+class MemoryProfilerList(list):
+
+    def __init__(self, *args):
+        super().__init__()
+        for e in args:
+            self.append(e)
+
+    def profile(self, depth=2):
+        for p in self:
+            p.profile(depth)
