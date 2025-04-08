@@ -17,7 +17,7 @@ try:
     def torch_type_to_nvcomp_type(dtype):
         return NVCOMP_TYPE_DICT.get(dtype, dtype)
 
-    DEFAULT_NVCOMP_CODEC_ALGORITHM = "LZ4"
+    DEFAULT_NVCOMP_CODEC_ALGORITHM = "ANS"
     DEFAULT_NVCOMP_CODEC_KWARGS = {}
 
     NVCOMP_CHUNK_SIZE_BYTES = 16777216

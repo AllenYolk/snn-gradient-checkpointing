@@ -164,7 +164,7 @@ class BitNvcompSpikeCompressor(BaseSpikeCompressor):
     def _decompress(self, s_seq: nvcomp.Array, shape) -> torch.Tensor:
         s_seq = self.codec.decompress(
             s_seq, target_shape=(-1,), target_dtype=torch.uint8
-        )
+        ) + 0  #? An error occurs if s_seq is directly handled by triton. `+0` is a workaround.
         s_seq_decompressed = bit_spike_decompress(s_seq, shape)
 
         ac = is_autocast_enabled()
