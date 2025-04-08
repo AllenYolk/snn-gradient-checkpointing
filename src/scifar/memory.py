@@ -1,12 +1,11 @@
 import argparse
-import time
 import sys
+import threading
 from tqdm import tqdm
 
 sys.path.append("./src")
 sys.path.append("./src/scifar")
 
-import wandb
 import torch
 import torch.nn.functional as F
 import torch.utils.data as data
@@ -24,8 +23,8 @@ import torchvision.datasets as datasets
 from torchvision.transforms.functional import InterpolationMode
 from spikingjelly.activation_based import functional
 
-from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy
+from utils import set_seed, AverageMeter
+from utils import accuracy, CategoryMemoryProfiler
 from augmentation import SequentialCIFARClassificationPresetTrain
 from augmentation import CIFAR100_MEAN, CIFAR100_STD
 from augmentation import CIFAR10_MEAN, CIFAR10_STD
@@ -135,22 +134,6 @@ def parse_args():
         '-net', "--network", default="MESequentialCIFARNet", type=str
     )
     parser.add_argument('-dl', "--decay_lambda", default=0.5, type=float)
-    parser.add_argument("-c", "--channels", default=128, type=int)
-    parser.add_argument(
-        '-b', "--batch_size", default=128, type=int, help='batch size'
-    )
-    parser.add_argument(
-        '-e',
-        '--epochs',
-        default=300,
-        type=int,
-    )
-    parser.add_argument(
-        '-nw',
-        "--num_workers",
-        default=4,
-        type=int,
-    )
     parser.add_argument(
         '--data_dir', type=str, default="/home/ma-user/work/datasets/CIFAR10"
     )
@@ -161,32 +144,25 @@ def parse_args():
         action='store_true',
         help='automatic mixed precision training'
     )
-    parser.add_argument(
-        '-opt',
-        "--optimizer",
-        type=str,
-        help='use which optimizer. SGD or Adam',
-        default='SGD'
-    )
-    parser.add_argument(
-        '-lr', "--learning_rate", default=0.1, type=float, help='learning rate'
-    )
-    parser.add_argument(
-        '-mom', '--momentum', default=0.9, type=float, help='momentum for SGD'
-    )
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
+    args.epochs = 3
+    args.channels = 128
+    args.batch_size = 128
+    args.num_workers = 4
+    args.learning_rate = 0.1
+    args.optimizer = "SGD"
+    args.momentum = 0.9
     return args
 
 
 def train_step(
-    net, train_data_loader, optimizer, lr_scheduler, device, scaler,
+    net, train_data_loader, optimizer, lr_scheduler, device, scaler, profiler,
     current_epoch, total_epoch
 ):
-    epoch_start_time = time.time()
     net.train()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -209,10 +185,12 @@ def train_step(
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
+                profiler.profile()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 batch_loss.backward()
+                profiler.profile()
                 optimizer.step()
             optimizer.zero_grad()
 
@@ -231,17 +209,14 @@ def train_step(
     if lr_scheduler is not None:
         lr_scheduler.step()
 
-    epoch_end_time = time.time()
-    epoch_time = epoch_end_time - epoch_start_time  # unit: second
     return {
         "loss": losses.avg,
         "top1_acc": top1.avg,
         "top5_acc": top5.avg,
-        "time": epoch_time
     }
 
 
-def val_step(net, test_data_loader, device):
+def val_step(net, test_data_loader, device, profiler):
     net.eval()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -271,20 +246,9 @@ def val_step(net, test_data_loader, device):
 def main():
     args = parse_args()
     print(args)
+    torch.cuda.reset_peak_memory_stats(args.device)
 
     set_seed(args.set_seed)
-
-    run_name_generator = ModelNameGenerator(
-        proj=f"sequential-cifar{args.num_classes}-me"
-    )
-    run_name = run_name_generator.generate(args)
-    wandb.require("core")
-    wandb.init(
-        project=f"sequential-cifar{args.num_classes}-me",
-        entity="pkuml-spiking",
-        config=args,
-        name=run_name,
-    )
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
@@ -306,7 +270,21 @@ def main():
     if args.amp:
         scaler = GradScaler()
 
+    profiler = CategoryMemoryProfiler(
+        net, optimizer, filename='snn_memory.prof'
+    )
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Before training: "
+        f"Peak allocated memory: {peak_allocated} MB, "
+        f"Peak reserved memory: {peak_reserved} MB"
+    )
+    profiler.profile()
+
     max_val_accuracy = 0.
+    torch.cuda.reset_peak_memory_stats(args.device)
     for epoch in range(args.epochs):
         train_results = train_step(
             net,
@@ -315,39 +293,44 @@ def main():
             lr_scheduler,
             args.device,
             scaler,
+            profiler,
             epoch,
             args.epochs,
         )
+        profiler.profile()
         val_results = val_step(
             net,
             val_data_loader,
             args.device,
+            profiler,
         )
+        profiler.profile()
 
-        wandb.log({
-            "loss/train_loss": train_results["loss"],
-            "acc/train_top1_acc": train_results["top1_acc"],
-            "acc/train_top5_acc": train_results["top5_acc"],
-            "time/train_epoch_time": train_results["time"],
-            "loss/val_loss": val_results["loss"],
-            "acc/val_top1_acc": val_results["top1_acc"],
-            "acc/val_top5_acc": val_results["top5_acc"],
-        })
+        mem_stats = torch.cuda.memory_stats(args.device)
+        peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+        peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+
         print(
             f"Epoch {epoch + 1}/{args.epochs}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
-            f"time/train_epoch_time={train_results['time']}, "
             f"val_loss={val_results['loss']}, "
             f"val_top1_acc={val_results['top1_acc']}, "
             f"val_top5_acc={val_results['top5_acc']}, "
+            f"peak_allocated={peak_allocated} MB, "
+            f"peak_reserved={peak_reserved} MB"
         )
         if val_results["top1_acc"] > max_val_accuracy:
             max_val_accuracy = val_results["top1_acc"]
 
-    wandb.summary["acc/max_val_top1_acc"] = max_val_accuracy
-    wandb.finish()
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Peak allocated memory: {peak_allocated} MB\n"
+        f"Peak reserved memory: {peak_reserved} MB"
+    )
 
 
 if __name__ == '__main__':
