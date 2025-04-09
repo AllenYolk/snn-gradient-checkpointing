@@ -65,8 +65,12 @@ def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
 
 class BaseMemoryProfiler(abc.ABC):
 
-    def __init__(self, model, filename):
-        self.model = model
+    def __init__(self, models, filename):
+        if isinstance(models, nn.Module):
+            models = (models,)
+        elif not isinstance(models, tuple):
+            models = tuple(models)
+        self.models = models
         self.filename = Path(filename)
         if self.filename.exists():
             os.remove(self.filename)
@@ -96,12 +100,16 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
 
     def __init__(
         self,
-        model: nn.Module,
-        optimizer: optim.Optimizer,
+        models: Tuple[nn.Module],
+        optimizers: Tuple[optim.Optimizer],
         filename='snn_memory.prof'
     ):
-        super().__init__(model, filename)
-        self.optimizer = optimizer
+        super().__init__(models, filename)
+        if isinstance(optimizers, optim.Optimizer):
+            optimizers = (optimizers,)
+        elif not isinstance(optimizers, tuple):
+            optimizers = tuple(optimizers)
+        self.optimizers = optimizers
         self.device_count = torch.cuda.device_count()
 
     def _get_memory_stats(self):
@@ -109,31 +117,34 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
 
         # model weights
         weight_tensors = set()
-        for param in self.model.parameters():
-            if param.is_cuda:
-                nbytes = param.element_size() * param.numel()
-                memory_usage['weight'] += nbytes
-                weight_tensors.add(param.data_ptr())
+        for model in self.models:
+            for param in model.parameters():
+                if param.is_cuda:
+                    nbytes = param.element_size() * param.numel()
+                    memory_usage['weight'] += nbytes
+                    weight_tensors.add(param.data_ptr())
 
         # gradients
         gradient_tensors = set()
-        for param in self.model.parameters():
-            if param.grad is not None and param.grad.is_cuda:
-                nbytes = param.grad.element_size() * param.grad.numel()
-                memory_usage['gradient'] += nbytes
-                gradient_tensors.add(param.grad.data_ptr())
+        for model in self.models:
+            for param in model.parameters():
+                if param.grad is not None and param.grad.is_cuda:
+                    nbytes = param.grad.element_size() * param.grad.numel()
+                    memory_usage['gradient'] += nbytes
+                    gradient_tensors.add(param.grad.data_ptr())
 
         # optimizer state
         optimizer_state_tensors = set()
-        for group in self.optimizer.param_groups:
-            for param in group['params']:
-                if param in self.optimizer.state:
-                    state = self.optimizer.state[param]
-                    for key, value in state.items():
-                        if torch.is_tensor(value) and value.is_cuda:
-                            nbytes = value.element_size() * value.numel()
-                            memory_usage['optimizer_state'] += nbytes
-                            optimizer_state_tensors.add(value.data_ptr())
+        for optimizer in self.optimizers:
+            for group in optimizer.param_groups:
+                for param in group['params']:
+                    if param in optimizer.state:
+                        state = optimizer.state[param]
+                        for key, value in state.items():
+                            if torch.is_tensor(value) and value.is_cuda:
+                                nbytes = value.element_size() * value.numel()
+                                memory_usage['optimizer_state'] += nbytes
+                                optimizer_state_tensors.add(value.data_ptr())
 
         classified_tensors = weight_tensors | gradient_tensors | optimizer_state_tensors
         for x in self.cuda_tensors():
@@ -144,7 +155,7 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
 
         return memory_usage
 
-    def profile(self, depth=1):
+    def profile(self, depth=2, *args, **kwargs):
         memory_usage = self._get_memory_stats()
         caller_str = _get_caller_info(depth)
 
@@ -156,12 +167,13 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
                     'reserved': torch.cuda.memory_reserved() / MB,
                 }
 
+        header_str = (
+            f"=== Category-wise Memory Stats ({time.ctime()}; {caller_str}) ==="
+        )
         with open(self.filename, 'a') as f:
-            f.write(
-                f"\n" + "="*5 + " " +
-                f"Category-wise Memory Stats ({time.ctime()}; {caller_str}) " +
-                f"="*5 + "\n"
-            )
+            f.write("=" * len(header_str) + "\n")
+            f.write(header_str + "\n")
+            f.write("=" * len(header_str) + "\n")
             for device_id in range(self.device_count):
                 f.write(
                     f"cuda:{device_id} - "
@@ -175,21 +187,50 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
             f.write(
                 f"  Total Tracked: {sum(memory_usage.values()) / MB:.2f} MB\n"
             )
+            f.write("=" * len(header_str) + "\n")
+            f.write("=" * len(header_str) + "\n"*3)
             f.flush()
 
 
 class LayerWiseMemoryProfiler(BaseMemoryProfiler):
 
+    field_idx = {
+        "name": 0,
+        "forward_start_memory": 1,
+        "forward_peak_memory": 2,
+        "forward_computation_memory": 3,
+        "backward_start_memory": 4,
+        "backward_peak_memory": 5,
+        "backward_computation_memory": 6
+    }
+
     def __init__(
         self,
-        model: nn.Module,
+        models: Tuple[nn.Module],
         instances: Tuple[nn.Module],
-        filename='layer_memory.prof'
+        filename='layer_memory.prof',
+        direct_children_only: Tuple[bool] = (False,),
     ):
-        super().__init__(model, filename)
+        super().__init__(models, filename)
+        if isinstance(instances, nn.Module):
+            instances = (instances,)
+        elif not isinstance(instances, tuple):
+            instances = tuple(instances)
+        self.instances = instances
 
-        self.start_memory = {}
-        self.peak_memory = {}
+        if isinstance(direct_children_only, bool):
+            direct_children_only = (direct_children_only,)
+        elif not isinstance(direct_children_only, tuple):
+            direct_children_only = tuple(direct_children_only)
+        if len(direct_children_only) != len(self.models):
+            raise ValueError(
+                "direct_children_only should have the same length as models"
+            )
+
+        self.forward_start_memory = DefaultDict(float)
+        self.forward_peak_memory = DefaultDict(float)
+        self.backward_start_memory = DefaultDict(float)
+        self.backward_peak_memory = DefaultDict(float)
         self.module_str = {}
 
         def pre_hook_generator(name):
@@ -198,8 +239,8 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
                 torch.cuda.synchronize()
-                self.start_memory[name] = torch.cuda.memory_allocated()
-                self.peak_memory[name] = 0
+                self.forward_start_memory[name] = torch.cuda.memory_allocated()
+                self.forward_peak_memory[name] = 0
 
             return pre_hook
 
@@ -207,45 +248,101 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
 
             def post_hook(module, input, output):
                 torch.cuda.synchronize()
-                self.peak_memory[name] = max(
-                    torch.cuda.max_memory_allocated(), self.peak_memory[name]
+                self.forward_peak_memory[name] = max(
+                    torch.cuda.max_memory_allocated(),
+                    self.forward_peak_memory[name]
                 )
 
             return post_hook
 
-        for name, m in model.named_modules():
-            if isinstance(m, instances):
-                self.module_str[name] = str(m)
-                m.register_forward_pre_hook(pre_hook_generator(name))
-                m.register_forward_hook(post_hook_generator(name))
+        def backward_pre_hook_generator(name):
 
-    def profile(self, depth=1):
-        results = []
-        for name in self.peak_memory.keys():
-            start_memory = self.start_memory[name]
-            peak_memory = self.peak_memory[name]
-            computation_memory = peak_memory - start_memory
-            results.append(
-                (name, start_memory, computation_memory, peak_memory)
+            def backward_pre_hook(module, grad_output):
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.synchronize()
+                self.backward_start_memory[name] = torch.cuda.memory_allocated()
+                self.backward_peak_memory[name] = 0
+
+            return backward_pre_hook
+
+        def backward_post_hook_generator(name):
+
+            def backward_post_hook(module, grad_input, grad_output):
+                torch.cuda.synchronize()
+                self.backward_peak_memory[name] = max(
+                    torch.cuda.max_memory_allocated(),
+                    self.backward_peak_memory[name]
+                )
+
+            return backward_post_hook
+
+        for i, model in enumerate(self.models):
+            it = (
+                model.named_children()
+                if direct_children_only[i] else model.named_modules()
             )
+            for name, m in it:
+                if isinstance(m, instances):
+                    mname = f"net{i}-{name}"
+                    self.module_str[mname] = str(m)
+                    m.register_forward_pre_hook(pre_hook_generator(mname))
+                    m.register_forward_hook(post_hook_generator(mname))
+                    m.register_full_backward_pre_hook(
+                        backward_pre_hook_generator(mname)
+                    )
+                    m.register_full_backward_hook(
+                        backward_post_hook_generator(mname)
+                    )
 
-        results = sorted(results, key=lambda x: x[-1], reverse=True)
+    def profile(self, depth=2, sort_by="peak_memory", *args, **kwargs):
+        results = []
+        for name in self.forward_peak_memory.keys():
+            forward_start_memory = self.forward_start_memory[name]
+            forward_peak_memory = self.forward_peak_memory[name]
+            backward_start_memory = self.backward_start_memory[name]
+            backward_peak_memory = self.backward_peak_memory[name]
+            forward_computation_memory = (
+                forward_peak_memory - forward_start_memory
+            )
+            backward_computation_memory = (
+                backward_peak_memory - backward_start_memory
+            )
+            results.append((
+                name, forward_start_memory, forward_peak_memory,
+                forward_computation_memory, backward_start_memory,
+                backward_peak_memory, backward_computation_memory
+            ))
+
+        results = sorted(
+            results, key=lambda x: x[self.field_idx[sort_by]], reverse=True
+        )
 
         caller_str = _get_caller_info(depth)
+        header_str = (
+            f"=== Layer-wise Memory Stats ({time.ctime()}; {caller_str}) ==="
+        )
 
         with open(self.filename, 'a') as f:
-            f.write(
-                f"\n" + "="*5 + " " +
-                f"Layer-wise Memory Stats ({time.ctime()}; {caller_str}) " +
-                f"="*5 + "\n"
-            )
-            for name, start_memory, computation_memory, peak_memory in results:
+            f.write("=" * len(header_str) + "\n")
+            f.write(header_str + "\n")
+            f.write("=" * len(header_str) + "\n")
+            for (
+                name, forward_start_memory, forward_peak_memory,
+                forward_computation_memory, backward_start_memory,
+                backward_peak_memory, backward_computation_memory
+            ) in results:
                 f.write(
                     f"{name}:{self.module_str[name]}\n"
-                    f"start_memory: {start_memory / MB:.2f} MB, "
-                    f"computation: {computation_memory / MB:.2f} MB, "
-                    f"peak_memory: {peak_memory / MB:.2f} MB\n"
+                    f"  forward_start_memory: {forward_start_memory / MB:.2f} MB, "
+                    f"forward_peak_memory: {forward_peak_memory / MB:.2f} MB, "
+                    f"forward_computation: {forward_computation_memory / MB:.2f} MB\n"
+                    f"  backward_start_memory: {backward_start_memory / MB:.2f} MB, "
+                    f"backward_peak_memory: {backward_peak_memory / MB:.2f} MB, "
+                    f"backward_computation: {backward_computation_memory / MB:.2f} MB\n"
                 )
+            f.write("=" * len(header_str) + "\n")
+            f.write("=" * len(header_str) + "\n"*3)
             f.flush()
 
 
@@ -256,6 +353,6 @@ class MemoryProfilerList(list):
         for e in args:
             self.append(e)
 
-    def profile(self, depth=2):
+    def profile(self, depth=3, *args, **kwargs):
         for p in self:
-            p.profile(depth)
+            p.profile(depth, *args, **kwargs)

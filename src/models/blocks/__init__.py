@@ -1,7 +1,8 @@
+from .base import BaseCheckpointingBlock
 from .linear import *
 from .conv1d import *
 from .conv2d import *
-from .checkpointing import SNNCheckpointingBlock
+from .checkpointing import SNNCheckpointingBlockFunction
 
 
 def get_block(block_type, **kwargs):

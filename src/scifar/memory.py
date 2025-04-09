@@ -1,6 +1,6 @@
 import argparse
+from pathlib import Path
 import sys
-import threading
 from tqdm import tqdm
 
 sys.path.append("./src")
@@ -23,7 +23,7 @@ import torchvision.datasets as datasets
 from torchvision.transforms.functional import InterpolationMode
 from spikingjelly.activation_based import functional
 
-from utils import set_seed, AverageMeter
+from utils import set_seed, AverageMeter, ModelNameGenerator
 from utils import accuracy, CategoryMemoryProfiler
 from utils import LayerWiseMemoryProfiler, MemoryProfilerList
 from augmentation import SequentialCIFARClassificationPresetTrain
@@ -138,6 +138,7 @@ def parse_args():
     parser.add_argument(
         '--data_dir', type=str, default="/home/ma-user/work/datasets/CIFAR10"
     )
+    parser.add_argument("--log_dir", type=str, default="./logs")
     parser.add_argument("-nc", "--num_classes", default=10, type=int)
     parser.add_argument(
         '-amp',
@@ -150,7 +151,7 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
-    args.epochs = 3
+    args.epochs = 2
     args.channels = 128
     args.batch_size = 128
     args.num_workers = 4
@@ -183,16 +184,16 @@ def train_step(
             with get_autocast_context(use_amp):
                 y = net(img)
                 batch_loss = F.cross_entropy(y, label)
-                profiler.profile()
+                profiler.profile(sort_by="forward_computation_memory")
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
-                profiler.profile()
+                profiler.profile(sort_by="backward_peak_memory")
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 batch_loss.backward()
-                profiler.profile()
+                profiler.profile(sort_by="backward_peak_memory")
                 optimizer.step()
             optimizer.zero_grad()
 
@@ -231,6 +232,7 @@ def val_step(net, test_data_loader, device, profiler):
 
             y = net(img)
             batch_loss = F.cross_entropy(y, label)
+            profiler.profile(sort_by="forward_computation_memory")
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(y.data, label.data, topk=(1, 5))
@@ -248,9 +250,13 @@ def val_step(net, test_data_loader, device, profiler):
 def main():
     args = parse_args()
     print(args)
-    torch.cuda.reset_peak_memory_stats(args.device)
 
     set_seed(args.set_seed)
+
+    run_name = ModelNameGenerator(
+        proj=f"sequential-cifar{args.num_classes}-me"
+    ).generate(args)
+    log_path = Path(args.log_dir) / (run_name+".prof.txt")
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
@@ -272,12 +278,10 @@ def main():
     if args.amp:
         scaler = GradScaler()
 
-    profiler = MemoryProfilerList(
-        CategoryMemoryProfiler(net, optimizer, filename='snn_memory.prof'),
-        LayerWiseMemoryProfiler(
-            net, instances=(torch.nn.Module,), filename='snn_memory.prof'
-        ),
-    )
+    print("Stage 1: Peak Memory Checking")
+    profiler = MemoryProfilerList()
+
+    torch.cuda.reset_peak_memory_stats(args.device)
     mem_stats = torch.cuda.memory_stats(args.device)
     peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
     peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
@@ -286,10 +290,8 @@ def main():
         f"Peak allocated memory: {peak_allocated} MB, "
         f"Peak reserved memory: {peak_reserved} MB"
     )
-    profiler.profile()
 
     max_val_accuracy = 0.
-    torch.cuda.reset_peak_memory_stats(args.device)
     for epoch in range(args.epochs):
         train_results = train_step(
             net,
@@ -302,14 +304,70 @@ def main():
             epoch,
             args.epochs,
         )
-        profiler.profile()
         val_results = val_step(
             net,
             val_data_loader,
             args.device,
             profiler,
         )
-        profiler.profile()
+
+        mem_stats = torch.cuda.memory_stats(args.device)
+        peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+        peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+
+        print(
+            f"Epoch {epoch + 1}/{args.epochs}: "
+            f"train_loss={train_results['loss']}, "
+            f"train_top1_acc={train_results['top1_acc']}, "
+            f"train_top5_acc={train_results['top5_acc']}, "
+            f"val_loss={val_results['loss']}, "
+            f"val_top1_acc={val_results['top1_acc']}, "
+            f"val_top5_acc={val_results['top5_acc']}, "
+            f"peak_allocated={peak_allocated} MB, "
+            f"peak_reserved={peak_reserved} MB"
+        )
+        if val_results["top1_acc"] > max_val_accuracy:
+            max_val_accuracy = val_results["top1_acc"]
+
+    print("Stage 2: Memory Profiling")
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename=log_path),
+        LayerWiseMemoryProfiler(
+            (net.conv, net),
+            instances=(torch.nn.Module,),
+            filename=log_path,
+            direct_children_only=(True, True),
+        ),
+    )
+
+    torch.cuda.reset_peak_memory_stats(args.device)
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        f"Before training: "
+        f"Peak allocated memory: {peak_allocated} MB, "
+        f"Peak reserved memory: {peak_reserved} MB"
+    )
+
+    for epoch in range(args.epochs, 2 * args.epochs):
+        train_results = train_step(
+            net,
+            train_data_loader,
+            optimizer,
+            lr_scheduler,
+            args.device,
+            scaler,
+            profiler,
+            epoch,
+            args.epochs,
+        )
+        val_results = val_step(
+            net,
+            val_data_loader,
+            args.device,
+            profiler,
+        )
 
         mem_stats = torch.cuda.memory_stats(args.device)
         peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)

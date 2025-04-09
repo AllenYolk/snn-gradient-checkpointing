@@ -2,13 +2,14 @@ import torch
 import torch.nn as nn
 import torch.autograd as autograd
 
+from .base import BaseCheckpointingBlock
 from ..compress import *
-from ..neuron import SJSlidingPSN, SJPSN
+from ..neuron import SlidingPSN, PSN
 from ..kernels import *
-from .checkpointing import SNNCheckpointingBlock
+from .checkpointing import SNNCheckpointingBlockFunction
 
 
-class Conv2dLIF(nn.Module):
+class Conv2dLIF(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -39,7 +40,7 @@ class Conv2dLIF(nn.Module):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlock.apply(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -53,7 +54,7 @@ class Conv2dLIF(nn.Module):
         )
 
 
-class Conv2dPSN(nn.Module):
+class Conv2dPSN(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -82,10 +83,10 @@ class Conv2dPSN(nn.Module):
         x_seq = conv2d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
         )
-        return SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
+        return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlock.apply(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -122,7 +123,7 @@ class _Conv2dSlidingPSNAutogradFunction(autograd.Function):
         x_seq = conv2d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
         )
-        return SJSlidingPSN.forward_function(
+        return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
 
@@ -152,7 +153,7 @@ class _Conv2dSlidingPSNAutogradFunction(autograd.Function):
                 y_seq = conv2d_forward(
                     x_seq, weight, bias, stride, padding, dilation, groups
                 )
-                s_seq = SJSlidingPSN.forward_function(
+                s_seq = SlidingPSN.forward_function(
                     y_seq, neuron_weight, neuron_bias, neuron_k
                 )
                 s_seq.backward(grad_s_seq)
@@ -173,7 +174,7 @@ class _Conv2dSlidingPSNAutogradFunction(autograd.Function):
         )
 
 
-class Conv2dSlidingPSN(nn.Module):
+class Conv2dSlidingPSN(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -203,12 +204,12 @@ class Conv2dSlidingPSN(nn.Module):
         x_seq = conv2d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
         )
-        return SJSlidingPSN.forward_function(
+        return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlock.apply(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -327,7 +328,7 @@ class _Conv2dBNLIFAutogradFunction(autograd.Function):
         )
 
 
-class Conv2dBNLIF(nn.Module):
+class Conv2dBNLIF(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -377,7 +378,7 @@ class Conv2dBNLIF(nn.Module):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlock.apply(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -396,7 +397,7 @@ class Conv2dBNLIF(nn.Module):
         )
 
 
-class Conv2dBNPSN(nn.Module):
+class Conv2dBNPSN(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -444,10 +445,10 @@ class Conv2dBNPSN(nn.Module):
             training,
             momentum=0.1 if in_backward else 0.
         )
-        return SJPSN.forward_function(x_seq, neuron_weight, neuron_bias)
+        return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlock.apply(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -467,7 +468,7 @@ class Conv2dBNPSN(nn.Module):
         )
 
 
-class Conv2dBNSlidingPSN(nn.Module):
+class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -516,12 +517,12 @@ class Conv2dBNSlidingPSN(nn.Module):
             training,
             momentum=0.1 if in_backward else 0.
         )
-        return SJSlidingPSN.forward_function(
+        return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlock.apply(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,

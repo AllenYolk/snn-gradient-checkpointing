@@ -125,25 +125,25 @@ def test_compressor_equality_SlidingPSN():
     net1 = Conv2dBNSlidingPSN(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJSlidingPSN(k=T // 5),
+        neuron=SlidingPSN(k=T // 5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = Conv2dBNSlidingPSN(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJSlidingPSN(k=T // 5),
+        neuron=SlidingPSN(k=T // 5),
         spike_compressor=BooleanSpikeCompressor()
     )
     net3 = Conv2dBNSlidingPSN(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJSlidingPSN(k=T // 5),
+        neuron=SlidingPSN(k=T // 5),
         spike_compressor=SparseSpikeCompressor(dtype=torch.int64)
     )
     net4 = Conv2dBNSlidingPSN(
         proj=nn.Conv2d(C, C, 5, padding=2, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJSlidingPSN(k=T // 5),
+        neuron=SlidingPSN(k=T // 5),
         spike_compressor=BitSpikeCompressor()
     )
     make_parameters_equal(net2, net1)
@@ -310,7 +310,7 @@ def _test_compressor_memory_SlidingPSN(compressor):
             Conv2dBNSlidingPSN(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
                 bn=nn.BatchNorm2d(C),
-                neuron=SJSlidingPSN(k=T),
+                neuron=SlidingPSN(k=T),
                 spike_compressor=compressor
             ),
         )
@@ -367,7 +367,7 @@ def _test_conventional_memory_SlidingPSN():
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}bn", nn.BatchNorm2d(C))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJSlidingPSN(k=T))
+        net.add_module(f"{i}neuron", SlidingPSN(k=T))
     net = net.to("cuda:0")
 
     torch.cuda.reset_peak_memory_stats("cuda:0")

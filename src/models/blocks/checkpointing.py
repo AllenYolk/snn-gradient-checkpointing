@@ -5,7 +5,7 @@ from nvidia import nvcomp
 from ..amp import get_autocast_context, is_autocast_enabled
 
 
-class SNNCheckpointingBlock(autograd.Function):
+class SNNCheckpointingBlockFunction(autograd.Function):
     """Reference:
     https://github.com/pytorch/pytorch/blob/v2.6.0/torch/utils/checkpoint.py
     """

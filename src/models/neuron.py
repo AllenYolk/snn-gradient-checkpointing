@@ -68,7 +68,8 @@ class SJLIF(neuron.LIFNode):
         return self.multi_step_forward(x_seq)
 
 
-class SJPSN(neuron.PSN):
+# =========================== Multi-step PSN Family ===========================
+class PSN(neuron.PSN):
     """Multi-step spikingjelly PSN with:
     * ATan surrogate function
 
@@ -84,7 +85,7 @@ class SJPSN(neuron.PSN):
         return psn_forward(x_seq, weight, bias)
 
 
-class SJSlidingPSN(neuron.SlidingPSN):
+class SlidingPSN(neuron.SlidingPSN):
     """Multi-step spikingjelly SlidingPSN with:
     * exponential weight initialization rule
     * ATan surrogate function

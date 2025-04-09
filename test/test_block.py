@@ -198,12 +198,12 @@ def test_linear_PSN_equality():
     T = 100
     net1 = LinearPSN(
         proj=nn.Linear(C, C, bias=True),
-        neuron=SJPSN(T=T),
+        neuron=PSN(T=T),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         nn.Linear(C, C, bias=True),
-        SJPSN(T=T),
+        PSN(T=T),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
@@ -219,7 +219,7 @@ def test_linear_PSN_memory_blocked():
             f"{i}",
             LinearPSN(
                 proj=nn.Linear(C, C, bias=True),
-                neuron=SJPSN(T=T),
+                neuron=PSN(T=T),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -232,7 +232,7 @@ def test_linear_PSN_memory_conventional():
     net = nn.Sequential()
     for i in range(100):
         net.add_module(f"{i}proj", nn.Linear(C, C, bias=True))
-        net.add_module(f"{i}neuron", SJPSN(T=T))
+        net.add_module(f"{i}neuron", PSN(T=T))
     net = net.to("cuda:0")
     _test_linear_memory(net, C, T)
 
@@ -242,12 +242,12 @@ def test_linear_SlidingPSN_equality():
     T = 100
     net1 = LinearSlidingPSN(
         proj=nn.Linear(C, C, bias=True),
-        neuron=SJSlidingPSN(k=T // 5),
+        neuron=SlidingPSN(k=T // 5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         nn.Linear(C, C, bias=True),
-        SJSlidingPSN(k=T // 5),
+        SlidingPSN(k=T // 5),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=False, with_psn=True)
@@ -263,7 +263,7 @@ def test_linear_SlidingPSN_memory_blocked():
             f"{i}",
             LinearSlidingPSN(
                 proj=nn.Linear(C, C, bias=True),
-                neuron=SJSlidingPSN(k=T // 5),
+                neuron=SlidingPSN(k=T // 5),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -276,7 +276,7 @@ def test_linear_SlidingPSN_memory_conventional():
     net = nn.Sequential()
     for i in range(100):
         net.add_module(f"{i}proj", nn.Linear(C, C, bias=True))
-        net.add_module(f"{i}neuron", SJSlidingPSN(k=T // 5))
+        net.add_module(f"{i}neuron", SlidingPSN(k=T // 5))
     net = net.to("cuda:0")
     _test_linear_memory(net, C, T)
 
@@ -339,7 +339,7 @@ def test_linear_bn_PSN_equality():
     net1 = LinearBNPSN(
         proj=nn.Linear(C, C, bias=True),
         bn=nn.BatchNorm1d(C),
-        neuron=SJPSN(T=T),
+        neuron=PSN(T=T),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -347,7 +347,7 @@ def test_linear_bn_PSN_equality():
         MergeTN(),
         nn.BatchNorm1d(C),
         SplitTN(T),
-        SJPSN(T=T),
+        PSN(T=T),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
@@ -363,7 +363,7 @@ def test_linear_bn_PSN_memory_blocked():
             LinearBNPSN(
                 proj=nn.Linear(C, C, bias=True),
                 bn=nn.BatchNorm1d(C),
-                neuron=SJPSN(T=T),
+                neuron=PSN(T=T),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -379,7 +379,7 @@ def test_linear_bn_PSN_memory_conventional():
         net.add_module(f"{i}merge", MergeTN())
         net.add_module(f"{i}bn", nn.BatchNorm1d(C))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJPSN(T=T))
+        net.add_module(f"{i}neuron", PSN(T=T))
     net = net.to("cuda:0")
     _test_linear_memory(net, C, T)
 
@@ -390,7 +390,7 @@ def test_linear_bn_SlidingPSN_equality():
     net1 = LinearBNSlidingPSN(
         proj=nn.Linear(C, C, bias=True),
         bn=nn.BatchNorm1d(C),
-        neuron=SJSlidingPSN(k=T // 5),
+        neuron=SlidingPSN(k=T // 5),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -398,7 +398,7 @@ def test_linear_bn_SlidingPSN_equality():
         MergeTN(),
         nn.BatchNorm1d(C),
         SplitTN(T),
-        SJSlidingPSN(k=T // 5),
+        SlidingPSN(k=T // 5),
     )
     _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
     _test_linear_equatlity(net1, net2, C, T, with_bn=True, with_psn=True)
@@ -414,7 +414,7 @@ def test_linear_bn_SlidingPSN_memory_blocked():
             LinearBNSlidingPSN(
                 proj=nn.Linear(C, C, bias=True),
                 bn=nn.BatchNorm1d(C),
-                neuron=SJSlidingPSN(k=T // 5),
+                neuron=SlidingPSN(k=T // 5),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -430,7 +430,7 @@ def test_linear_bn_SlidingPSN_memory_conventional():
         net.add_module(f"{i}merge", MergeTN())
         net.add_module(f"{i}bn", nn.BatchNorm1d(C))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJSlidingPSN(k=T // 5))
+        net.add_module(f"{i}neuron", SlidingPSN(k=T // 5))
     net = net.to("cuda:0")
     _test_linear_memory(net, C, T)
 
@@ -488,14 +488,14 @@ def test_conv2d_PSN_equality():
     C = 48
     net1 = Conv2dPSN(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-        neuron=SJPSN(T=T),
+        neuron=PSN(T=T),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         MergeTN(),
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         SplitTN(T),
-        SJPSN(T=T),
+        PSN(T=T),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
@@ -510,7 +510,7 @@ def test_conv2d_PSN_memory_blocked():
             f"{i}",
             Conv2dPSN(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-                neuron=SJPSN(T=T),
+                neuron=PSN(T=T),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -525,7 +525,7 @@ def test_conv2d_PSN_memory_conventional():
         net.add_module(f"{i}merge", MergeTN())
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJPSN(T=T))
+        net.add_module(f"{i}neuron", PSN(T=T))
     _test_conv2d_memory(net, C, T)
 
 
@@ -534,14 +534,14 @@ def test_conv2d_SlidingPSN_equality():
     C = 48
     net1 = Conv2dSlidingPSN(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-        neuron=SJSlidingPSN(k=T // 2),
+        neuron=SlidingPSN(k=T // 2),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
         MergeTN(),
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         SplitTN(T),
-        SJSlidingPSN(k=T // 2),
+        SlidingPSN(k=T // 2),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=False, with_psn=True)
@@ -556,7 +556,7 @@ def test_conv2d_SlidingPSN_memory_blocked():
             f"{i}",
             Conv2dSlidingPSN(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
-                neuron=SJSlidingPSN(k=T // 2),
+                neuron=SlidingPSN(k=T // 2),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -571,7 +571,7 @@ def test_conv2d_SlidingPSN_memory_conventional():
         net.add_module(f"{i}merge", MergeTN())
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJSlidingPSN(k=T // 2))
+        net.add_module(f"{i}neuron", SlidingPSN(k=T // 2))
     _test_conv2d_memory(net, C, T)
 
 
@@ -633,7 +633,7 @@ def test_conv2d_bn_PSN_equality():
     net1 = Conv2dBNPSN(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJPSN(T=T),
+        neuron=PSN(T=T),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -641,7 +641,7 @@ def test_conv2d_bn_PSN_equality():
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         nn.BatchNorm2d(C),
         SplitTN(T),
-        SJPSN(T=T),
+        PSN(T=T),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
@@ -657,7 +657,7 @@ def test_conv2d_bn_PSN_memory_blocked():
             Conv2dBNPSN(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
                 bn=nn.BatchNorm2d(C),
-                neuron=SJPSN(T=T),
+                neuron=PSN(T=T),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -673,7 +673,7 @@ def test_conv2d_bn_PSN_memory_conventional():
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}bn", nn.BatchNorm2d(C))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJPSN(T=T))
+        net.add_module(f"{i}neuron", PSN(T=T))
     _test_conv2d_memory(net, C, T)
 
 
@@ -683,7 +683,7 @@ def test_conv2d_bn_SlidingPSN_equality():
     net1 = Conv2dBNSlidingPSN(
         proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
         bn=nn.BatchNorm2d(C),
-        neuron=SJSlidingPSN(k=T // 2),
+        neuron=SlidingPSN(k=T // 2),
         spike_compressor=IdentitySpikeCompressor()
     )
     net2 = nn.Sequential(
@@ -691,7 +691,7 @@ def test_conv2d_bn_SlidingPSN_equality():
         nn.Conv2d(C, C, 3, padding=1, bias=True),
         nn.BatchNorm2d(C),
         SplitTN(T),
-        SJSlidingPSN(k=T // 2),
+        SlidingPSN(k=T // 2),
     )
     _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
     _test_conv2d_equality(net1, net2, C, T, with_bn=True, with_psn=True)
@@ -707,7 +707,7 @@ def test_conv2d_bn_SlidingPSN_memory_blocked():
             Conv2dBNSlidingPSN(
                 proj=nn.Conv2d(C, C, 3, padding=1, bias=True),
                 bn=nn.BatchNorm2d(C),
-                neuron=SJSlidingPSN(k=T // 2),
+                neuron=SlidingPSN(k=T // 2),
                 spike_compressor=IdentitySpikeCompressor()
             ),
         )
@@ -723,7 +723,7 @@ def test_conv2d_bn_SlidingPSN_memory_conventional():
         net.add_module(f"{i}proj", nn.Conv2d(C, C, 3, padding=1, bias=True))
         net.add_module(f"{i}bn", nn.BatchNorm2d(C))
         net.add_module(f"{i}split", SplitTN(T))
-        net.add_module(f"{i}neuron", SJSlidingPSN(k=T // 2))
+        net.add_module(f"{i}neuron", SlidingPSN(k=T // 2))
     _test_conv2d_memory(net, C, T)
 
 

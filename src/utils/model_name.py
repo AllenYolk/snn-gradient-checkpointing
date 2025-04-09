@@ -11,9 +11,9 @@ class ModelNameGenerator:
     @staticmethod
     def generate_sequential_cifar10_model_name(args):
         run_name = (
-            f"c{args.channels}_"
-            f"decaylambda{args.decay_lambda}_opt{args.optimizer}_"
-            f"lr{args.learning_rate}_amp{args.amp}_"
+            f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
+            f"c{args.channels}_opt{args.optimizer}_lomo{args.lomo}_"
+            f"amp{args.amp}"
         )
         return run_name
 

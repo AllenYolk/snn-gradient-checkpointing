@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from spikingjelly.activation_based import layer, functional
 
 from .blocks import get_block, neuron_type_to_str
