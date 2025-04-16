@@ -1,4 +1,4 @@
-from .convnet import *
+from .scifarnet import *
 from .neuron import *
 from .blocks import *
 from .compress import *

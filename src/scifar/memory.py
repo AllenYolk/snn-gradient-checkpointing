@@ -24,7 +24,7 @@ from torchvision.transforms.functional import InterpolationMode
 from spikingjelly.activation_based import functional
 
 from utils import set_seed, AverageMeter, ModelNameGenerator
-from utils import accuracy, CategoryMemoryProfiler
+from utils import accuracy, CategoryMemoryProfiler, count_learnable_parameters
 from utils import LayerWiseMemoryProfiler, MemoryProfilerList
 from augmentation import SequentialCIFARClassificationPresetTrain
 from augmentation import CIFAR100_MEAN, CIFAR100_STD
@@ -151,7 +151,7 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
-    args.epochs = 2
+    args.epochs = 1
     args.channels = 128
     args.batch_size = 128
     args.num_workers = 4
@@ -269,7 +269,7 @@ def main():
         T=32,  # for PSN
         k=8,  # for SlidingPSN
     )
-    print(net)
+    print(net, count_learnable_parameters(net))
     net = net.to(args.device)
 
     optimizer, lr_scheduler = prepare_optimizers_and_schedulers(args, net)
@@ -360,7 +360,7 @@ def main():
             scaler,
             profiler,
             epoch,
-            args.epochs,
+            2 * args.epochs,
         )
         val_results = val_step(
             net,

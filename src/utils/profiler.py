@@ -295,7 +295,7 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                         backward_post_hook_generator(mname)
                     )
 
-    def profile(self, depth=2, sort_by="peak_memory", *args, **kwargs):
+    def profile(self, depth=2, sort_by="backward_peak_memory", *args, **kwargs):
         results = []
         for name in self.forward_peak_memory.keys():
             forward_start_memory = self.forward_start_memory[name]
