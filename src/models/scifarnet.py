@@ -5,7 +5,6 @@ from spikingjelly.activation_based import layer, functional
 from .blocks import get_block, neuron_type_to_str
 from .neuron import get_neuron
 from .compress import *
-from .merge_split import *
 
 
 class MESequentialCIFARNet(nn.Module):

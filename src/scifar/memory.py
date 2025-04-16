@@ -269,7 +269,8 @@ def main():
         T=32,  # for PSN
         k=8,  # for SlidingPSN
     )
-    print(net, count_learnable_parameters(net))
+    print(net)
+    print("Number of learnable parameters: ", count_learnable_parameters(net))
     net = net.to(args.device)
 
     optimizer, lr_scheduler = prepare_optimizers_and_schedulers(args, net)
