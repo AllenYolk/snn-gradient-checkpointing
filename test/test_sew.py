@@ -9,6 +9,8 @@ import models
 from utils import count_learnable_parameters
 from utils import set_seed
 
+DEVICE = "cpu"
+
 
 def make_parameters_equal(net, reference_net):
     """Assume that `net` and `reference_net` have the parameter order.
@@ -30,7 +32,7 @@ def _test_sew18_imagenet(net):
 
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
-    x = torch.randn(B, 3, 224, 224).to("cuda")
+    x = torch.randn(B, 3, 224, 224).to(DEVICE)
     y = net(x)
     print(y.shape)
     assert y.shape == (B, 1000)
@@ -46,7 +48,7 @@ def _test_sew18_imagenet(net):
 
 def test_sew18_imagenet():
     net = models.SEWResNet18("SJLIF", T=4, detach_reset=True)
-    net = net.to("cuda")
+    net = net.to(DEVICE)
     _test_sew18_imagenet(net)
 
 
@@ -54,7 +56,7 @@ def test_sew18_imagenet_checkpointing():
     net = models.MESEWResNet18(
         "HandWrittenLIF", "BitSpikeCompressor", T=4, detach_reset=True
     )
-    net = net.to("cuda")
+    net = net.to(DEVICE)
     _test_sew18_imagenet(net)
 
 
@@ -66,7 +68,7 @@ def _test_sew_cifar10dvs(net):
 
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
-    x = torch.randn(B, 10, 2, 128, 128).to("cuda")
+    x = torch.randn(B, 10, 2, 128, 128).to(DEVICE)
     y = net(x)
     print(y.shape)
     assert y.shape == (B, 10)
@@ -82,7 +84,7 @@ def _test_sew_cifar10dvs(net):
 
 def test_sew_cifar10dvs():
     net = models.CIFAR10DVSSEWResNet("SJLIF", detach_reset=True)
-    net = net.to("cuda")
+    net = net.to(DEVICE)
     _test_sew_cifar10dvs(net)
 
 
@@ -90,7 +92,7 @@ def test_sew_cifar10dvs_checkpointing():
     net = models.MECIFAR10DVSSEWResNet(
         "HandWrittenLIF", "BitSpikeCompressor", detach_reset=True
     )
-    net = net.to("cuda")
+    net = net.to(DEVICE)
     _test_sew_cifar10dvs(net)
 
 
@@ -102,7 +104,7 @@ def _test_sew_dvsgesture(net):
 
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
-    x = torch.randn(B, 10, 2, 128, 128).to("cuda")
+    x = torch.randn(B, 10, 2, 128, 128).to(DEVICE)
     y = net(x)
     print(y.shape)
     assert y.shape == (B, 11)
@@ -118,7 +120,7 @@ def _test_sew_dvsgesture(net):
 
 def test_sew_dvsgesture():
     net = models.DVSGestureSEWResNet("SJLIF", detach_reset=True)
-    net = net.to("cuda")
+    net = net.to(DEVICE)
     _test_sew_dvsgesture(net)
 
 
@@ -126,7 +128,7 @@ def test_sew_dvsgesture_checkpointing():
     net = models.MEDVSGestureSEWResNet(
         "HandWrittenLIF", "BitSpikeCompressor", detach_reset=True
     )
-    net = net.to("cuda")
+    net = net.to(DEVICE)
     _test_sew_dvsgesture(net)
 
 
@@ -136,7 +138,7 @@ def test_sew18_equality_imagenet():
         T=4,
         detach_reset=True,
     )
-    net1 = net1.to("cuda")
+    net1 = net1.to(DEVICE)
 
     net2 = models.MESEWResNet18(
         "HandWrittenLIF",
@@ -144,12 +146,12 @@ def test_sew18_equality_imagenet():
         T=4,
         detach_reset=True,
     )
-    net2 = net2.to("cuda")
+    net2 = net2.to(DEVICE)
     make_parameters_equal(net2, net1)
     print(net2)
 
     B = 2
-    x = torch.randn(B, 3, 224, 224).to("cuda")
+    x = torch.randn(B, 3, 224, 224).to(DEVICE)
     y1 = net1(x)
     y2 = net2(x)
     print(y1, y2)
@@ -183,19 +185,19 @@ def test_sew_equality_dvsgesture():
         "HandWrittenLIF",
         detach_reset=True,
     )
-    net1 = net1.to("cuda")
+    net1 = net1.to(DEVICE)
 
     net2 = models.MEDVSGestureSEWResNet(
         "HandWrittenLIF",
         "BitSpikeCompressor",
         detach_reset=True,
     )
-    net2 = net2.to("cuda")
+    net2 = net2.to(DEVICE)
     make_parameters_equal(net2, net1)
     print(net2)
 
     B = 3
-    x = torch.randn(B, 10, 2, 128, 128).to("cuda")
+    x = torch.randn(B, 10, 2, 128, 128).to(DEVICE)
     y1 = net1(x)
     y2 = net2(x)
     print(y1, y2)

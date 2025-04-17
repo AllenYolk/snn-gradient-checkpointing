@@ -7,53 +7,165 @@ from spikingjelly.activation_based import layer
 from .blocks import get_block, neuron_type_to_str
 from .neuron import get_neuron
 from .compress import *
-
-
-class TEBNProjection(nn.Module):
-
-    def __init__(self, T, input_ndim: int = 5):
-        super().__init__()
-        self.p = nn.Parameter(
-            torch.ones(T, *[1 for _ in range(input_ndim - 1)])
-        )
-
-    def forward(self, x_seq):
-        return x_seq * self.p
+from .tebn import TEBNProjection
 
 
 def vgg_block(
-    in_plane, out_plane, kernel_size, stride, padding, T, neuron_type, **kwargs
+    in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
+    neuron_type, **kwargs
 ):
-    return nn.Sequential(
-        layer.SeqToANNContainer(
-            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            nn.BatchNorm2d(out_plane),
-        ),
-        TEBNProjection(T),
-        get_neuron(neuron_type, **kwargs),
-    )
+    if use_tebn:
+        return nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+                nn.BatchNorm2d(out_plane),
+            ),
+            TEBNProjection(T),
+            get_neuron(neuron_type, **kwargs),
+        )
+    else:
+        return nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+                nn.BatchNorm2d(out_plane),
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )
 
 
 class CIFAR10DVSVGG(nn.Module):
 
-    def __init__(self, T, neuron_type, **kwargs):
+    def __init__(self, T, neuron_type, dropout=0.25, **kwargs):
         super().__init__()
 
+        use_tebn = neuron_type != "PSN"
         self.features = nn.Sequential(
-            vgg_block(2, 64, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(64, 128, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2),
-            vgg_block(128, 256, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(256, 256, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2),
-            vgg_block(256, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(512, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2),
-            vgg_block(512, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(512, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2),
+            vgg_block(2, 64, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            vgg_block(64, 128, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            layer.AvgPool2d(2, step_mode="m"),
+            vgg_block(128, 256, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            vgg_block(256, 256, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            layer.AvgPool2d(2, step_mode="m"),
+            vgg_block(256, 512, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            layer.AvgPool2d(2, step_mode="m"),
+            vgg_block(512, 512, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
+            layer.AvgPool2d(2, step_mode="m"),
         )
-        self.dropout = nn.Dropout(0.25)
+        self.dropout = layer.Dropout(dropout)
+        d = int(48 / 2 / 2 / 2 / 2)
+        self.classifier = nn.Linear(512 * d * d, 10)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode='fan_out', nonlinearity='relu'
+                )
+
+    def forward(self, input):
+        # input.shape = [N, T, C, H, W]
+        input = input.transpose(0, 1).contiguous()  # [T, N, C, H, W]
+        x = self.features(input)
+        x = torch.flatten(x, 2)  # [T, N, D]
+        x = self.dropout(x)
+        x = x.mean(dim=0)
+        x = self.classifier(x)
+        return x
+
+
+def vgg_block_checkpointing(
+    in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
+    neuron_type, spike_compressor: str, **kwargs
+):
+    if use_tebn:
+        return get_block(
+            f"Conv2dTEBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+            bn=nn.BatchNorm2d(out_plane),
+            tebn_proj=TEBNProjection(T),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor)
+        )
+    else:
+        return get_block(
+            f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+            bn=nn.BatchNorm2d(out_plane),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor)
+        )
+
+
+def avgpool_vgg_block_checkpointing(
+    pool_kernel_size, in_plane, out_plane, kernel_size, stride, padding,
+    use_tebn: bool, T, neuron_type, spike_compressor: str, **kwargs
+):
+    if use_tebn:
+        return get_block(
+            f"AvgPool2dConv2dTEBN{neuron_type_to_str(neuron_type)}",
+            pool=nn.AvgPool2d(pool_kernel_size),
+            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+            bn=nn.BatchNorm2d(out_plane),
+            tebn_proj=TEBNProjection(T),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor)
+        )
+    else:
+        return get_block(
+            f"AvgPool2dConv2dBN{neuron_type_to_str(neuron_type)}",
+            pool=nn.AvgPool2d(pool_kernel_size),
+            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+            bn=nn.BatchNorm2d(out_plane),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor)
+        )
+
+
+class MECIFAR10DVSVGG(nn.Module):
+
+    def __init__(
+        self, T, neuron_type, spike_compressor: str, dropout=0.25, **kwargs
+    ):
+        super().__init__()
+
+        use_tebn = neuron_type != "PSN"
+        self.features = nn.Sequential(
+            vgg_block_checkpointing(
+                2, 64, 3, 1, 1, use_tebn, T, neuron_type, "NullSpikeCompressor",
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                64, 128, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
+            ),
+            avgpool_vgg_block_checkpointing(
+                2, 128, 256, 3, 1, 1, use_tebn, T, neuron_type,
+                spike_compressor, **kwargs
+            ),
+            vgg_block_checkpointing(
+                256, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
+            ),
+            avgpool_vgg_block_checkpointing(
+                2, 256, 512, 3, 1, 1, use_tebn, T, neuron_type,
+                spike_compressor, **kwargs
+            ),
+            vgg_block_checkpointing(
+                512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
+            ),
+            avgpool_vgg_block_checkpointing(
+                2, 512, 512, 3, 1, 1, use_tebn, T, neuron_type,
+                spike_compressor, **kwargs
+            ),
+            vgg_block_checkpointing(
+                512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
+            ),
+            layer.AvgPool2d(2, step_mode="m"),
+        )
+        self.dropout = layer.Dropout(dropout)
         d = int(48 / 2 / 2 / 2 / 2)
         self.classifier = nn.Linear(512 * d * d, 10)
 

@@ -140,13 +140,13 @@ class NvcompSpikeCompressor(BaseSpikeCompressor):
             compressed_dtype=torch.uint8
         )
 
-    def _compress(self, s_seq: torch.Tensor) -> nvcomp.Array:
+    def _compress(self, s_seq: torch.Tensor):
         s_seq = s_seq.reshape(-1)
         self.target_dtype = s_seq.dtype
         s_seq_compressed = self.codec.compress(s_seq)
         return s_seq_compressed
 
-    def _decompress(self, s_seq: nvcomp.Array, shape) -> torch.Tensor:
+    def _decompress(self, s_seq, shape) -> torch.Tensor:
         s_seq = self.codec.decompress(
             s_seq, target_shape=(-1,), target_dtype=self.target_dtype
         )
@@ -168,12 +168,12 @@ class BitNvcompSpikeCompressor(BaseSpikeCompressor):
             compressed_dtype=torch.uint8
         )
 
-    def _compress(self, s_seq: torch.Tensor) -> nvcomp.Array:
+    def _compress(self, s_seq: torch.Tensor):
         s_seq_compressed = bit_spike_compress(s_seq)
         s_seq_compressed = self.codec.compress(s_seq_compressed)
         return s_seq_compressed
 
-    def _decompress(self, s_seq: nvcomp.Array, shape) -> torch.Tensor:
+    def _decompress(self, s_seq, shape) -> torch.Tensor:
         s_seq = self.codec.decompress(
             s_seq, target_shape=(-1,), target_dtype=torch.uint8
         ) + 0  #? An error occurs if s_seq is directly handled by triton. `+0` is a workaround.

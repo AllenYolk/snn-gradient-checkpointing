@@ -7,6 +7,7 @@ from ..compress import *
 from ..neuron import SlidingPSN, PSN
 from ..kernels import *
 from .checkpointing import SNNCheckpointingBlockFunction
+from ..tebn import TEBNProjection
 
 
 class Conv2dLIF(BaseCheckpointingBlock):
@@ -364,6 +365,584 @@ class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
+        )
+
+
+class Conv2dTEBNLIF(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron,
+        tebn_proj_weight,
+        in_backward=False
+    ):
+        x_seq = conv2d_tebn_forward(
+            x_seq,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight
+        )
+        return neuron(x_seq)
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron,
+            self.tebn_proj.p,
+        )
+
+
+class Conv2dTEBNSlidingPSN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        tebn_proj_weight,
+        in_backward=False
+    ):
+        x_seq = conv2d_tebn_forward(
+            x_seq,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight
+        )
+        return SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
+            self.tebn_proj.p,
+        )
+
+
+class AvgPool2dConv2dBNLIF(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool2d,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.bn = bn
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron,
+        in_backward=False
+    ):
+        x_seq = avgpool2d_conv2d_bn_forward(
+            x_seq,
+            pool_kernel_size,
+            pool_stride,
+            pool_padding,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        return neuron(x_seq)
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron,
+        )
+
+
+class AvgPool2dConv2dBNPSN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool2d,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.bn = bn
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron_weight,
+        neuron_bias,
+        in_backward=False
+    ):
+        x_seq = avgpool2d_conv2d_bn_forward(
+            x_seq,
+            pool_kernel_size,
+            pool_stride,
+            pool_padding,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron.weight,
+            self.neuron.bias,
+        )
+
+
+class AvgPool2dConv2dBNSlidingPSN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool2d,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.bn = bn
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        in_backward=False
+    ):
+        x_seq = avgpool2d_conv2d_bn_forward(
+            x_seq,
+            pool_kernel_size,
+            pool_stride,
+            pool_padding,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        return SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
+        )
+
+
+class AvgPool2dConv2dTEBNLIF(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool2d,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron,
+        tebn_proj_weight,
+        in_backward=False
+    ):
+        x_seq = avgpool2d_conv2d_tebn_forward(
+            x_seq,
+            pool_kernel_size,
+            pool_stride,
+            pool_padding,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight
+        )
+        return neuron(x_seq)
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron,
+            self.tebn_proj.p,
+        )
+
+
+class AvgPool2dConv2dTEBNSlidingPSN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool2d,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.pool = pool
+        self.proj = proj
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        tebn_proj_weight,
+        in_backward=False
+    ):
+        x_seq = avgpool2d_conv2d_tebn_forward(
+            x_seq,
+            pool_kernel_size,
+            pool_stride,
+            pool_padding,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight
+        )
+        return SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
+            self.tebn_proj.p,
         )
 
 

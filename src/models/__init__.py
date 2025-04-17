@@ -6,3 +6,4 @@ from .merge_split import *
 from .amp import *
 from .optimizer import *
 from .sew_resnet import *
+from .vgg import *

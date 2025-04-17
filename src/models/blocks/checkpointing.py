@@ -1,6 +1,5 @@
 import torch
 import torch.autograd as autograd
-from nvidia import nvcomp
 
 from ..amp import get_autocast_context, is_autocast_enabled
 

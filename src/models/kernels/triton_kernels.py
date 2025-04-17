@@ -588,6 +588,7 @@ try:
         return s_seq_decompressed.reshape(shape)
 
 except Exception as e:
+    import torch
     TRITON_AVAILABLE = False
     TRITON_BFLOAT16_AVAILABLE = False
     TRITON_FLOAT8E4NV_AVAILABLE = False
