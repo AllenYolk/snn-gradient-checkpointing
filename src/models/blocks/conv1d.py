@@ -25,8 +25,15 @@ class Conv1dLIF(BaseCheckpointingBlock):
 
     @staticmethod
     def conventional_forward(
-        x_seq, weight, bias, stride, padding, dilation, groups, neuron,
-        in_backward
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        neuron,
+        in_backward=False,  # will be used in checkpointing function
     ):
         y_seq = conv1d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
@@ -72,7 +79,7 @@ class Conv1dPSN(BaseCheckpointingBlock):
         groups,
         neuron_weight,
         neuron_bias,
-        in_backward=False
+        in_backward=False,  # will be used in checkpointing function
     ):
         x_seq = conv1d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
@@ -120,7 +127,7 @@ class Conv1dSlidingPSN(BaseCheckpointingBlock):
         neuron_weight,
         neuron_bias,
         neuron_k,
-        in_backward=False
+        in_backward=False,  # will be used in checkpointing function
     ):
         x_seq = conv1d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups

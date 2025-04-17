@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
-from spikingjelly.activation_based import layer, functional
+from spikingjelly.activation_based import layer
 
 from ..blocks import get_block, neuron_type_to_str
 from ..neuron import get_neuron
 from ..compress import *
+from ..merge_split import RepeatT
 
 
 def _conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -79,6 +80,76 @@ class BasicBlock(nn.Module):
         return out
 
 
+class BasicBlockCheckpointing(nn.Module):
+    expansion = 1
+
+    def __init__(
+        self,
+        neuron_type,
+        spike_compressor: str,
+        in_planes,
+        planes,
+        stride=1,
+        downsample=None,
+        groups=1,
+        base_width=64,
+        dilation=1,
+        norm_layer=nn.BatchNorm2d,
+        forced_uint8: bool = True,
+        **kwargs  # neuronal parameters
+    ):
+        super().__init__()
+        if groups != 1 or base_width != 64:
+            raise ValueError(
+                'SpikingBasicBlock only supports groups=1 and base_width=64'
+            )
+        if dilation > 1:
+            raise NotImplementedError(
+                "Dilation > 1 not supported in SpikingBasicBlock"
+            )
+        if norm_layer != nn.BatchNorm2d:
+            raise NotImplementedError(
+                "Only nn.BatchNorm2d is supported in BasicBlockCheckpointing"
+            )
+        spike_compressor_class = get_spike_compressor(spike_compressor)
+        forced_uint8 = (
+            spike_compressor_class.requires_strictly_binary and forced_uint8
+        )
+
+        self.conv_bn_sn1 = get_block(
+            block_type=f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=_conv3x3(in_planes, planes, stride),
+            bn=norm_layer(planes),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(
+                "Uint8SpikeCompressor" if forced_uint8 else spike_compressor
+            ),
+        )
+
+        self.conv_bn_sn2 = get_block(
+            block_type=f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=_conv3x3(planes, planes),
+            bn=norm_layer(planes),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv_bn_sn1(x)
+        out = self.conv_bn_sn2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out = identity + out
+
+        return out
+
+
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -95,7 +166,7 @@ class Bottleneck(nn.Module):
         norm_layer=nn.BatchNorm2d,
         **kwargs,  # neuronal parameters
     ):
-        super(Bottleneck, self).__init__()
+        super().__init__()
         width = int(planes * (base_width/64.)) * groups
         self.conv1 = layer.SeqToANNContainer(
             _conv1x1(in_planes, width), norm_layer(width)
@@ -130,6 +201,75 @@ class Bottleneck(nn.Module):
         return out
 
 
+class BottleneckCheckpointing(nn.Module):
+    expansion = 4
+
+    def __init__(
+        self,
+        neuron_type,
+        spike_compressor: str,
+        in_planes,
+        planes,
+        stride=1,
+        downsample=None,
+        groups=1,
+        base_width=64,
+        dilation=1,
+        norm_layer=nn.BatchNorm2d,
+        forced_uint8: bool = True,
+        **kwargs,  # neuronal parameters
+    ):
+        super().__init__()
+        width = int(planes * (base_width/64.)) * groups
+        spike_compressor_class = get_spike_compressor(spike_compressor)
+        forced_uint8 = (
+            spike_compressor_class.requires_strictly_binary and forced_uint8
+        )
+
+        self.conv_bn_sn1 = get_block(
+            block_type=f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=_conv1x1(in_planes, width),
+            bn=norm_layer(width),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(
+                "Uint8SpikeCompressor" if forced_uint8 else spike_compressor
+            ),
+        )
+
+        self.conv_bn_sn2 = get_block(
+            block_type=f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=_conv3x3(width, width, stride, groups, dilation),
+            bn=norm_layer(width),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+        self.conv_bn_sn3 = get_block(
+            block_type=f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=_conv1x1(width, planes * self.expansion),
+            bn=norm_layer(planes * self.expansion),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv_bn_sn1(x)
+        out = self.conv_bn_sn2(out)
+        out = self.conv_bn_sn3(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out = identity + out
+
+        return out
+
+
 def _zero_init_blocks(net: nn.Module):
     for m in net.modules():
         if isinstance(m, Bottleneck):
@@ -152,6 +292,8 @@ class SEWResNet(nn.Module):
         width_per_group=64,
         replace_stride_with_dilation=None,
         norm_layer=nn.BatchNorm2d,
+        checkpointing=False,
+        spike_compressor="IdentitySpikeCompressor",
         **kwargs,  # neuronal parameters
     ):
         super().__init__()
@@ -159,6 +301,18 @@ class SEWResNet(nn.Module):
         self.T = T
         self.in_planes = 64
         self.dilation = 1
+        self.checkpointing = checkpointing
+        block_end_with_checkpointing = block.__name__.endswith("Checkpointing")
+        if checkpointing and not block_end_with_checkpointing:
+            raise ValueError(
+                "If checkpointing=True, block type should also "
+                "enable checkpointing!"
+            )
+        if not checkpointing and block_end_with_checkpointing:
+            raise ValueError(
+                "If checkpointing=False, block type should not "
+                "enable checkpointing!"
+            )
         if replace_stride_with_dilation is None:
             replace_stride_with_dilation = [False, False, False]
         if len(replace_stride_with_dilation) != 3:
@@ -170,17 +324,45 @@ class SEWResNet(nn.Module):
         self.groups = groups
         self.base_width = width_per_group
 
-        self.conv1 = nn.Conv2d(
-            3, self.in_planes, kernel_size=7, stride=2, padding=3, bias=False
-        )
-        self.bn1 = norm_layer(self.in_planes)
-        self.sn1 = get_neuron(neuron_type, **kwargs)
-        self.maxpool = layer.MaxPool2d(
-            kernel_size=3, stride=2, padding=1, step_mode="m"
+        self.pre_conv = get_block(
+            f"Conv2dBNRepeat{neuron_type_to_str(neuron_type)}MaxPool2d",
+            proj=nn.Conv2d(
+                3,
+                self.in_planes,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False,
+            ),
+            bn=norm_layer(self.in_planes),
+            T=T,
+            neuron=get_neuron(neuron_type, **kwargs),
+            pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            spike_compressor=get_spike_compressor("NullSpikeCompressor"),
+        ) if checkpointing else nn.Sequential(
+            nn.Conv2d(
+                3,
+                self.in_planes,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False,
+            ),
+            norm_layer(self.in_planes),
+            RepeatT(T),
+            get_neuron(neuron_type, **kwargs),
+            layer.MaxPool2d(kernel_size=3, stride=2, padding=1, step_mode="m"),
         )
 
         self.layer1 = self._make_layer(
-            neuron_type, block, 64, layers[0], **kwargs
+            neuron_type,
+            block,
+            64,
+            layers[0],
+            checkpointing=checkpointing,
+            spike_compressor=spike_compressor,
+            forced_1st_uint8=False,  # input to its first res block is binary!
+            **kwargs
         )
         self.layer2 = self._make_layer(
             neuron_type,
@@ -189,6 +371,9 @@ class SEWResNet(nn.Module):
             layers[1],
             stride=2,
             dilate=replace_stride_with_dilation[0],
+            checkpointing=checkpointing,
+            spike_compressor=spike_compressor,
+            forced_1st_uint8=True,
             **kwargs,
         )
         self.layer3 = self._make_layer(
@@ -198,6 +383,9 @@ class SEWResNet(nn.Module):
             layers[2],
             stride=2,
             dilate=replace_stride_with_dilation[1],
+            checkpointing=checkpointing,
+            spike_compressor=spike_compressor,
+            forced_1st_uint8=True,
             **kwargs,
         )
         self.layer4 = self._make_layer(
@@ -207,6 +395,9 @@ class SEWResNet(nn.Module):
             layers[3],
             stride=2,
             dilate=replace_stride_with_dilation[2],
+            checkpointing=checkpointing,
+            spike_compressor=spike_compressor,
+            forced_1st_uint8=True,
             **kwargs,
         )
         self.avgpool = layer.AdaptiveAvgPool2d((1, 1), step_mode="m")
@@ -232,16 +423,32 @@ class SEWResNet(nn.Module):
         blocks,
         stride=1,
         dilate=False,
+        checkpointing=False,
+        spike_compressor="IdentitySpikeCompressor",
+        forced_1st_uint8: bool = True,
         **kwargs,
     ):
         norm_layer = self._norm_layer
         downsample = None
         previous_dilation = self.dilation
+        spike_compressor_class = get_spike_compressor(spike_compressor)
+        downsample_forced_uint8 = (
+            spike_compressor_class.requires_strictly_binary and forced_1st_uint8
+        )
         if dilate:
             self.dilation *= stride
             stride = 1
         if stride != 1 or self.in_planes != planes * block.expansion:
-            downsample = nn.Sequential(
+            downsample = get_block(
+                f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+                proj=_conv1x1(self.in_planes, planes * block.expansion, stride),
+                bn=norm_layer(planes * block.expansion),
+                neuron=get_neuron(neuron_type, **kwargs),
+                spike_compressor=get_spike_compressor(
+                    "Uint8SpikeCompressor"
+                    if downsample_forced_uint8 else spike_compressor
+                ),
+            ) if checkpointing else nn.Sequential(
                 layer.SeqToANNContainer(
                     _conv1x1(self.in_planes, planes * block.expansion, stride),
                     norm_layer(planes * block.expansion),
@@ -250,9 +457,12 @@ class SEWResNet(nn.Module):
             )
 
         layers = []
+        neuron_type = [neuron_type]
+        if checkpointing:
+            neuron_type.append(spike_compressor)
         layers.append(
             block(
-                neuron_type,
+                *neuron_type,
                 self.in_planes,
                 planes,
                 stride,
@@ -261,6 +471,7 @@ class SEWResNet(nn.Module):
                 self.base_width,
                 previous_dilation,
                 norm_layer,
+                forced_uint8=forced_1st_uint8,  # input might by binary
                 **kwargs,
             )
         )
@@ -268,13 +479,14 @@ class SEWResNet(nn.Module):
         for _ in range(1, blocks):
             layers.append(
                 block(
-                    neuron_type,
+                    *neuron_type,
                     self.in_planes,
                     planes,
                     groups=self.groups,
                     base_width=self.base_width,
                     dilation=self.dilation,
                     norm_layer=norm_layer,
+                    forced_uint8=True,  # input cannot be binary
                     **kwargs
                 )
             )
@@ -283,11 +495,8 @@ class SEWResNet(nn.Module):
 
     def _forward_impl(self, x):
         # x.shape = [B, C, H, W]
-        x = self.conv1(x)
-        x = self.bn1(x)  # [B, C, H, W]
-        x = x.repeat(self.T, 1, 1, 1, 1)
-        x = self.sn1(x)  # [T, B, C, H, W]
-        x = self.maxpool(x)
+        x = self.pre_conv(x)  # [T, B, C, H, W]
+
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -301,21 +510,91 @@ class SEWResNet(nn.Module):
         return self._forward_impl(x)
 
 
-def sew_resnet18(neuron_type, **kwargs):
-    return SEWResNet(neuron_type, BasicBlock, [2, 2, 2, 2], **kwargs)
+class SEWResNet18(SEWResNet):
+
+    def __init__(self, neuron_type, **kwargs):
+        super().__init__(neuron_type, BasicBlock, [2, 2, 2, 2], **kwargs)
 
 
-def sew_resnet34(neuron_type, **kwargs):
-    return SEWResNet(neuron_type, BasicBlock, [3, 4, 6, 3], **kwargs)
+class SEWResNet34(SEWResNet):
+
+    def __init__(self, neuron_type, **kwargs):
+        super().__init__(neuron_type, BasicBlock, [3, 4, 6, 3], **kwargs)
 
 
-def sew_resnet50(neuron_type, **kwargs):
-    return SEWResNet(neuron_type, Bottleneck, [3, 4, 6, 3], **kwargs)
+class SEWResNet50(SEWResNet):
+
+    def __init__(self, neuron_type, **kwargs):
+        super().__init__(neuron_type, Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
-def sew_resnet101(neuron_type, **kwargs):
-    return SEWResNet(neuron_type, Bottleneck, [3, 4, 23, 3], **kwargs)
+class SEWResNet101(SEWResNet):
+
+    def __init__(self, neuron_type, **kwargs):
+        super().__init__(neuron_type, Bottleneck, [3, 4, 23, 3], **kwargs)
 
 
-def sew_resnet152(neuron_type, **kwargs):
-    return SEWResNet(neuron_type, Bottleneck, [3, 8, 36, 3], **kwargs)
+class SEWResNet152(SEWResNet):
+
+    def __init__(self, neuron_type, **kwargs):
+        super().__init__(neuron_type, Bottleneck, [3, 8, 36, 3], **kwargs)
+
+
+class MESEWResNet18(SEWResNet):
+
+    def __init__(self, neuron_type, spike_compressor, **kwargs):
+        super().__init__(
+            neuron_type,
+            BasicBlockCheckpointing, [2, 2, 2, 2],
+            checkpointing=True,
+            spike_compressor=spike_compressor,
+            **kwargs
+        )
+
+
+class MESEWResNet34(SEWResNet):
+
+    def __init__(self, neuron_type, spike_compressor, **kwargs):
+        super().__init__(
+            neuron_type,
+            BasicBlockCheckpointing, [3, 4, 6, 3],
+            checkpointing=True,
+            spike_compressor=spike_compressor,
+            **kwargs
+        )
+
+
+class MESEWResNet50(SEWResNet):
+
+    def __init__(self, neuron_type, spike_compressor, **kwargs):
+        super().__init__(
+            neuron_type,
+            BottleneckCheckpointing, [3, 4, 6, 3],
+            checkpointing=True,
+            spike_compressor=spike_compressor,
+            **kwargs
+        )
+
+
+class MESEWResNet101(SEWResNet):
+
+    def __init__(self, neuron_type, spike_compressor, **kwargs):
+        super().__init__(
+            neuron_type,
+            BottleneckCheckpointing, [3, 4, 23, 3],
+            checkpointing=True,
+            spike_compressor=spike_compressor,
+            **kwargs
+        )
+
+
+class MESEWResNet152(SEWResNet):
+
+    def __init__(self, neuron_type, spike_compressor, **kwargs):
+        super().__init__(
+            neuron_type,
+            BottleneckCheckpointing, [3, 8, 36, 3],
+            checkpointing=True,
+            spike_compressor=spike_compressor,
+            **kwargs
+        )

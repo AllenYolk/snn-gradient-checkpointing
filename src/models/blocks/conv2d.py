@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.autograd as autograd
+import torch.nn.functional as F
 
 from .base import BaseCheckpointingBlock
 from ..compress import *
@@ -32,7 +32,7 @@ class Conv2dLIF(BaseCheckpointingBlock):
         dilation,
         groups,
         neuron,
-        in_backward=False
+        in_backward=False,  # will be used in checkpointing function
     ):
         x_seq = conv2d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
@@ -78,7 +78,7 @@ class Conv2dPSN(BaseCheckpointingBlock):
         groups,
         neuron_weight,
         neuron_bias,
-        in_backward=False
+        in_backward=False,  # will be used in checkpointing function
     ):
         x_seq = conv2d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
@@ -98,79 +98,6 @@ class Conv2dPSN(BaseCheckpointingBlock):
             self.proj.groups,
             self.neuron.weight,
             self.neuron.bias,
-        )
-
-
-class _Conv2dSlidingPSNAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, stride, padding, dilation, groups,
-        neuron_weight, neuron_bias, neuron_k, spike_compressor
-    ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq), weight, bias, neuron_weight,
-                neuron_bias
-            )
-            ctx.stride = stride
-            ctx.padding = padding
-            ctx.dilation = dilation
-            ctx.groups = groups
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-            ctx.neuron_k = neuron_k
-        x_seq = conv2d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
-        return SlidingPSN.forward_function(
-            x_seq, neuron_weight, neuron_bias, neuron_k
-        )
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_neuron_weight, grad_neuron_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            stride, padding, dilation, groups = (
-                ctx.stride, ctx.padding, ctx.dilation, ctx.groups
-            )
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            neuron_k = ctx.neuron_k
-            x_seq, weight, bias, neuron_weight, neuron_bias = ctx.saved_tensors
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                neuron_weight = neuron_weight.detach().requires_grad_(True)
-                neuron_bias = neuron_bias.detach().requires_grad_(True)
-                y_seq = conv2d_forward(
-                    x_seq, weight, bias, stride, padding, dilation, groups
-                )
-                s_seq = SlidingPSN.forward_function(
-                    y_seq, neuron_weight, neuron_bias, neuron_k
-                )
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[7]:
-                grad_neuron_weight = neuron_weight.grad
-            if ctx.needs_input_grad[8]:
-                grad_neuron_bias = neuron_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, None, None, None, None,
-            grad_neuron_weight, grad_neuron_bias, None, None
         )
 
 
@@ -199,7 +126,7 @@ class Conv2dSlidingPSN(BaseCheckpointingBlock):
         neuron_weight,
         neuron_bias,
         neuron_k,
-        in_backward=False
+        in_backward=False,  # will be used in checkpointing function
     ):
         x_seq = conv2d_forward(
             x_seq, weight, bias, stride, padding, dilation, groups
@@ -222,109 +149,6 @@ class Conv2dSlidingPSN(BaseCheckpointingBlock):
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
-        )
-
-
-class _Conv2dBNLIFAutogradFunction(autograd.Function):
-
-    @staticmethod
-    def forward(
-        ctx, x_seq, weight, bias, stride, padding, dilation, groups, bn_weight,
-        bn_bias, bn_running_mean, bn_running_var, training, neuron,
-        spike_compressor
-    ):
-        if any(ctx.needs_input_grad):
-            ctx.save_for_backward(
-                spike_compressor.compress(x_seq),
-                weight,
-                bias,
-                bn_weight,
-                bn_bias,
-                bn_running_mean,
-                bn_running_var,
-            )
-            ctx.stride = stride
-            ctx.padding = padding
-            ctx.dilation = dilation
-            ctx.groups = groups
-            ctx.training = training
-            ctx.neuron = neuron
-            ctx.spike_compressor = spike_compressor
-            ctx.x_seq_shape = x_seq.shape
-        x_seq = conv2d_bn_forward(
-            x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
-            bn_running_mean,
-            bn_running_var,
-            training,
-            momentum=0.  # disable running stats update
-        )
-        return neuron(x_seq)
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        grad_x_seq, grad_weight, grad_bias = None, None, None
-        grad_bn_weight, grad_bn_bias = None, None
-
-        if any(ctx.needs_input_grad):
-            stride, padding, dilation, groups = (
-                ctx.stride, ctx.padding, ctx.dilation, ctx.groups
-            )
-            training = ctx.training
-            neuron = ctx.neuron
-            spike_compressor = ctx.spike_compressor
-            x_seq_shape = ctx.x_seq_shape
-            x_seq, weight, bias = ctx.saved_tensors[:3]
-            bn_weight, bn_bias = ctx.saved_tensors[3:5]
-            bn_running_mean, bn_running_var = ctx.saved_tensors[5:]
-            x_seq = spike_compressor.decompress(x_seq, x_seq_shape)
-
-            with torch.set_grad_enabled(True):
-                #! y = x.detach() => y is just a new "pointer" to x's data.
-                #! No extra memory is allocated.
-                x_seq = x_seq.detach().requires_grad_(True)
-                weight = weight.detach().requires_grad_(True)
-                bias = bias.detach().requires_grad_(True)
-                bn_weight = bn_weight.detach().requires_grad_(True)
-                bn_bias = bn_bias.detach().requires_grad_(True)
-                y_seq = conv2d_bn_forward(
-                    x_seq,
-                    weight,
-                    bias,
-                    stride,
-                    padding,
-                    dilation,
-                    groups,
-                    bn_weight,
-                    bn_bias,
-                    bn_running_mean,
-                    bn_running_var,
-                    training,
-                    momentum=0.1
-                )
-                s_seq = neuron(y_seq)
-                s_seq.backward(grad_s_seq)
-
-            if ctx.needs_input_grad[0]:
-                grad_x_seq = x_seq.grad
-            if ctx.needs_input_grad[1]:
-                grad_weight = weight.grad
-            if ctx.needs_input_grad[2]:
-                grad_bias = bias.grad
-            if ctx.needs_input_grad[7]:
-                grad_bn_weight = bn_weight.grad
-            if ctx.needs_input_grad[8]:
-                grad_bn_bias = bn_bias.grad
-        return (
-            grad_x_seq, grad_weight, grad_bias, None, None, None, None,
-            grad_bn_weight, grad_bn_bias, None, None, None, None, None
         )
 
 
@@ -540,4 +364,279 @@ class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
+        )
+
+
+class Conv2dBNRepeatLIFMaxPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        T: int,
+        neuron: nn.Module,
+        pool: nn.MaxPool2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.T = T
+        self.neuron = neuron
+        self.pool = pool
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        T,
+        neuron,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        pool_dilation,
+        in_backward=False
+    ):
+        x = conv2d_bn_ann_forward(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
+        x_seq = neuron(x_seq)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        return x_seq.reshape(T, -1, *x_seq.shape[1:])
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.T,
+            self.neuron,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.pool.dilation,
+        )
+
+
+class Conv2dBNRepeatPSNMaxPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        T: int,
+        neuron: nn.Module,
+        pool: nn.MaxPool2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.T = T
+        self.neuron = neuron
+        self.pool = pool
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        T,
+        neuron_weight,
+        neuron_bias,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        pool_dilation,
+        in_backward=False
+    ):
+        x = conv2d_bn_ann_forward(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
+        x_seq = PSN.forward_function(x_seq, neuron_weight, neuron_bias)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        return x_seq.reshape(T, -1, *x_seq.shape[1:])
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.T,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.pool.dilation,
+        )
+
+
+class Conv2dBNSlidingRepeatPSNMaxPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        T: int,
+        neuron: nn.Module,
+        pool: nn.MaxPool2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.T = T
+        self.neuron = neuron
+        self.pool = pool
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        T,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        pool_dilation,
+        in_backward=False
+    ):
+        x = conv2d_bn_ann_forward(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
+        x_seq = SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        return x_seq.reshape(T, -1, *x_seq.shape[1:])
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.T,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.pool.dilation,
         )

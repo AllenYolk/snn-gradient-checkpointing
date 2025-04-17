@@ -173,6 +173,24 @@ def conv2d_bn_forward_compiled(
     return y_seq
 
 
+@_conditional_compile()
+def conv2d_bn_ann_forward_compiled(
+    x, weight, bias, stride, padding, dilation, groups, bn_weight, bn_bias,
+    bn_running_mean, bn_running_var, training, momentum
+):
+    x = F.conv2d(x, weight, bias, stride, padding, dilation, groups)
+    x = F.batch_norm(
+        x,
+        bn_running_mean,
+        bn_running_var,
+        bn_weight,
+        bn_bias,
+        training=training,
+        momentum=momentum
+    )
+    return x
+
+
 #===============================================================================
 #                           Spiking Neurons                                    =
 #===============================================================================

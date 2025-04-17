@@ -15,3 +15,11 @@ class BaseCheckpointingBlock(nn.Module):
 
     def forward(self, x_seq: torch.Tensor):
         raise NotImplementedError("The forward function is not implemented.")
+
+    def extra_repr(self) -> str:
+        if hasattr(self, "spike_compressor"):
+            return (
+                f"Spike compressor: {self.spike_compressor.__class__.__name__}"
+            )
+        else:
+            return ""

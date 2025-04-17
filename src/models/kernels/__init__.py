@@ -26,6 +26,8 @@ api = {
         conv2d_forward_compiled,
     "conv2d_bn_forward":
         conv2d_bn_forward_compiled,
+    "conv2d_bn_ann_forward":
+        conv2d_bn_ann_forward_compiled,
     "handwritten_lif_forward":
         handwritten_lif_forward_compiled,
     "handwritten_lif_backward_not_detached":
@@ -86,6 +88,7 @@ conv1d_bn_forward = api["conv1d_bn_forward"]
 avgpool1d_conv1d_bn_forward = api["avgpool1d_conv1d_bn_forward"]
 conv2d_forward = api["conv2d_forward"]
 conv2d_bn_forward = api["conv2d_bn_forward"]
+conv2d_bn_ann_forward = api["conv2d_bn_ann_forward"]
 handwritten_lif_forward = api["handwritten_lif_forward"]
 handwritten_lif_backward_not_detached = (
     api["handwritten_lif_backward_not_detached"]

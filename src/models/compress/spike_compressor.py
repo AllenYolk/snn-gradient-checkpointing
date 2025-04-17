@@ -44,6 +44,7 @@ class NullSpikeCompressor(BaseSpikeCompressor):
     instance, the input layer should always use NullSpikeCompressor, as its 
     input is a float tensor rather than a spike tensor.
     """
+    requires_strictly_binary = False
 
     def __init__(self):
         super().__init__()
@@ -63,6 +64,7 @@ class IdentitySpikeCompressor(BaseSpikeCompressor):
     if amp is enabled, as it decompresses the tensor to low-precision float even
     if the original tensor is with float32 dtype.
     """
+    requires_strictly_binary = False
 
     def __init__(self):
         super().__init__()
@@ -78,6 +80,8 @@ class IdentitySpikeCompressor(BaseSpikeCompressor):
 
 class BooleanSpikeCompressor(BaseSpikeCompressor):
 
+    requires_strictly_binary = True
+
     def __init__(self):
         super().__init__()
 
@@ -92,6 +96,8 @@ class BooleanSpikeCompressor(BaseSpikeCompressor):
 
 class Uint8SpikeCompressor(BaseSpikeCompressor):
 
+    requires_strictly_binary = False
+
     def __init__(self):
         super().__init__()
 
@@ -105,6 +111,8 @@ class Uint8SpikeCompressor(BaseSpikeCompressor):
 
 
 class BitSpikeCompressor(BaseSpikeCompressor):
+
+    requires_strictly_binary = True
 
     def __init__(self):
         super().__init__()
@@ -122,6 +130,8 @@ class BitSpikeCompressor(BaseSpikeCompressor):
 
 
 class NvcompSpikeCompressor(BaseSpikeCompressor):
+
+    requires_strictly_binary = False
 
     def __init__(self):
         super().__init__()
@@ -149,6 +159,8 @@ class NvcompSpikeCompressor(BaseSpikeCompressor):
 
 class BitNvcompSpikeCompressor(BaseSpikeCompressor):
 
+    requires_strictly_binary = True
+
     def __init__(self):
         super().__init__()
         self.codec = NvcompCompressor(
@@ -173,6 +185,8 @@ class BitNvcompSpikeCompressor(BaseSpikeCompressor):
 
 
 class SparseSpikeCompressor(BaseSpikeCompressor):
+
+    requires_strictly_binary = True
 
     def __init__(self, dtype=torch.int64):
         super().__init__()
