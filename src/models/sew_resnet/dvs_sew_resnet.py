@@ -256,7 +256,7 @@ class DVSResNet(nn.Module):
 
     def forward(self, x: torch.Tensor):
         # x.shape = [N, T, 2, H, W]
-        x = x.permute(1, 0, 2, 3, 4)  # [T, N, 2, *, *]
+        x = x.permute(1, 0, 2, 3, 4).contiguous()  # [T, N, 2, *, *]
         x = self.conv(x)
         return self.out(x.mean(0))
 
