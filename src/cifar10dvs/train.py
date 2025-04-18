@@ -1,4 +1,4 @@
-import os
+import time
 import argparse
 from pathlib import Path
 import sys
@@ -11,7 +11,7 @@ sys.path.append("./src/cifar10dvs")
 import numpy as np
 import wandb
 import torch
-from torch.cuda import amp
+import torch.nn as nn
 import torch.utils.data as data
 from utils import use_torch_npu
 
@@ -22,19 +22,17 @@ else:
     print("NPU is not available.")
 
 import torchvision.transforms as transforms
-import torchinfo
-from spikingjelly.activation_based import functional, surrogate
+from spikingjelly.activation_based import functional
 from spikingjelly.datasets.cifar10_dvs import CIFAR10DVS as SJCIFAR10DVS
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy, tet_loss_step
-from utils import get_two_parameter_groups
-from utils import get_optimizer_wrapper, OptimizerWrapperList, LRSchedulerList
-from utils import move_state_dict_to_cpu
+from utils import accuracy, TETLoss, TMeanCrossEntropyLoss
 from utils.transforms import TransformedDatasetWrapper
 from augmentation import CIFAR10DVSNDA
 from cifar10dvs_dataset import CIFAR10DVS, move_data
 import models
+from models.optimizer import Lomo
+from models.amp import get_autocast_context, GradScaler
 
 
 def prepare_dataloaders(args):
@@ -116,81 +114,38 @@ def prepare_dataloaders(args):
 
 
 def prepare_optimizers_and_schedulers(args, net):
-    param_group1, param_group2 = get_two_parameter_groups(
-        net, r"^((first)|(features\.(?:[0-9]|1[0-5])\.))", verbose=True
+    optimizer = torch.optim.SGD(
+        net.parameters(),
+        lr=args.learning_rate,
+        momentum=args.momentum,
+        weight_decay=args.l2_factor
     )
-    if args.optimizer == 'SGD':
-        optimizer1 = torch.optim.SGD(
-            param_group1,
-            lr=args.learning_rate,
-            momentum=args.momentum,
-            weight_decay=args.l2_factor
-        )
-        optimizer2 = torch.optim.SGD(
-            param_group2,
-            lr=args.learning_rate,
-            momentum=args.momentum,
-            weight_decay=args.l2_factor
-        )
-    elif args.optimizer == 'Adam':
-        optimizer1 = torch.optim.AdamW(
-            param_group1, lr=args.learning_rate, weight_decay=args.l2_factor
-        )
-        optimizer2 = torch.optim.AdamW(
-            param_group2, lr=args.learning_rate, weight_decay=args.l2_factor
-        )
-    else:
-        raise NotImplementedError(args.opt)
 
-    if args.lr_scheduler == 'StepLR':
-        lr_scheduler1 = torch.optim.lr_scheduler.StepLR(
-            optimizer1, step_size=args.step_size, gamma=args.gamma
-        )
-        lr_scheduler2 = torch.optim.lr_scheduler.StepLR(
-            optimizer2, step_size=args.step_size, gamma=args.gamma
-        )
-    elif args.lr_scheduler == 'CosALR':
-        lr_scheduler1 = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer1, T_max=args.T_max
-        )
-        lr_scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer2, T_max=args.T_max
-        )
-    else:
-        raise NotImplementedError(args.lr_scheduler)
-
-    optimizer1 = get_optimizer_wrapper(
-        method=args.optimizer_wrapper,
-        optimizer=optimizer1,
-        rho=args.optimizer_wrapper_rho
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs
     )
-    optimizer2 = get_optimizer_wrapper(method="vanilla", optimizer=optimizer2)
 
-    return (
-        OptimizerWrapperList([optimizer1, optimizer2]),
-        LRSchedulerList([lr_scheduler1, lr_scheduler2])
-    )
+    if args.lomo:
+        optimizer = Lomo(optimizer)
+
+    return optimizer, lr_scheduler
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Classify CIFAR10DVS')
     parser.add_argument('-T', '--T', default=10, type=int)
-    parser.add_argument('-dl', "--decay_lambda", default=0.5, type=float)
+    parser.add_argument("-neuron", "--neuron_type", default='LIF', type=str)
     parser.add_argument(
-        '-b', "--batch_size", default=128, type=int, help='batch size'
+        "-sc",
+        "--spike_compressor",
+        default="IdentitySpikeCompressor",
+        type=str
     )
-    parser.add_argument(
-        '-e',
-        '--epochs',
-        default=300,
-        type=int,
-    )
-    parser.add_argument(
-        '-nw',
-        "--num_workers",
-        default=4,
-        type=int,
-    )
+    parser.add_argument("-net", "--network", default="CIFAR10DVSVGG", type=str)
+    parser.add_argument('-dl', "--decay_lambda", default=0.25, type=float)
+    parser.add_argument('-b', "--batch_size", default=32, type=int)
+    parser.add_argument('-e', '--epochs', default=100, type=int)
+    parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(
         '--data_dir',
         type=str,
@@ -203,66 +158,14 @@ def parse_args():
         help='automatic mixed precision training'
     )
     parser.add_argument(
-        '-opt',
-        "--optimizer",
-        type=str,
-        help='use which optimizer. SGD or Adam',
-        default='SGD'
+        "-loss", "--loss", default="tet", type=str, choices=["ce", "tet"]
     )
-    parser.add_argument(
-        '-lr', "--learning_rate", default=0.1, type=float, help='learning rate'
-    )
-    parser.add_argument(
-        '-mom', '--momentum', default=0.9, type=float, help='momentum for SGD'
-    )
-    parser.add_argument(
-        '-sch',
-        '--lr_scheduler',
-        default='CosALR',
-        type=str,
-        help='use which schedule. StepLR or CosALR'
-    )
-    parser.add_argument(
-        '-step_size',
-        '--step_size',
-        default=100,
-        type=float,
-        help='step_size for StepLR'
-    )
-    parser.add_argument(
-        '-gamma', '--gamma', default=0.1, type=float, help='gamma for StepLR'
-    )
-    parser.add_argument(
-        '-T_max',
-        '--T_max',
-        default=300,
-        type=int,
-        help='T_max for CosineAnnealingLR'
-    )
-    parser.add_argument(
-        '-m', '--model', type=str, default='online_spiking_vgg11'
-    )
-    parser.add_argument('-ou', '--online_update', action='store_true')
-    parser.add_argument(
-        "-bn", "--batch_normalization", type=str, default="None"
-    )
-    parser.add_argument(
-        "-ots", "--online_threshold_stabilization", action="store_true"
-    )
+    parser.add_argument('-lr', "--learning_rate", default=0.1, type=float)
+    parser.add_argument('-mom', '--momentum', default=0.9, type=float)
     parser.add_argument('-l2', '--l2_factor', type=float, default=5e-4)
-    parser.add_argument('-ll', '--loss_lambda', type=float, default=0.001)
-    parser.add_argument("-rtnl", "--rate_till_now_loss", action="store_true")
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
-    parser.add_argument("-r", "--learning_rule", default="OTTT", type=str)
-    parser.add_argument("-dr", "--dropout", default=0.1, type=float)
-    parser.add_argument(
-        "-ow", "--optimizer_wrapper", default="vanilla", type=str
-    )
-    parser.add_argument(
-        "-owr", "--optimizer_wrapper_rho", default=0.5, type=float
-    )
-    parser.add_argument("-br", "--block_rho", default=0.0, type=float)
+    parser.add_argument("-lomo", "--lomo", action='store_true')
 
     return parser.parse_args()
 
@@ -270,24 +173,20 @@ def parse_args():
 def train_step(
     net,
     train_data_loader,
-    T,
+    criterion,
     optimizer,
     lr_scheduler,
     device,
-    online_update,
-    use_amp,
-    loss_lambda,
-    rate_till_now_loss,
-    num_classes,
     scaler,
     current_epoch,
     total_epoch,
 ):
+    epoch_start_time = time.time()
     net.train()
-
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+    use_amp = scaler is not None
 
     with tqdm(
         train_data_loader,
@@ -297,77 +196,25 @@ def train_step(
     ) as pbar:
         for img, label in pbar:
             img, label = img.float().to(device), label.to(device)
-            batch_loss = 0.
-            total_spike_count = 0.  # \sum_{t}(WS[t]+b); detached
 
-            if not online_update:
-                optimizer.zero_grad()
-            optimizer.reset_state()
+            with get_autocast_context(use_amp):
+                y = net(img)  # [T, N, Categories]
+                batch_loss = criterion(y, label)
 
-            for t in range(T):
-                if online_update:
-                    optimizer.zero_grad()
-                with amp.autocast(enabled=use_amp):
-                    # calculate loss and total_spike_count
-                    if rate_till_now_loss:
-                        # Even if online_update is True, we use the same method
-                        # as that of online_update=False to calculate rate_till_now,
-                        # since we assume that the online update is small and
-                        # has negligible effects on rate_till_now. See the OTTT
-                        # paper for more details.
-                        frame = img[:, t]
-                        out_spike = net(frame, init=(t == 0))  # WS[t]+b
-                        rate_till_now = total_spike_count + out_spike
-                        rate_till_now = rate_till_now / (t+1)
-                        loss = tet_loss_step(
-                            rate_till_now,
-                            label,
-                            loss_lambda,
-                            target_is_label=True,
-                            num_classes=num_classes
-                        ) / T
-                        total_spike_count += out_spike.clone().detach()
-                    else:
-                        frame = img[:, t]
-                        out_spike = net(frame, init=(t == 0))  # WS[t]+b
-                        loss = tet_loss_step(
-                            out_spike,
-                            label,
-                            loss_lambda,
-                            target_is_label=True,
-                            num_classes=num_classes
-                        ) / T
-                        total_spike_count += out_spike.clone().detach()
-
-                if use_amp and (scaler is not None):
-                    scaler.scale(loss).backward()
-                    optimizer.minor_step(t)
-                    if online_update:
-                        scaler.step(optimizer)
-                        scaler.update()
-                else:
-                    loss.backward()
-                    optimizer.minor_step(t)
-                    if online_update:
-                        optimizer.step()
-                batch_loss += loss.item()
-
-            if not online_update:
-                if use_amp and (scaler is not None):
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    optimizer.step()
+            if use_amp:
+                scaler.scale(batch_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                batch_loss.backward()
+                optimizer.step()
+            optimizer.zero_grad()
 
             functional.reset_net(net)
-
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(
-                total_spike_count.data, label.data, topk=(1, 5)
-            )
-            losses.update(batch_loss, frame.size(0))
-            top1.update(prec1.item(), frame.size(0))
-            top5.update(prec5.item(), frame.size(0))
+            prec1, prec5 = accuracy(y.mean(dim=0).data, label.data, topk=(1, 5))
+            losses.update(batch_loss.item(), label.size(0))
+            top1.update(prec1.item(), label.size(0))
+            top5.update(prec5.item(), label.size(0))
 
             pbar.set_postfix({
                 "loss": losses.avg,
@@ -375,27 +222,21 @@ def train_step(
                 "top5_acc": top5.avg,
             })
 
-        if lr_scheduler is not None:
-            lr_scheduler.step()
+    if lr_scheduler is not None:
+        lr_scheduler.step()
 
-        return {
-            "loss": losses.avg,
-            "top1_acc": top1.avg,
-            "top5_acc": top5.avg,
-        }
+    epoch_end_time = time.time()
+    epoch_time = epoch_end_time - epoch_start_time  # unit: second
+    return {
+        "loss": losses.avg,
+        "top1_acc": top1.avg,
+        "top5_acc": top5.avg,
+        "time": epoch_time
+    }
 
 
-def val_step(
-    net,
-    test_data_loader,
-    T,
-    device,
-    loss_lambda,
-    rate_till_now_loss,
-    num_classes,
-):
+def val_step(net, test_data_loader, device, criterion):
     net.eval()
-
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
@@ -403,42 +244,16 @@ def val_step(
     with torch.no_grad():
         for img, label in test_data_loader:
             img, label = img.float().to(device), label.to(device)
-            batch_loss = 0.
-            total_spike_count = 0.  # \sum_{t}(WS[t]+b)
 
-            for t in range(T):
-                frame = img[:, t]
-                out_spike = net(frame, init=(t == 0))  # WS[t]+b
-                # calculate loss
-                if rate_till_now_loss:
-                    rate_till_now = total_spike_count + out_spike
-                    rate_till_now = rate_till_now / (t+1)
-                    loss = tet_loss_step(
-                        rate_till_now,
-                        label,
-                        loss_lambda,
-                        target_is_label=True,
-                        num_classes=num_classes
-                    ) / T
-                else:
-                    loss = tet_loss_step(
-                        out_spike,
-                        label,
-                        loss_lambda,
-                        target_is_label=True,
-                        num_classes=num_classes
-                    ) / T
-                total_spike_count += out_spike.clone().detach()
-                batch_loss += loss.item()
+            y = net(img)  # [T, N, Categories]
+            batch_loss = criterion(y, label)
 
             functional.reset_net(net)
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(
-                total_spike_count.data, label.data, topk=(1, 5)
-            )
-            losses.update(batch_loss, frame.size(0))
-            top1.update(prec1.item(), frame.size(0))
-            top5.update(prec5.item(), frame.size(0))
+            prec1, prec5 = accuracy(y.mean(dim=0).data, label.data, topk=(1, 5))
+            losses.update(batch_loss.item(), label.size(0))
+            top1.update(prec1.item(), label.size(0))
+            top5.update(prec5.item(), label.size(0))
 
     return {
         "loss": losses.avg,
@@ -453,67 +268,51 @@ def main():
 
     set_seed(args.set_seed)
 
-    run_name_generator = ModelNameGenerator(proj="cifar10dvs-online")
+    run_name_generator = ModelNameGenerator(proj="cifar10dvs-me")
     run_name = run_name_generator.generate(args)
-    model_name = run_name[:100] if len(run_name) > 100 else run_name
     wandb.require("core")
     wandb.init(
-        project="cifar10dvs-online",
+        project="cifar10dvs-me",
         entity="pkuml-spiking",
         config=args,
         name=run_name,
-        # add the following line if 'InitStartError' occurs:
-        # settings=wandb.Settings(start_method='fork')
     )
-    log_dir = Path(wandb.run.dir)
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
-    net = spiking_vgg.__dict__[args.model](
-        c_in=2,
-        fc_hw=1,
-        bn=args.batch_normalization,
-        num_classes=10,
-        learning_rule=args.learning_rule,
-        light_classifier=True,
-        T=args.T,
-        osr_bound=50.,
-        block_rho=args.block_rho,
+    net = getattr(models, args.network)(
+        T=args.T,  # for tebn and PSN
+        neuron_type=args.neuron_type,
+        spike_compressor=args.spike_compressor,
         decay_lambda=args.decay_lambda,
-        surrogate_function=surrogate.Sigmoid(alpha=4.),
-        online_threshold_stabilization=args.online_threshold_stabilization,
-        v_reset=None,  # soft reset
-        dropout=args.dropout,
+        k=8,  # for SlidingPSN
     )
-    functional.set_step_mode(net, step_mode='s')
-    try:
-        net(torch.randn(1, 2, 48, 48), init=True)
-        torchinfo.summary(net, input_size=(1, 2, 48, 48))
-    except Exception as e:
-        print(net)
+    print(net)
     net = net.to(args.device)
 
+    if args.loss == "ce":
+        criterion = TMeanCrossEntropyLoss()
+    else:
+        criterion = TETLoss(
+            base_criterion=torch.nn.CrossEntropyLoss(),
+            mean=1.,
+            tet_lambda=1e-3,
+        )
     optimizer, lr_scheduler = prepare_optimizers_and_schedulers(args, net)
 
     scaler = None
     if args.amp:
-        scaler = amp.GradScaler()
+        scaler = GradScaler()
 
     max_val_accuracy = 0.
-    assert args.learning_rule != "BPTT"
     for epoch in range(args.epochs):
         train_results = train_step(
             net,
             train_data_loader,
-            args.T,
+            criterion,
             optimizer,
             lr_scheduler,
             args.device,
-            args.online_update,
-            args.amp,
-            args.loss_lambda,
-            args.rate_till_now_loss,
-            10,
             scaler,
             epoch,
             args.epochs,
@@ -521,16 +320,14 @@ def main():
         val_results = val_step(
             net,
             val_data_loader,
-            args.T,
             args.device,
-            args.loss_lambda,
-            args.rate_till_now_loss,
-            10,
+            criterion,
         )
         wandb.log({
             "loss/train_loss": train_results["loss"],
             "acc/train_top1_acc": train_results["top1_acc"],
             "acc/train_top5_acc": train_results["top5_acc"],
+            "time/train_epoch_time": train_results["time"],
             "loss/val_loss": val_results["loss"],
             "acc/val_top1_acc": val_results["top1_acc"],
             "acc/val_top5_acc": val_results["top5_acc"],
@@ -540,19 +337,15 @@ def main():
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
+            f"time/train_epoch_time={train_results['time']}, "
             f"val_loss={val_results['loss']}, "
             f"val_top1_acc={val_results['top1_acc']}, "
             f"val_top5_acc={val_results['top5_acc']}"
         )
         if val_results["top1_acc"] > max_val_accuracy:
             max_val_accuracy = val_results["top1_acc"]
-            torch.save(net.state_dict(), log_dir / f"{model_name}.pth")
 
     wandb.summary["acc/max_val_top1_acc"] = max_val_accuracy
-    move_state_dict_to_cpu(log_dir / f"{model_name}.pth")
-    wandb.log_model(log_dir / f"{model_name}.pth")
-    os.remove(log_dir / f"{model_name}.pth")
-
     wandb.finish()
 
 

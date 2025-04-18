@@ -47,3 +47,12 @@ class RepeatT(nn.Module):
 
     def extra_repr(self):
         return f"T={self.T}"
+
+
+class AverageT(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x.mean(dim=0)

@@ -1,10 +1,9 @@
-import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from spikingjelly.activation_based import layer
 
-from .blocks import get_block, neuron_type_to_str
+from .checkpointing import get_block, neuron_type_to_str
+from .checkpointing import get_checkpointing_module
 from .neuron import get_neuron
 from .compress import *
 from .tebn import TEBNProjection
@@ -21,7 +20,7 @@ def vgg_block(
                 nn.BatchNorm2d(out_plane),
             ),
             TEBNProjection(T),
-            get_neuron(neuron_type, **kwargs),
+            get_neuron(neuron_type, T=T, **kwargs),
         )
     else:
         return nn.Sequential(
@@ -29,7 +28,7 @@ def vgg_block(
                 nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
                 nn.BatchNorm2d(out_plane),
             ),
-            get_neuron(neuron_type, **kwargs),
+            get_neuron(neuron_type, T=T, **kwargs),
         )
 
 
@@ -69,7 +68,6 @@ class CIFAR10DVSVGG(nn.Module):
         x = self.features(input)
         x = torch.flatten(x, 2)  # [T, N, D]
         x = self.dropout(x)
-        x = x.mean(dim=0)
         x = self.classifier(x)
         return x
 
@@ -84,7 +82,7 @@ def vgg_block_checkpointing(
             proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
             bn=nn.BatchNorm2d(out_plane),
             tebn_proj=TEBNProjection(T),
-            neuron=get_neuron(neuron_type, **kwargs),
+            neuron=get_neuron(neuron_type, T=T, **kwargs),
             spike_compressor=get_spike_compressor(spike_compressor)
         )
     else:
@@ -92,7 +90,7 @@ def vgg_block_checkpointing(
             f"Conv2dBN{neuron_type_to_str(neuron_type)}",
             proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
             bn=nn.BatchNorm2d(out_plane),
-            neuron=get_neuron(neuron_type, **kwargs),
+            neuron=get_neuron(neuron_type, T=T, **kwargs),
             spike_compressor=get_spike_compressor(spike_compressor)
         )
 
@@ -108,7 +106,7 @@ def avgpool_vgg_block_checkpointing(
             proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
             bn=nn.BatchNorm2d(out_plane),
             tebn_proj=TEBNProjection(T),
-            neuron=get_neuron(neuron_type, **kwargs),
+            neuron=get_neuron(neuron_type, T=T, **kwargs),
             spike_compressor=get_spike_compressor(spike_compressor)
         )
     else:
@@ -117,7 +115,7 @@ def avgpool_vgg_block_checkpointing(
             pool=nn.AvgPool2d(pool_kernel_size),
             proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
             bn=nn.BatchNorm2d(out_plane),
-            neuron=get_neuron(neuron_type, **kwargs),
+            neuron=get_neuron(neuron_type, T=T, **kwargs),
             spike_compressor=get_spike_compressor(spike_compressor)
         )
 
@@ -181,6 +179,5 @@ class MECIFAR10DVSVGG(nn.Module):
         x = self.features(input)
         x = torch.flatten(x, 2)  # [T, N, D]
         x = self.dropout(x)
-        x = x.mean(dim=0)
         x = self.classifier(x)
         return x

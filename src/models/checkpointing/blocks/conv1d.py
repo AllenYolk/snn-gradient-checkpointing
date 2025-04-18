@@ -4,10 +4,10 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 
 from .base import BaseCheckpointingBlock
-from ..compress import *
-from ..neuron import SlidingPSN, PSN
-from ..kernels import *
-from .checkpointing import SNNCheckpointingBlockFunction
+from ...compress import *
+from ...neuron import SlidingPSN, PSN
+from ...kernels import *
+from ..checkpointing import SNNCheckpointingBlockFunction
 
 
 class Conv1dLIF(BaseCheckpointingBlock):

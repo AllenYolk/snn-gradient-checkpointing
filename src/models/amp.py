@@ -14,6 +14,8 @@ CACHE_ENABLED = False
 
 
 def get_autocast_context(enabled: bool):
+    """A wrapper for torch.amp.autocast or torch.cuda.amp.autocast context.
+    """
     autocast_params = {
         "enabled": enabled,
         "dtype": AUTOCAST_DTYPE,

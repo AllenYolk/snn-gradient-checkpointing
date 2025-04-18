@@ -7,38 +7,53 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.ops import focal_loss
 
-from .misc import get_one_hot
+
+class TMeanCrossEntropyLoss(nn.CrossEntropyLoss):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, y_seq, label):
+        y = y_seq.mean(dim=0)
+        return super().forward(y, label)
 
 
-def tet_loss_step(
-    output, target, loss_lambda, target_is_label=True, num_classes=None
-):
-    """Calculate the TET loss for a single step.
+class TETLoss(nn.Module):
 
-    If loss_lambda=0, the loss is reduced to the cross-entropy loss.
-    MSE loss will not be calculated in this case.
+    def __init__(
+        self,
+        base_criterion,
+        mean: float,
+        tet_lambda: float,
+    ):
+        super().__init__()
+        self.base_criterion = base_criterion
+        self.mean = mean
+        self.tet_lambda = tet_lambda
 
-    Args:
-        output: the output of the model at a single step.
-        target: label or probabilities.
-        loss_lambda: weight for the MSE loss.
-        target_is_label: Defaults to True.
-        num_classes: required if target_is_label=True. Defaults to None.
+        if tet_lambda == 0:
+            self.regularization_loss = self._regularization_loss_0
+        else:
+            self.regularization_loss = self._regularization_loss
 
-    Returns:
-        the TET loss for a single step. Not divided by T.
-    """
-    if target_is_label:
-        target = get_one_hot(target, num_classes)
-    # `target` is a probability distribution
+    def base_criterion_loss(self, y, label):
+        T = y.shape[0]
+        l = 0
+        for t in range(T):
+            l += self.base_criterion(y[t], label)
+        return l / T
 
-    ce_loss = F.cross_entropy(output, target, label_smoothing=0.1)
-    if loss_lambda <= 0:
-        return ce_loss
+    def _regularization_loss(self, y):
+        reg = torch.full_like(y, self.mean)
+        return F.mse_loss(y, reg)
 
-    mse_loss = F.mse_loss(output, target)
-    loss = (1-loss_lambda) * ce_loss + loss_lambda*mse_loss
-    return loss
+    def _regularization_loss_0(self, y):
+        return 0.
+
+    def forward(self, y, label):
+        base_loss = self.base_criterion_loss(y, label)
+        re_loss = self.regularization_loss(y)
+        return (1. - self.tet_lambda) * base_loss + self.tet_lambda * re_loss
 
 
 def mse_loss_allowing_nan(y_pred, y_true):

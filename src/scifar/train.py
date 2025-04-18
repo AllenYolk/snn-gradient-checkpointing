@@ -98,19 +98,11 @@ def prepare_dataloaders(args):
 
 
 def prepare_optimizers_and_schedulers(args, net):
-    if args.optimizer == 'SGD':
-        optimizer = torch.optim.SGD(
-            net.parameters(),
-            lr=args.learning_rate,
-            momentum=args.momentum,
-        )
-    elif args.optimizer == 'Adam':
-        optimizer = torch.optim.AdamW(
-            net.parameters(),
-            lr=args.learning_rate,
-        )
-    else:
-        raise NotImplementedError(args.opt)
+    optimizer = torch.optim.SGD(
+        net.parameters(),
+        lr=args.learning_rate,
+        momentum=args.momentum,
+    )
 
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs
@@ -136,21 +128,9 @@ def parse_args():
     )
     parser.add_argument('-dl', "--decay_lambda", default=0.5, type=float)
     parser.add_argument("-c", "--channels", default=128, type=int)
-    parser.add_argument(
-        '-b', "--batch_size", default=128, type=int, help='batch size'
-    )
-    parser.add_argument(
-        '-e',
-        '--epochs',
-        default=300,
-        type=int,
-    )
-    parser.add_argument(
-        '-nw',
-        "--num_workers",
-        default=4,
-        type=int,
-    )
+    parser.add_argument('-b', "--batch_size", default=128, type=int)
+    parser.add_argument('-e', '--epochs', default=300, type=int)
+    parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(
         '--data_dir', type=str, default="/home/ma-user/work/datasets/CIFAR10"
     )
@@ -161,19 +141,8 @@ def parse_args():
         action='store_true',
         help='automatic mixed precision training'
     )
-    parser.add_argument(
-        '-opt',
-        "--optimizer",
-        type=str,
-        help='use which optimizer. SGD or Adam',
-        default='SGD'
-    )
-    parser.add_argument(
-        '-lr', "--learning_rate", default=0.1, type=float, help='learning rate'
-    )
-    parser.add_argument(
-        '-mom', '--momentum', default=0.9, type=float, help='momentum for SGD'
-    )
+    parser.add_argument('-lr', "--learning_rate", default=0.1, type=float)
+    parser.add_argument('-mom', '--momentum', default=0.9, type=float)
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-lomo", "--lomo", action='store_true')
@@ -256,6 +225,7 @@ def val_step(net, test_data_loader, device):
             batch_loss = F.cross_entropy(y, label)
 
             # measure accuracy and record loss
+            functional.reset_net(net)
             prec1, prec5 = accuracy(y.data, label.data, topk=(1, 5))
             losses.update(batch_loss.item(), label.size(0))
             top1.update(prec1.item(), label.size(0))

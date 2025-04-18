@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base import BaseCheckpointingBlock
-from ..compress import *
-from ..neuron import SlidingPSN, PSN
-from ..kernels import *
-from .checkpointing import SNNCheckpointingBlockFunction
-from ..tebn import TEBNProjection
+from ...compress import *
+from ...neuron import SlidingPSN, PSN
+from ...kernels import *
+from ..checkpointing import SNNCheckpointingBlockFunction
+from ...tebn import TEBNProjection
 
 
 class Conv2dLIF(BaseCheckpointingBlock):
@@ -150,6 +150,70 @@ class Conv2dSlidingPSN(BaseCheckpointingBlock):
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
+        )
+
+
+class Conv2dBN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        in_backward=False
+    ):
+        return conv2d_bn_forward(
+            x_seq,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
         )
 
 
@@ -365,6 +429,75 @@ class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
+        )
+
+
+class Conv2dTEBN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        tebn_proj_weight,
+        in_backward=False
+    ):
+        return conv2d_tebn_forward(
+            x_seq,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.tebn_proj.p,
         )
 
 

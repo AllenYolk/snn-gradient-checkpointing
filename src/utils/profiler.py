@@ -123,6 +123,11 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
                     nbytes = param.element_size() * param.numel()
                     memory_usage['weight'] += nbytes
                     weight_tensors.add(param.data_ptr())
+            for buffer in model.buffers():
+                if buffer.is_cuda:
+                    nbytes = buffer.element_size() * buffer.numel()
+                    memory_usage["buffer"] += nbytes
+                    weight_tensors.add(buffer.data_ptr())
 
         # gradients
         gradient_tensors = set()

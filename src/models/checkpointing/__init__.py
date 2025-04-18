@@ -1,12 +1,15 @@
-from .base import BaseCheckpointingBlock
-from .linear import *
-from .conv1d import *
-from .conv2d import *
-from .checkpointing import SNNCheckpointingBlockFunction
+from .blocks import *
+from .checkpointing import *
+from .checkpointing_module import *
 
 
 def get_block(block_type, **kwargs):
     return globals()[block_type](**kwargs)
+
+
+def get_checkpointing_module(module_type, **kwargs):
+    module_type = module_type + "Checkpointing"
+    return globals()[module_type](**kwargs)
 
 
 def neuron_type_to_str(neuron_type):

@@ -98,19 +98,11 @@ def prepare_dataloaders(args):
 
 
 def prepare_optimizers_and_schedulers(args, net):
-    if args.optimizer == 'SGD':
-        optimizer = torch.optim.SGD(
-            net.parameters(),
-            lr=args.learning_rate,
-            momentum=args.momentum,
-        )
-    elif args.optimizer == 'Adam':
-        optimizer = torch.optim.AdamW(
-            net.parameters(),
-            lr=args.learning_rate,
-        )
-    else:
-        raise NotImplementedError(args.opt)
+    optimizer = torch.optim.SGD(
+        net.parameters(),
+        lr=args.learning_rate,
+        momentum=args.momentum,
+    )
 
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs
@@ -134,7 +126,6 @@ def parse_args():
     parser.add_argument(
         '-net', "--network", default="MESequentialCIFARNet", type=str
     )
-    parser.add_argument('-dl', "--decay_lambda", default=0.5, type=float)
     parser.add_argument(
         '--data_dir', type=str, default="/home/ma-user/work/datasets/CIFAR10"
     )
@@ -151,12 +142,12 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
-    args.epochs = 1
+    args.decay_lambda = 0.5
+    args.epochs = 2
     args.channels = 128
     args.batch_size = 128
     args.num_workers = 4
     args.learning_rate = 0.1
-    args.optimizer = "SGD"
     args.momentum = 0.9
     return args
 
@@ -184,7 +175,7 @@ def train_step(
             with get_autocast_context(use_amp):
                 y = net(img)
                 batch_loss = F.cross_entropy(y, label)
-                profiler.profile(sort_by="forward_computation_memory")
+                profiler.profile(sort_by="forward_peak_memory")
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
@@ -232,7 +223,7 @@ def val_step(net, test_data_loader, device, profiler):
 
             y = net(img)
             batch_loss = F.cross_entropy(y, label)
-            profiler.profile(sort_by="forward_computation_memory")
+            profiler.profile(sort_by="forward_peak_memory")
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(y.data, label.data, topk=(1, 5))
@@ -256,7 +247,8 @@ def main():
     run_name = ModelNameGenerator(
         proj=f"sequential-cifar{args.num_classes}-me"
     ).generate(args)
-    log_path = Path(args.log_dir) / (run_name+".prof.txt")
+    log_path = Path(args.log_dir) / f"SCIFAR{args.num_classes}"
+    log_path = log_path / (run_name+".prof.txt")
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
@@ -288,8 +280,8 @@ def main():
     peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
     print(
         f"Before training: "
-        f"Peak allocated memory: {peak_allocated} MB, "
-        f"Peak reserved memory: {peak_reserved} MB"
+        f"peak_allocated={peak_allocated} MB, "
+        f"peak_reserved={peak_reserved} MB"
     )
 
     max_val_accuracy = 0.
@@ -375,7 +367,7 @@ def main():
         peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
 
         print(
-            f"Epoch {epoch + 1}/{args.epochs}: "
+            f"Epoch {epoch + args.epoch}/{args.epochs*2}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
@@ -387,14 +379,6 @@ def main():
         )
         if val_results["top1_acc"] > max_val_accuracy:
             max_val_accuracy = val_results["top1_acc"]
-
-    mem_stats = torch.cuda.memory_stats(args.device)
-    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
-    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
-    print(
-        f"Peak allocated memory: {peak_allocated} MB\n"
-        f"Peak reserved memory: {peak_reserved} MB"
-    )
 
 
 if __name__ == '__main__':

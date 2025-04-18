@@ -9,7 +9,7 @@ import models
 from utils import count_learnable_parameters
 from utils import set_seed
 
-DEVICE = "cpu"
+DEVICE = "cuda"
 
 
 def make_parameters_equal(net, reference_net):
@@ -92,8 +92,8 @@ def test_vgg_equality_cifar10dvs():
     with torch.no_grad():
         target = x.sum(dim=(1, 2, 3, 4)) >= 0
         target = target.long()
-    loss1 = F.cross_entropy(y1, target)
-    loss2 = F.cross_entropy(y2, target)
+    loss1 = F.cross_entropy(y1.mean(dim=0), target)
+    loss2 = F.cross_entropy(y2.mean(dim=0), target)
     assert torch.allclose(loss1, loss2)
 
     loss1.backward()

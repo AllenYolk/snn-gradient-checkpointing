@@ -9,7 +9,7 @@ import models
 from utils import count_learnable_parameters
 from utils import set_seed
 
-DEVICE = "cpu"
+DEVICE = "cuda"
 
 
 def make_parameters_equal(net, reference_net):
