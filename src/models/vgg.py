@@ -34,10 +34,10 @@ def vgg_block(
 
 class CIFAR10DVSVGG(nn.Module):
 
-    def __init__(self, T, neuron_type, dropout=0.25, **kwargs):
+    def __init__(self, T, neuron_type, dropout=0.25, allow_tebn=True, **kwargs):
         super().__init__()
 
-        use_tebn = neuron_type != "PSN"
+        use_tebn = (neuron_type != "PSN") and allow_tebn
         self.features = nn.Sequential(
             vgg_block(2, 64, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
             vgg_block(64, 128, 3, 1, 1, use_tebn, T, neuron_type, **kwargs),
@@ -96,13 +96,13 @@ def vgg_block_checkpointing(
 
 
 def avgpool_vgg_block_checkpointing(
-    pool_kernel_size, in_plane, out_plane, kernel_size, stride, padding,
-    use_tebn: bool, T, neuron_type, spike_compressor: str, **kwargs
+    in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
+    neuron_type, spike_compressor: str, **kwargs
 ):
     if use_tebn:
         return get_block(
             f"AvgPool2dConv2dTEBN{neuron_type_to_str(neuron_type)}",
-            pool=nn.AvgPool2d(pool_kernel_size),
+            pool=nn.AvgPool2d(2),
             proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
             bn=nn.BatchNorm2d(out_plane),
             tebn_proj=TEBNProjection(T),
@@ -112,7 +112,7 @@ def avgpool_vgg_block_checkpointing(
     else:
         return get_block(
             f"AvgPool2dConv2dBN{neuron_type_to_str(neuron_type)}",
-            pool=nn.AvgPool2d(pool_kernel_size),
+            pool=nn.AvgPool2d(2),
             proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
             bn=nn.BatchNorm2d(out_plane),
             neuron=get_neuron(neuron_type, T=T, **kwargs),
@@ -123,11 +123,17 @@ def avgpool_vgg_block_checkpointing(
 class MECIFAR10DVSVGG(nn.Module):
 
     def __init__(
-        self, T, neuron_type, spike_compressor: str, dropout=0.25, **kwargs
+        self,
+        T,
+        neuron_type,
+        spike_compressor: str,
+        dropout=0.25,
+        allow_tebn=True,
+        **kwargs
     ):
         super().__init__()
 
-        use_tebn = neuron_type != "PSN"
+        use_tebn = (neuron_type != "PSN") and allow_tebn
         self.features = nn.Sequential(
             vgg_block_checkpointing(
                 2, 64, 3, 1, 1, use_tebn, T, neuron_type, "NullSpikeCompressor",
@@ -138,24 +144,24 @@ class MECIFAR10DVSVGG(nn.Module):
                 **kwargs
             ),
             avgpool_vgg_block_checkpointing(
-                2, 128, 256, 3, 1, 1, use_tebn, T, neuron_type,
-                spike_compressor, **kwargs
+                128, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
             ),
             vgg_block_checkpointing(
                 256, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
                 **kwargs
             ),
             avgpool_vgg_block_checkpointing(
-                2, 256, 512, 3, 1, 1, use_tebn, T, neuron_type,
-                spike_compressor, **kwargs
+                256, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
             ),
             vgg_block_checkpointing(
                 512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
                 **kwargs
             ),
             avgpool_vgg_block_checkpointing(
-                2, 512, 512, 3, 1, 1, use_tebn, T, neuron_type,
-                spike_compressor, **kwargs
+                512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                **kwargs
             ),
             vgg_block_checkpointing(
                 512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
