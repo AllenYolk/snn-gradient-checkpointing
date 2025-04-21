@@ -143,7 +143,7 @@ def parse_args():
 
     args = parser.parse_args()
     args.decay_lambda = 0.5
-    args.epochs = 2
+    args.epochs = 1
     args.channels = 128
     args.batch_size = 128
     args.num_workers = 4
