@@ -247,7 +247,7 @@ def main():
     run_name = ModelNameGenerator(
         proj=f"sequential-cifar{args.num_classes}-me"
     ).generate(args)
-    log_path = Path(args.log_dir) / f"SCIFAR{args.num_classes}"
+    log_path = Path(args.log_dir) / f"SCIFAR{args.num_classes}-critical"
     if not log_path.exists():
         log_path.mkdir(parents=True)
     mem_data_path = log_path / (run_name+".prof.pt")

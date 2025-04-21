@@ -174,6 +174,46 @@ def conv2d_bn_forward_compiled(
 
 
 @_conditional_compile()
+def bn_forward_compiled(
+    x_seq, bn_weight, bn_bias, bn_running_mean, bn_running_var, training,
+    momentum
+):
+    T, N = x_seq.size(0), x_seq.size(1)
+    x_seq = x_seq.flatten(0, 1)
+    x_seq = F.batch_norm(
+        x_seq,
+        bn_running_mean,
+        bn_running_var,
+        bn_weight,
+        bn_bias,
+        training=training,
+        momentum=momentum
+    )
+    y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+    return y_seq
+
+
+@_conditional_compile()
+def tebn_forward_compiled(
+    x_seq, bn_weight, bn_bias, bn_running_mean, bn_running_var, training,
+    momentum, tebn_proj_weight
+):
+    T, N = x_seq.size(0), x_seq.size(1)
+    x_seq = x_seq.flatten(0, 1)
+    x_seq = F.batch_norm(
+        x_seq,
+        bn_running_mean,
+        bn_running_var,
+        bn_weight,
+        bn_bias,
+        training=training,
+        momentum=momentum
+    )
+    y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+    return y_seq * tebn_proj_weight
+
+
+@_conditional_compile()
 def conv2d_tebn_forward_compiled(
     x_seq, weight, bias, stride, padding, dilation, groups, bn_weight, bn_bias,
     bn_running_mean, bn_running_var, training, momentum, tebn_proj_weight

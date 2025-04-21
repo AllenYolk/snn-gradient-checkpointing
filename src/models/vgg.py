@@ -123,6 +123,45 @@ def vgg_block_checkpointing(
             )
 
 
+def vgg_critical_block_checkpointing(
+    in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
+    neuron_type, spike_compressor: str, **kwargs
+):
+    if use_tebn:
+        return nn.Sequential(
+            get_block(
+                f"Conv2d",
+                proj=nn.Conv2d(
+                    in_plane, out_plane, kernel_size, stride, padding
+                ),
+                spike_compressor=get_spike_compressor(spike_compressor)
+            ),
+            get_block(
+                f"TEBN{neuron_type_to_str(neuron_type)}",
+                bn=nn.BatchNorm2d(out_plane),
+                tebn_proj=TEBNProjection(T),
+                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                spike_compressor=get_spike_compressor("NullSpikeCompressor")
+            )
+        )
+    else:
+        return nn.Sequential(
+            get_block(
+                f"Conv2d",
+                proj=nn.Conv2d(
+                    in_plane, out_plane, kernel_size, stride, padding
+                ),
+                spike_compressor=get_spike_compressor(spike_compressor)
+            ),
+            get_block(
+                f"BN{neuron_type_to_str(neuron_type)}",
+                bn=nn.BatchNorm2d(out_plane),
+                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                spike_compressor=get_spike_compressor("NullSpikeCompressor")
+            )
+        )
+
+
 class MECIFAR10DVSVGG(nn.Module):
 
     def __init__(
@@ -142,9 +181,9 @@ class MECIFAR10DVSVGG(nn.Module):
                 2, 64, 3, 1, 1, use_tebn, T, neuron_type, "NullSpikeCompressor",
                 False, **kwargs
             ),
-            vgg_block_checkpointing(
+            vgg_critical_block_checkpointing(
                 64, 128, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                False, **kwargs
+                **kwargs
             ),
             vgg_block_checkpointing(
                 128, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,

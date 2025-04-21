@@ -22,6 +22,10 @@ api = {
         conv1d_bn_forward_compiled,
     "avgpool1d_conv1d_bn_forward":
         avgpool1d_conv1d_bn_forward_compiled,
+    "bn_forward":
+        bn_forward_compiled,
+    "tebn_forward":
+        tebn_forward_compiled,
     "conv2d_forward":
         conv2d_forward_compiled,
     "conv2d_bn_forward":
@@ -92,6 +96,8 @@ avgpool1d_flatten_linear_forward = api["avgpool1d_flatten_linear_forward"]
 conv1d_forward = api["conv1d_forward"]
 conv1d_bn_forward = api["conv1d_bn_forward"]
 avgpool1d_conv1d_bn_forward = api["avgpool1d_conv1d_bn_forward"]
+bn_forward = api["bn_forward"]
+tebn_forward = api["tebn_forward"]
 conv2d_forward = api["conv2d_forward"]
 conv2d_bn_forward = api["conv2d_bn_forward"]
 conv2d_tebn_forward = api["conv2d_tebn_forward"]

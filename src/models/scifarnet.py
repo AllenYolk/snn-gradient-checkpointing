@@ -54,6 +54,30 @@ class MESequentialCIFARNet(nn.Module):
                             "NullSpikeCompressor"
                         ),
                     )
+                elif i == 0 and j == 2:
+                    conv_block = nn.Sequential(
+                        get_block(
+                            f"Conv1d",
+                            proj=nn.Conv1d(
+                                in_channels,
+                                channels,
+                                kernel_size=3,
+                                padding=1,
+                                bias=True
+                            ),
+                            spike_compressor=get_spike_compressor(
+                                spike_compressor
+                            ),
+                        ),
+                        get_block(
+                            f"BN{neuron_str}",
+                            bn=nn.BatchNorm1d(channels),
+                            neuron=get_neuron(neuron_type, **kwargs),
+                            spike_compressor=get_spike_compressor(
+                                "NullSpikeCompressor"
+                            ),
+                        )
+                    )
                 elif j == 0:
                     conv_block = get_block(
                         block_type=f"AvgPool1dConv1dBN{neuron_str}",

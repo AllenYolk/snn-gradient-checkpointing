@@ -10,6 +10,52 @@ from ...kernels import *
 from ..checkpointing import SNNCheckpointingBlockFunction
 
 
+class Conv1d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv1d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        in_backward=False
+    ):
+        return conv1d_forward(
+            x_seq,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x_seq,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+        )
+
+
 class Conv1dLIF(BaseCheckpointingBlock):
 
     def __init__(

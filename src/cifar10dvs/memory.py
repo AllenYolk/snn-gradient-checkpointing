@@ -273,7 +273,7 @@ def main():
 
     run_name_generator = ModelNameGenerator(proj="cifar10dvs-me")
     run_name = run_name_generator.generate(args)
-    log_path = Path(args.log_dir) / "CIFAR10DVS"
+    log_path = Path(args.log_dir) / "CIFAR10DVS-critical"
     if not log_path.exists():
         log_path.mkdir(parents=True)
     mem_data_path = log_path / (run_name+".prof.pt")
