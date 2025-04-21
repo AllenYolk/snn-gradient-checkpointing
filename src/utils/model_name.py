@@ -25,7 +25,8 @@ class ModelNameGenerator:
     def generate_cifar10dvs_model_name(args):
         return (
             f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
-            f"T{args.T}_lomo{args.lomo}_amp{args.amp}_loss{args.loss}"
+            f"T{args.T}_lomo{args.lomo}_amp{args.amp}_loss{args.loss}_"
+            f"tebn{args.allow_tebn}"
         )
 
     def generate(self, args):

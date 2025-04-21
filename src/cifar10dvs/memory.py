@@ -277,7 +277,7 @@ def main():
     if not log_path.exists():
         log_path.mkdir(parents=True)
     mem_data_path = log_path / (run_name+".prof.pt")
-    log_path = log_path / (run_name+"prof.txt")
+    log_path = log_path / (run_name+".prof.txt")
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
