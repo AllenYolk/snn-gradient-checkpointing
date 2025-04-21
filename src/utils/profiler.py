@@ -95,6 +95,10 @@ class BaseMemoryProfiler(abc.ABC):
     def profile(self):
         pass
 
+    @abc.abstractmethod
+    def save_data(self, filename):
+        pass
+
 
 class CategoryMemoryProfiler(BaseMemoryProfiler):
 
@@ -196,25 +200,30 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
             f.write("=" * len(header_str) + "\n"*3)
             f.flush()
 
+    def save_data(self, filename):
+        pass
+
 
 class LayerWiseMemoryProfiler(BaseMemoryProfiler):
 
     field_idx = {
         "name": 0,
         "forward_start_memory": 1,
-        "forward_peak_memory": 2,
-        "forward_computation_memory": 3,
-        "backward_start_memory": 4,
-        "backward_peak_memory": 5,
-        "backward_computation_memory": 6
+        "forward_end_memory": 2,
+        "forward_peak_memory": 3,
+        "forward_computation_memory": 4,
+        "backward_start_memory": 5,
+        "backward_end_memory": 6,
+        "backward_peak_memory": 7,
+        "backward_computation_memory": 8,
     }
 
     def __init__(
         self,
         models: Tuple[nn.Module],
-        instances: Tuple[nn.Module],
+        search_mode: Tuple[str] = ("direct_children",),
+        instances: Tuple[nn.Module] = (nn.Module,),
         filename='layer_memory.prof',
-        direct_children_only: Tuple[bool] = (False,),
     ):
         super().__init__(models, filename)
         if isinstance(instances, nn.Module):
@@ -223,18 +232,20 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
             instances = tuple(instances)
         self.instances = instances
 
-        if isinstance(direct_children_only, bool):
-            direct_children_only = (direct_children_only,)
-        elif not isinstance(direct_children_only, tuple):
-            direct_children_only = tuple(direct_children_only)
-        if len(direct_children_only) != len(self.models):
+        if isinstance(search_mode, str):
+            search_mode = (search_mode,)
+        elif not isinstance(search_mode, tuple):
+            search_mode = tuple(search_mode)
+        if len(search_mode) != len(self.models):
             raise ValueError(
-                "direct_children_only should have the same length as models"
+                "search_mode should have the same length as models"
             )
 
         self.forward_start_memory = DefaultDict(float)
+        self.forward_end_memory = DefaultDict(float)
         self.forward_peak_memory = DefaultDict(float)
         self.backward_start_memory = DefaultDict(float)
+        self.backward_end_memory = DefaultDict(float)
         self.backward_peak_memory = DefaultDict(float)
         self.module_str = {}
 
@@ -257,6 +268,7 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                     torch.cuda.max_memory_allocated(),
                     self.forward_peak_memory[name]
                 )
+                self.forward_end_memory[name] = torch.cuda.memory_allocated()
 
             return post_hook
 
@@ -279,17 +291,20 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                     torch.cuda.max_memory_allocated(),
                     self.backward_peak_memory[name]
                 )
+                self.backward_end_memory[name] = torch.cuda.memory_allocated()
 
             return backward_post_hook
 
         for i, model in enumerate(self.models):
-            it = (
-                model.named_children()
-                if direct_children_only[i] else model.named_modules()
-            )
+            if search_mode[i] == "self":
+                it = (("self", model),)
+            elif search_mode[i] == "submodules":
+                it = model.named_modules()
+            elif search_mode[i] == "direct_children":
+                it = model.named_children()
             for name, m in it:
                 if isinstance(m, instances):
-                    mname = f"net{i}-{name}"
+                    mname = f"net{i}'s {name}"
                     self.module_str[mname] = str(m)
                     m.register_forward_pre_hook(pre_hook_generator(mname))
                     m.register_forward_hook(post_hook_generator(mname))
@@ -304,8 +319,10 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
         results = []
         for name in self.forward_peak_memory.keys():
             forward_start_memory = self.forward_start_memory[name]
+            forward_end_memory = self.forward_end_memory[name]
             forward_peak_memory = self.forward_peak_memory[name]
             backward_start_memory = self.backward_start_memory[name]
+            backward_end_memory = self.backward_end_memory[name]
             backward_peak_memory = self.backward_peak_memory[name]
             forward_computation_memory = (
                 forward_peak_memory - forward_start_memory
@@ -314,14 +331,16 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                 backward_peak_memory - backward_start_memory
             )
             results.append((
-                name, forward_start_memory, forward_peak_memory,
-                forward_computation_memory, backward_start_memory,
+                name, forward_start_memory, forward_end_memory,
+                forward_peak_memory, forward_computation_memory,
+                backward_start_memory, backward_end_memory,
                 backward_peak_memory, backward_computation_memory
             ))
 
-        results = sorted(
-            results, key=lambda x: x[self.field_idx[sort_by]], reverse=True
-        )
+        if sort_by is not None:
+            results = sorted(
+                results, key=lambda x: x[self.field_idx[sort_by]], reverse=True
+            )
 
         caller_str = _get_caller_info(depth)
         header_str = (
@@ -333,22 +352,35 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
             f.write(header_str + "\n")
             f.write("=" * len(header_str) + "\n")
             for (
-                name, forward_start_memory, forward_peak_memory,
-                forward_computation_memory, backward_start_memory,
+                name, forward_start_memory, forward_end_memory,
+                forward_peak_memory, forward_computation_memory,
+                backward_start_memory, backward_end_memory,
                 backward_peak_memory, backward_computation_memory
             ) in results:
                 f.write(
                     f"{name}:{self.module_str[name]}\n"
                     f"  forward_start_memory: {forward_start_memory / MB:.2f} MB, "
+                    f"forward_end_memory: {forward_end_memory / MB:.2f} MB, "
                     f"forward_peak_memory: {forward_peak_memory / MB:.2f} MB, "
                     f"forward_computation: {forward_computation_memory / MB:.2f} MB\n"
                     f"  backward_start_memory: {backward_start_memory / MB:.2f} MB, "
+                    f"backward_end_memory: {backward_end_memory / MB:.2f} MB, "
                     f"backward_peak_memory: {backward_peak_memory / MB:.2f} MB, "
                     f"backward_computation: {backward_computation_memory / MB:.2f} MB\n"
                 )
             f.write("=" * len(header_str) + "\n")
             f.write("=" * len(header_str) + "\n"*3)
             f.flush()
+
+    def save_data(self, filename):
+        torch.save({
+            "forward_start_memory": self.forward_start_memory,
+            "forward_end_memory": self.forward_end_memory,
+            "forward_peak_memory": self.forward_peak_memory,
+            "backward_start_memory": self.backward_start_memory,
+            "backward_end_memory": self.backward_end_memory,
+            "backward_peak_memory": self.backward_peak_memory,
+        }, filename)
 
 
 class MemoryProfilerList(list):
@@ -361,3 +393,7 @@ class MemoryProfilerList(list):
     def profile(self, depth=3, *args, **kwargs):
         for p in self:
             p.profile(depth, *args, **kwargs)
+
+    def save_data(self, filenames):
+        for p, fn in zip(self, filenames):
+            p.save_data(fn)

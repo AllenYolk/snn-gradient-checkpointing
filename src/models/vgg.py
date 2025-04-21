@@ -73,50 +73,54 @@ class CIFAR10DVSVGG(nn.Module):
 
 def vgg_block_checkpointing(
     in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
-    neuron_type, spike_compressor: str, **kwargs
+    neuron_type, spike_compressor: str, preceding_avg_pool: bool, **kwargs
 ):
-    if use_tebn:
-        return get_block(
-            f"Conv2dTEBN{neuron_type_to_str(neuron_type)}",
-            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            bn=nn.BatchNorm2d(out_plane),
-            tebn_proj=TEBNProjection(T),
-            neuron=get_neuron(neuron_type, T=T, **kwargs),
-            spike_compressor=get_spike_compressor(spike_compressor)
-        )
+    if preceding_avg_pool:
+        if use_tebn:
+            return get_block(
+                f"AvgPool2dConv2dTEBN{neuron_type_to_str(neuron_type)}",
+                pool=nn.AvgPool2d(2),
+                proj=nn.Conv2d(
+                    in_plane, out_plane, kernel_size, stride, padding
+                ),
+                bn=nn.BatchNorm2d(out_plane),
+                tebn_proj=TEBNProjection(T),
+                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                spike_compressor=get_spike_compressor(spike_compressor)
+            )
+        else:
+            return get_block(
+                f"AvgPool2dConv2dBN{neuron_type_to_str(neuron_type)}",
+                pool=nn.AvgPool2d(2),
+                proj=nn.Conv2d(
+                    in_plane, out_plane, kernel_size, stride, padding
+                ),
+                bn=nn.BatchNorm2d(out_plane),
+                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                spike_compressor=get_spike_compressor(spike_compressor)
+            )
     else:
-        return get_block(
-            f"Conv2dBN{neuron_type_to_str(neuron_type)}",
-            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            bn=nn.BatchNorm2d(out_plane),
-            neuron=get_neuron(neuron_type, T=T, **kwargs),
-            spike_compressor=get_spike_compressor(spike_compressor)
-        )
-
-
-def avgpool_vgg_block_checkpointing(
-    in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
-    neuron_type, spike_compressor: str, **kwargs
-):
-    if use_tebn:
-        return get_block(
-            f"AvgPool2dConv2dTEBN{neuron_type_to_str(neuron_type)}",
-            pool=nn.AvgPool2d(2),
-            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            bn=nn.BatchNorm2d(out_plane),
-            tebn_proj=TEBNProjection(T),
-            neuron=get_neuron(neuron_type, T=T, **kwargs),
-            spike_compressor=get_spike_compressor(spike_compressor)
-        )
-    else:
-        return get_block(
-            f"AvgPool2dConv2dBN{neuron_type_to_str(neuron_type)}",
-            pool=nn.AvgPool2d(2),
-            proj=nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            bn=nn.BatchNorm2d(out_plane),
-            neuron=get_neuron(neuron_type, T=T, **kwargs),
-            spike_compressor=get_spike_compressor(spike_compressor)
-        )
+        if use_tebn:
+            return get_block(
+                f"Conv2dTEBN{neuron_type_to_str(neuron_type)}",
+                proj=nn.Conv2d(
+                    in_plane, out_plane, kernel_size, stride, padding
+                ),
+                bn=nn.BatchNorm2d(out_plane),
+                tebn_proj=TEBNProjection(T),
+                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                spike_compressor=get_spike_compressor(spike_compressor)
+            )
+        else:
+            return get_block(
+                f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+                proj=nn.Conv2d(
+                    in_plane, out_plane, kernel_size, stride, padding
+                ),
+                bn=nn.BatchNorm2d(out_plane),
+                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                spike_compressor=get_spike_compressor(spike_compressor)
+            )
 
 
 class MECIFAR10DVSVGG(nn.Module):
@@ -136,35 +140,35 @@ class MECIFAR10DVSVGG(nn.Module):
         self.features = nn.Sequential(
             vgg_block_checkpointing(
                 2, 64, 3, 1, 1, use_tebn, T, neuron_type, "NullSpikeCompressor",
-                **kwargs
+                False, **kwargs
             ),
             vgg_block_checkpointing(
                 64, 128, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
+                False, **kwargs
             ),
-            avgpool_vgg_block_checkpointing(
+            vgg_block_checkpointing(
                 128, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
+                True, **kwargs
             ),
             vgg_block_checkpointing(
                 256, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
+                False, **kwargs
             ),
-            avgpool_vgg_block_checkpointing(
+            vgg_block_checkpointing(
                 256, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
+                True, **kwargs
             ),
             vgg_block_checkpointing(
                 512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
-            ),
-            avgpool_vgg_block_checkpointing(
-                512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
+                False, **kwargs
             ),
             vgg_block_checkpointing(
                 512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                **kwargs
+                True, **kwargs
+            ),
+            vgg_block_checkpointing(
+                512, 512, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
+                False, **kwargs
             ),
             layer.AvgPool2d(2, step_mode="m"),
         )

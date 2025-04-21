@@ -248,6 +248,9 @@ def main():
         proj=f"sequential-cifar{args.num_classes}-me"
     ).generate(args)
     log_path = Path(args.log_dir) / f"SCIFAR{args.num_classes}"
+    if not log_path.exists():
+        log_path.mkdir(parents=True)
+    mem_data_path = log_path / (run_name+".prof.pt")
     log_path = log_path / (run_name+".prof.txt")
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
@@ -326,10 +329,10 @@ def main():
     profiler = MemoryProfilerList(
         CategoryMemoryProfiler(net, optimizer, filename=log_path),
         LayerWiseMemoryProfiler(
-            (net.conv, net),
+            (net.conv, net.fc, net.decode),
+            search_mode=("direct_children", "self", "self"),
             instances=(torch.nn.Module,),
             filename=log_path,
-            direct_children_only=(True, True),
         ),
     )
 
@@ -343,7 +346,7 @@ def main():
         f"Peak reserved memory: {peak_reserved} MB"
     )
 
-    for epoch in range(args.epochs, 2 * args.epochs):
+    for epoch in range(args.epochs, args.epochs + 1):
         train_results = train_step(
             net,
             train_data_loader,
@@ -355,30 +358,13 @@ def main():
             epoch,
             2 * args.epochs,
         )
-        val_results = val_step(
-            net,
-            val_data_loader,
-            args.device,
-            profiler,
-        )
-
-        mem_stats = torch.cuda.memory_stats(args.device)
-        peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
-        peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
-
+        profiler.save_data((None, mem_data_path))
         print(
-            f"Epoch {epoch + args.epoch}/{args.epochs*2}: "
+            f"Epoch {epoch + 1}/{args.epochs+1}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
-            f"val_loss={val_results['loss']}, "
-            f"val_top1_acc={val_results['top1_acc']}, "
-            f"val_top5_acc={val_results['top5_acc']}, "
-            f"peak_allocated={peak_allocated} MB, "
-            f"peak_reserved={peak_reserved} MB"
         )
-        if val_results["top1_acc"] > max_val_accuracy:
-            max_val_accuracy = val_results["top1_acc"]
 
 
 if __name__ == '__main__':
