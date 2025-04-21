@@ -4,6 +4,8 @@ import torch
 import torch.nn.functional as F
 from spikingjelly.activation_based import surrogate
 
+from ..tebn import TEBNProjectionAutogradFunction
+
 TORCH_VERSION = torch.__version__.split('.')[0]
 
 DISABLE_COMPILE = int(TORCH_VERSION) < 2
@@ -210,7 +212,7 @@ def tebn_forward_compiled(
         momentum=momentum
     )
     y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
-    return y_seq * tebn_proj_weight
+    return TEBNProjectionAutogradFunction.apply(y_seq, tebn_proj_weight)
 
 
 @_conditional_compile()
@@ -231,7 +233,7 @@ def conv2d_tebn_forward_compiled(
         momentum=momentum
     )
     y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
-    return y_seq * tebn_proj_weight
+    return TEBNProjectionAutogradFunction.apply(y_seq, tebn_proj_weight)
 
 
 @_conditional_compile()
@@ -277,7 +279,7 @@ def avgpool2d_conv2d_tebn_forward_compiled(
         momentum=momentum
     )
     y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
-    return y_seq * tebn_proj_weight
+    return TEBNProjectionAutogradFunction.apply(y_seq, tebn_proj_weight)
 
 
 @_conditional_compile()
