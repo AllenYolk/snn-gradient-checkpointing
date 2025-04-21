@@ -3,7 +3,6 @@ import torch.nn as nn
 from spikingjelly.activation_based import layer
 
 from .checkpointing import get_block, neuron_type_to_str
-from .checkpointing import get_checkpointing_module
 from .neuron import get_neuron
 from .compress import *
 from .tebn import TEBNProjection
