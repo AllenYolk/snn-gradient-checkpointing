@@ -183,6 +183,7 @@ def train_step(
     profiler,
     current_epoch,
     total_epoch,
+    early_exit=False,
 ):
     net.train()
     losses = AverageMeter()
@@ -196,7 +197,7 @@ def train_step(
         leave=False,
         unit="batch"
     ) as pbar:
-        for img, label in pbar:
+        for i, (img, label) in enumerate(pbar):
             img, label = img.float().to(device), label.to(device)
 
             with get_autocast_context(use_amp):
@@ -226,6 +227,9 @@ def train_step(
                 "top1_acc": top1.avg,
                 "top5_acc": top5.avg,
             })
+
+            if early_exit and i >= 5:
+                break
 
     if lr_scheduler is not None:
         lr_scheduler.step()
@@ -393,7 +397,8 @@ def main():
             scaler,
             profiler,
             epoch,
-            2 * args.epochs,
+            args.epochs + 1,
+            early_exit=True,
         )
         profiler.save_data((None, mem_data_path))
         print(
