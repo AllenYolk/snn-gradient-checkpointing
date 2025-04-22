@@ -137,11 +137,10 @@ def vgg_critical_block_checkpointing(
                 spike_compressor=get_spike_compressor(spike_compressor)
             ),
             get_block(
-                f"TEBN{neuron_type_to_str(neuron_type)}",
+                f"NestedTEBN{neuron_type_to_str(neuron_type)}",
                 bn=nn.BatchNorm2d(out_plane),
                 tebn_proj=TEBNProjection(T),
                 neuron=get_neuron(neuron_type, T=T, **kwargs),
-                spike_compressor=get_spike_compressor("NullSpikeCompressor")
             )
         )
     else:
