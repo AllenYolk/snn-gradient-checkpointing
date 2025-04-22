@@ -16,12 +16,10 @@ class BNLIF(BaseCheckpointingBlock):
         self,
         bn: nn.BatchNorm2d,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.bn = bn
         self.neuron = neuron
-        self.spike_compressor = spike_compressor
 
     @staticmethod
     def conventional_forward(
@@ -48,7 +46,7 @@ class BNLIF(BaseCheckpointingBlock):
     def forward(self, x_seq: torch.Tensor):
         return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
-            self.spike_compressor,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
             self.bn.weight,
             self.bn.bias,
@@ -65,12 +63,10 @@ class BNPSN(BaseCheckpointingBlock):
         self,
         bn: nn.BatchNorm2d,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.bn = bn
         self.neuron = neuron
-        self.spike_compressor = spike_compressor
 
     @staticmethod
     def conventional_forward(
@@ -98,7 +94,7 @@ class BNPSN(BaseCheckpointingBlock):
     def forward(self, x_seq: torch.Tensor):
         return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
-            self.spike_compressor,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
             self.bn.weight,
             self.bn.bias,
@@ -116,12 +112,10 @@ class BNSlidingPSN(BaseCheckpointingBlock):
         self,
         bn: nn.BatchNorm2d,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.bn = bn
         self.neuron = neuron
-        self.spike_compressor = spike_compressor
 
     @staticmethod
     def conventional_forward(
@@ -152,7 +146,7 @@ class BNSlidingPSN(BaseCheckpointingBlock):
     def forward(self, x_seq: torch.Tensor):
         return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
-            self.spike_compressor,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
             self.bn.weight,
             self.bn.bias,
@@ -172,13 +166,11 @@ class TEBNLIF(BaseCheckpointingBlock):
         bn: nn.BatchNorm2d,
         tebn_proj: TEBNProjection,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.bn = bn
         self.tebn_proj = tebn_proj
         self.neuron = neuron
-        self.spike_compressor = spike_compressor
 
     @staticmethod
     def conventional_forward(
@@ -207,7 +199,7 @@ class TEBNLIF(BaseCheckpointingBlock):
     def forward(self, x_seq: torch.Tensor):
         return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
-            self.spike_compressor,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
             self.bn.weight,
             self.bn.bias,
@@ -226,13 +218,11 @@ class TEBNSlidingPSN(BaseCheckpointingBlock):
         bn: nn.BatchNorm2d,
         tebn_proj: TEBNProjection,
         neuron: nn.Module,
-        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
     ):
         super().__init__()
         self.bn = bn
         self.tebn_proj = tebn_proj
         self.neuron = neuron
-        self.spike_compressor = spike_compressor
 
     @staticmethod
     def conventional_forward(
@@ -265,7 +255,7 @@ class TEBNSlidingPSN(BaseCheckpointingBlock):
     def forward(self, x_seq: torch.Tensor):
         return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
-            self.spike_compressor,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
             self.bn.weight,
             self.bn.bias,
@@ -279,115 +269,66 @@ class TEBNSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class NestedTEBNLIF(BaseCheckpointingBlock):
+class TEBNProjectionLIF(BaseCheckpointingBlock):
 
     def __init__(
         self,
-        bn: nn.BatchNorm2d,
         tebn_proj: TEBNProjection,
         neuron: nn.Module,
     ):
         super().__init__()
-        self.bn = bn
         self.tebn_proj = tebn_proj
         self.neuron = neuron
 
     @staticmethod
     def conventional_forward(
-        x_seq,
-        bn_weight,
-        bn_bias,
-        bn_running_mean,
-        bn_running_var,
-        training,
-        tebn_proj_weight,
-        neuron,
-        in_backward=False
+        x_seq, tebn_proj_weight, neuron, in_backward=False
     ):
-        x_seq = checkpoint(
-            tebn_forward,
-            x_seq,
-            bn_weight,
-            bn_bias,
-            bn_running_mean,
-            bn_running_var,
-            training,
-            0.1 if in_backward else 0.,  # momentum
-            tebn_proj_weight,
-            use_reentrant=False,
-        )
+        x_seq = x_seq * tebn_proj_weight
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return checkpoint(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
-            self.bn.weight,
-            self.bn.bias,
-            self.bn.running_mean,
-            self.bn.running_var,
-            self.bn.training,
             self.tebn_proj.p,
             self.neuron,
-            use_reentrant=False,
         )
 
 
-class NestedTEBNSlidingPSN(BaseCheckpointingBlock):
+class TEBNProjectionSlidingPSN(BaseCheckpointingBlock):
 
     def __init__(
         self,
-        bn: nn.BatchNorm2d,
         tebn_proj: TEBNProjection,
         neuron: nn.Module,
     ):
         super().__init__()
-        self.bn = bn
         self.tebn_proj = tebn_proj
         self.neuron = neuron
 
     @staticmethod
     def conventional_forward(
         x_seq,
-        bn_weight,
-        bn_bias,
-        bn_running_mean,
-        bn_running_var,
-        training,
         tebn_proj_weight,
         neuron_weight,
         neuron_bias,
         neuron_k,
         in_backward=False
     ):
-        x_seq = checkpoint(
-            tebn_forward,
-            x_seq,
-            bn_weight,
-            bn_bias,
-            bn_running_mean,
-            bn_running_var,
-            training,
-            0.1 if in_backward else 0.,  # momentum
-            tebn_proj_weight,
-            use_reentrant=False,
-        )
+        x_seq = x_seq * tebn_proj_weight
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return checkpoint(
+        return SNNCheckpointingBlockFunction.apply(
             self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
             x_seq,
-            self.bn.weight,
-            self.bn.bias,
-            self.bn.running_mean,
-            self.bn.running_var,
-            self.bn.training,
             self.tebn_proj.p,
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
-            use_reentrant=False,
         )

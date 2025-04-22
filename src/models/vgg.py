@@ -130,15 +130,15 @@ def vgg_critical_block_checkpointing(
     if use_tebn:
         return nn.Sequential(
             get_block(
-                f"Conv2d",
+                f"Conv2dBN",
                 proj=nn.Conv2d(
                     in_plane, out_plane, kernel_size, stride, padding
                 ),
+                bn=nn.BatchNorm2d(out_plane),
                 spike_compressor=get_spike_compressor(spike_compressor)
             ),
             get_block(
-                f"NestedTEBN{neuron_type_to_str(neuron_type)}",
-                bn=nn.BatchNorm2d(out_plane),
+                f"TEBNProjection{neuron_type_to_str(neuron_type)}",
                 tebn_proj=TEBNProjection(T),
                 neuron=get_neuron(neuron_type, T=T, **kwargs),
             )
