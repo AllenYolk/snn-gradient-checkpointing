@@ -15,6 +15,8 @@ class Lomo(Optimizer):
         self.optimizer = optimizer
         self.clip_grad_norm = clip_grad_norm
         self.clip_grad_value = clip_grad_value
+        self.need_scan = ((clip_grad_norm is not None) or
+                          (clip_grad_value is not None))
 
         if self.clip_grad_norm is not None and self.clip_grad_norm <= 0:
             raise ValueError("clip_grad_norm must be positive if specified.")
@@ -35,11 +37,9 @@ class Lomo(Optimizer):
     def fuse_update(self):
 
         def func(x):
-            i = 0
             with torch.no_grad():
                 for group in self.optimizer.param_groups:
                     for p in group["params"]:
-                        i += 1
                         if p.requires_grad and p.grad is not None:
                             grad = p.grad
                             if self.clip_grad_value is not None:
@@ -49,7 +49,7 @@ class Lomo(Optimizer):
                                 )
                             if self.clip_grad_norm is not None:
                                 raise NotImplementedError(
-                                    "clip_grad_norm is not implemented yet."
+                                    "clip_grad_norm has not been implemented."
                                 )
                             p.grad = grad
 
@@ -63,9 +63,20 @@ class Lomo(Optimizer):
 
             return x
 
-        return func
+        def func_no_scan(x):
+            self.optimizer.step()
+
+            with torch.no_grad():
+                for group in self.optimizer.param_groups:
+                    for p in group["params"]:
+                        if p.requires_grad:
+                            p.grad = None
+
+            return x
+
+        return func if self.need_scan else func_no_scan
 
     def step(self):
-        # the last parameter is not ready when calling the hook function
-        # manually call the update function!
+        # The last parameter is not ready when calling the hook function.
+        # Manually call the update function!
         self.grad_func(0)
