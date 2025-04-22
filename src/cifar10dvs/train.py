@@ -113,7 +113,7 @@ def prepare_dataloaders(args):
     return train_data_loader, test_data_loader
 
 
-def prepare_optimizers_and_schedulers(args, net):
+def prepare_optimizers_and_schedulers(args, net, scaler):
     optimizer = torch.optim.SGD(
         net.parameters(),
         lr=args.learning_rate,
@@ -126,7 +126,7 @@ def prepare_optimizers_and_schedulers(args, net):
     )
 
     if args.lomo:
-        optimizer = Lomo(optimizer)
+        optimizer = Lomo(optimizer, scaler=scaler)
 
     return optimizer, lr_scheduler
 
@@ -300,11 +300,13 @@ def main():
             mean=1.,
             tet_lambda=1e-3,
         )
-    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(args, net)
 
     scaler = None
     if args.amp:
         scaler = GradScaler()
+    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(
+        args, net, scaler
+    )
 
     max_val_accuracy = 0.
     for epoch in range(args.epochs):

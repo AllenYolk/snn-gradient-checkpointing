@@ -73,9 +73,6 @@ class MESequentialCIFARNet(nn.Module):
                             f"BN{neuron_str}",
                             bn=nn.BatchNorm1d(channels),
                             neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                "NullSpikeCompressor"
-                            ),
                         )
                     )
                 elif j == 0:

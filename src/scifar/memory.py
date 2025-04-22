@@ -97,7 +97,7 @@ def prepare_dataloaders(args):
     return train_data_loader, test_data_loader
 
 
-def prepare_optimizers_and_schedulers(args, net):
+def prepare_optimizers_and_schedulers(args, net, scaler):
     optimizer = torch.optim.SGD(
         net.parameters(),
         lr=args.learning_rate,
@@ -109,7 +109,7 @@ def prepare_optimizers_and_schedulers(args, net):
     )
 
     if args.lomo:
-        optimizer = Lomo(optimizer)
+        optimizer = Lomo(optimizer, scaler=scaler)
 
     return optimizer, lr_scheduler
 
@@ -279,11 +279,12 @@ def main():
     print("Number of learnable parameters: ", count_learnable_parameters(net))
     net = net.to(args.device)
 
-    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(args, net)
-
     scaler = None
     if args.amp:
         scaler = GradScaler()
+    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(
+        args, net, scaler
+    )
 
     print("Stage 1: Peak Memory Checking")
     profiler = MemoryProfilerList()
