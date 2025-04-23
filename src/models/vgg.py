@@ -12,6 +12,7 @@ def vgg_block(
     in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
     neuron_type, **kwargs
 ):
+    kwargs["T"] = T
     if use_tebn:
         return nn.Sequential(
             layer.SeqToANNContainer(
@@ -76,6 +77,7 @@ def vgg_block_checkpointing(
     in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
     neuron_type, spike_compressor: str, preceding_avg_pool: bool, **kwargs
 ):
+    kwargs["T"] = T
     if preceding_avg_pool:
         if use_tebn:
             return get_block(
@@ -124,10 +126,12 @@ def vgg_block_checkpointing(
             )
 
 
+# TODO: implement more critical blocks
 def vgg_critical_block_checkpointing(
     in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
     neuron_type, spike_compressor: str, **kwargs
 ):
+    kwargs["T"] = T
     if use_tebn:
         return nn.Sequential(
             get_block(
@@ -139,9 +143,10 @@ def vgg_critical_block_checkpointing(
                 spike_compressor=get_spike_compressor(spike_compressor)
             ),
             get_block(
-                f"TEBNProjection{neuron_type_to_str(neuron_type)}",
+                f"TEBNProjection{neuron_type_to_str(neuron_type)}AvgPool2d",
                 tebn_proj=TEBNProjection(T),
                 neuron=get_neuron(neuron_type, **kwargs),
+                pool=nn.AvgPool2d(2),
             )
         )
     else:
@@ -154,10 +159,10 @@ def vgg_critical_block_checkpointing(
                 spike_compressor=get_spike_compressor(spike_compressor)
             ),
             get_block(
-                f"BN{neuron_type_to_str(neuron_type)}",
+                f"BN{neuron_type_to_str(neuron_type)}AvgPool2d",
                 bn=nn.BatchNorm2d(out_plane),
                 neuron=get_neuron(neuron_type, **kwargs),
-                spike_compressor=get_spike_compressor("NullSpikeCompressor")
+                pool=nn.AvgPool2d(2)
             )
         )
         # This split does reduce peak memory usage if spike compressor is used.
@@ -177,7 +182,6 @@ class MECIFAR10DVSVGG(nn.Module):
         **kwargs
     ):
         super().__init__()
-        kwargs["T"] = T
 
         use_tebn = (neuron_type != "PSN") and allow_tebn
         self.features = nn.Sequential(
@@ -190,8 +194,8 @@ class MECIFAR10DVSVGG(nn.Module):
                 **kwargs
             ),
             vgg_block_checkpointing(
-                128, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,
-                True, **kwargs
+                128, 256, 3, 1, 1, use_tebn, T, neuron_type,
+                "NullSpikeCompressor", False, **kwargs
             ),
             vgg_block_checkpointing(
                 256, 256, 3, 1, 1, use_tebn, T, neuron_type, spike_compressor,

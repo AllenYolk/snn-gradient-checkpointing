@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .base import BaseCheckpointingBlock
@@ -294,6 +295,49 @@ class TEBNProjectionLIF(BaseCheckpointingBlock):
             x_seq,
             self.tebn_proj.p,
             self.neuron,
+        )
+
+
+class TEBNProjectionLIFAvgPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        pool: nn.AvgPool2d,
+    ):
+        super().__init__()
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.pool = pool
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        tebn_proj_weight,
+        neuron,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        in_backward=False
+    ):
+        x_seq = x_seq * tebn_proj_weight
+        x_seq = neuron(x_seq)
+        T = x_seq.shape[0]
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        return x_seq.reshape(T, -1, *x_seq.shape[1:])
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
+            x_seq,
+            self.tebn_proj.p,
+            self.neuron,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
         )
 
 
