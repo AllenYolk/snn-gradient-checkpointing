@@ -80,7 +80,7 @@ class BNPSN(BaseCheckpointingBlock):
         neuron_bias,
         in_backward=False
     ):
-        x_seq = tebn_forward(
+        x_seq = bn_forward(
             x_seq,
             bn_weight,
             bn_bias,
@@ -130,7 +130,7 @@ class BNSlidingPSN(BaseCheckpointingBlock):
         neuron_k,
         in_backward=False
     ):
-        x_seq = tebn_forward(
+        x_seq = bn_forward(
             x_seq,
             bn_weight,
             bn_bias,

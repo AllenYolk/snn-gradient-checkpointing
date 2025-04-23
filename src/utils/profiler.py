@@ -221,6 +221,7 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
     def __init__(
         self,
         models: Tuple[nn.Module],
+        model_names: Tuple[str] = None,
         search_mode: Tuple[str] = ("direct_children",),
         instances: Tuple[nn.Module] = (nn.Module,),
         filename='layer_memory.prof',
@@ -239,6 +240,15 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
         if len(search_mode) != len(self.models):
             raise ValueError(
                 "search_mode should have the same length as models"
+            )
+
+        if model_names is None:
+            model_names = tuple([f"net{i}" for i in range(len(models))])
+        if not isinstance(model_names, (tuple, list)):
+            raise ValueError("model_names should be a tuple of strings")
+        if len(model_names) != len(models):
+            raise ValueError(
+                "model_names should have the same length as models"
             )
 
         self.forward_start_memory = DefaultDict(float)
@@ -304,7 +314,7 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                 it = model.named_children()
             for name, m in it:
                 if isinstance(m, instances):
-                    mname = f"net{i}'s {name}"
+                    mname = f"{model_names[i]}'s {name}"
                     self.module_str[mname] = str(m)
                     m.register_forward_pre_hook(pre_hook_generator(mname))
                     m.register_forward_hook(post_hook_generator(mname))
@@ -395,5 +405,10 @@ class MemoryProfilerList(list):
             p.profile(depth, *args, **kwargs)
 
     def save_data(self, filenames):
+        if len(self) != len(filenames):
+            raise ValueError(
+                "filenames should be a list of str with the same length "
+                "as MemoryProfilerList."
+            )
         for p, fn in zip(self, filenames):
             p.save_data(fn)

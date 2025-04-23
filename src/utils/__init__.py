@@ -8,3 +8,4 @@ from .model_name import *
 from .npu import *
 from .loss import *
 from .profiler import *
+from .dist import *

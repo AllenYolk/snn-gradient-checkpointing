@@ -22,9 +22,9 @@ class TETLoss(nn.Module):
 
     def __init__(
         self,
-        base_criterion,
-        mean: float,
-        tet_lambda: float,
+        base_criterion=nn.CrossEntropyLoss(),
+        mean: float = 1.,
+        tet_lambda: float = 1e-3,
     ):
         super().__init__()
         self.base_criterion = base_criterion

@@ -1,5 +1,4 @@
 import argparse
-import time
 import sys
 from pathlib import Path
 from tqdm import tqdm
@@ -7,7 +6,6 @@ from tqdm import tqdm
 sys.path.append("./src")
 sys.path.append("./src/scifar")
 
-import wandb
 import torch
 import torch.utils.data as data
 from utils import use_torch_npu
@@ -23,8 +21,9 @@ import torchvision.datasets as datasets
 from spikingjelly.activation_based import functional
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy, save_on_master, mkdir
+from utils import accuracy, save_on_master, mkdir, count_learnable_parameters
 from utils import TETLoss, TMeanCrossEntropyLoss
+from utils.profiler import *
 import models
 from models import get_autocast_context, GradScaler, Lomo
 
@@ -145,6 +144,7 @@ def parse_args():
         type=str,
         default="/export/home/data_allenyolk/ImageNet0_03125"
     )
+    parser.add_argument("--log_dir", type=str, default="./logs")
     parser.add_argument(
         "--cache_dataset",
         dest="cache_dataset",
@@ -159,17 +159,12 @@ def parse_args():
         default="IdentitySpikeCompressor",
         type=str
     )
-    parser.add_argument('-b', "--batch_size", default=32, type=int)
-    parser.add_argument('-e', '--epochs', default=320, type=int)
-    parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(
         '-amp',
         "--amp",
         action='store_true',
         help='automatic mixed precision training'
     )
-    parser.add_argument('-lr', "--learning_rate", default=0.1, type=float)
-    parser.add_argument('-mom', '--momentum', default=0.9, type=float)
     parser.add_argument(
         "-loss", "--loss", default="tet", type=str, choices=["ce", "tet"]
     )
@@ -178,14 +173,27 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
+    args.batch_size = 32
+    args.epochs = 1
+    args.num_workers = 4
+    args.learning_rate = 0.1
+    args.momentum = 0.9
     return args
 
 
 def train_step(
-    net, train_data_loader, criterion, optimizer, lr_scheduler, device, scaler,
-    current_epoch, total_epoch
+    net,
+    train_data_loader,
+    criterion,
+    optimizer,
+    lr_scheduler,
+    device,
+    scaler,
+    profiler,
+    current_epoch,
+    total_epoch,
+    early_exit=False,
 ):
-    epoch_start_time = time.time()
     net.train()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -198,7 +206,7 @@ def train_step(
         leave=False,
         unit="batch"
     ) as pbar:
-        for img, label in pbar:
+        for i, (img, label) in enumerate(pbar):
             img, label = img.float().to(device), label.to(device)
 
             with get_autocast_context(use_amp):
@@ -207,10 +215,12 @@ def train_step(
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
+                profiler.profile(sort_by="backward_peak_memory")
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 batch_loss.backward()
+                profiler.profile(sort_by="backward_peak_memory")
                 optimizer.step()
             optimizer.zero_grad()
 
@@ -226,16 +236,16 @@ def train_step(
                 "top5_acc": top5.avg,
             })
 
+            if early_exit and i > 5:
+                break
+
     if lr_scheduler is not None:
         lr_scheduler.step()
 
-    epoch_end_time = time.time()
-    epoch_time = epoch_end_time - epoch_start_time  # unit: second
     return {
         "loss": losses.avg,
         "top1_acc": top1.avg,
         "top5_acc": top5.avg,
-        "time": epoch_time
     }
 
 
@@ -275,13 +285,11 @@ def main():
 
     run_name_generator = ModelNameGenerator(proj=f"imagenet-me")
     run_name = run_name_generator.generate(args)
-    wandb.require("core")
-    wandb.init(
-        project=f"imagenet-me",
-        entity="pkuml-spiking",
-        config=args,
-        name=run_name,
-    )
+    log_path = Path(args.log_dir) / "ImageNet"
+    if not log_path.exists():
+        log_path.mkdir(parents=True)
+    mem_data_path = log_path / (run_name+".prof.pt")
+    log_path = log_path / (run_name+".prof.txt")
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
@@ -294,6 +302,7 @@ def main():
         k=4,  # for SlidingPSN
     )
     print(net)
+    print("Number of learnable parameters: ", count_learnable_parameters(net))
     net = net.to(args.device)
 
     if args.loss == "ce":
@@ -310,6 +319,19 @@ def main():
         args, net, scaler
     )
 
+    print("Stage 1: Peak Memory Checking")
+    profiler = MemoryProfilerList()
+
+    torch.cuda.reset_peak_memory_stats(args.device)
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        "Before training: "
+        f"peak_allocated={peak_allocated:.2f} MB, "
+        f"peak_reserved={peak_reserved:.2f} MB"
+    )
+
     max_val_accuracy = 0.
     for epoch in range(args.epochs):
         train_results = train_step(
@@ -320,6 +342,7 @@ def main():
             lr_scheduler,
             args.device,
             scaler,
+            profiler,
             epoch,
             args.epochs,
         )
@@ -329,31 +352,75 @@ def main():
             args.device,
             criterion,
         )
-
-        wandb.log({
-            "loss/train_loss": train_results["loss"],
-            "acc/train_top1_acc": train_results["top1_acc"],
-            "acc/train_top5_acc": train_results["top5_acc"],
-            "time/train_epoch_time": train_results["time"],
-            "loss/val_loss": val_results["loss"],
-            "acc/val_top1_acc": val_results["top1_acc"],
-            "acc/val_top5_acc": val_results["top5_acc"],
-        })
+        mem_stats = torch.cuda.memory_stats(args.device)
+        peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+        peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
         print(
             f"Epoch {epoch + 1}/{args.epochs}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
-            f"time/train_epoch_time={train_results['time']}, "
             f"val_loss={val_results['loss']}, "
             f"val_top1_acc={val_results['top1_acc']}, "
             f"val_top5_acc={val_results['top5_acc']}, "
+            f"peak_allocated={peak_allocated:.2f} MB, "
+            f"peak_reserved={peak_reserved:.2f} MB"
         )
         if val_results["top1_acc"] > max_val_accuracy:
             max_val_accuracy = val_results["top1_acc"]
 
-    wandb.summary["acc/max_val_top1_acc"] = max_val_accuracy
-    wandb.finish()
+    print("Stage 2: Memory Profiling")
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename=log_path),
+        LayerWiseMemoryProfiler(
+            (
+                net.pre_conv, net.layer1, net.layer2, net.layer3, net.layer4,
+                net.avgpool, net.fc
+            ),
+            search_mode=(
+                "self", "direct_children", "direct_children", "direct_children",
+                "direct_children", "self", "self"
+            ),
+            model_names=(
+                "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool",
+                "fc"
+            ),
+            instances=(torch.nn.Module,),
+            filename=log_path,
+        ),
+    )
+
+    torch.cuda.reset_peak_memory_stats(args.device)
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        "Before training: "
+        f"peak_allocated={peak_allocated:.2f} MB, "
+        f"peak_reserved={peak_reserved:.2f} MB"
+    )
+
+    for epoch in range(args.epochs, args.epochs + 1):
+        train_results = train_step(
+            net,
+            train_data_loader,
+            criterion,
+            optimizer,
+            lr_scheduler,
+            args.device,
+            scaler,
+            profiler,
+            epoch,
+            args.epochs + 1,
+            early_exit=True,
+        )
+        profiler.save_data((None, mem_data_path))
+        print(
+            f"Profiling Epoch: "
+            f"train_loss={train_results['loss']}, "
+            f"train_top1_acc={train_results['top1_acc']}, "
+            f"train_top5_acc={train_results['top5_acc']}, "
+        )
 
 
 if __name__ == '__main__':

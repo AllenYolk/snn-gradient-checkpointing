@@ -19,7 +19,7 @@ def vgg_block(
                 nn.BatchNorm2d(out_plane),
             ),
             TEBNProjection(T),
-            get_neuron(neuron_type, T=T, **kwargs),
+            get_neuron(neuron_type, **kwargs),
         )
     else:
         return nn.Sequential(
@@ -27,7 +27,7 @@ def vgg_block(
                 nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
                 nn.BatchNorm2d(out_plane),
             ),
-            get_neuron(neuron_type, T=T, **kwargs),
+            get_neuron(neuron_type, **kwargs),
         )
 
 
@@ -35,6 +35,7 @@ class CIFAR10DVSVGG(nn.Module):
 
     def __init__(self, T, neuron_type, dropout=0.25, allow_tebn=True, **kwargs):
         super().__init__()
+        kwargs["T"] = T
 
         use_tebn = (neuron_type != "PSN") and allow_tebn
         self.features = nn.Sequential(
@@ -85,7 +86,7 @@ def vgg_block_checkpointing(
                 ),
                 bn=nn.BatchNorm2d(out_plane),
                 tebn_proj=TEBNProjection(T),
-                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                neuron=get_neuron(neuron_type, **kwargs),
                 spike_compressor=get_spike_compressor(spike_compressor)
             )
         else:
@@ -96,7 +97,7 @@ def vgg_block_checkpointing(
                     in_plane, out_plane, kernel_size, stride, padding
                 ),
                 bn=nn.BatchNorm2d(out_plane),
-                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                neuron=get_neuron(neuron_type, **kwargs),
                 spike_compressor=get_spike_compressor(spike_compressor)
             )
     else:
@@ -108,7 +109,7 @@ def vgg_block_checkpointing(
                 ),
                 bn=nn.BatchNorm2d(out_plane),
                 tebn_proj=TEBNProjection(T),
-                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                neuron=get_neuron(neuron_type, **kwargs),
                 spike_compressor=get_spike_compressor(spike_compressor)
             )
         else:
@@ -118,7 +119,7 @@ def vgg_block_checkpointing(
                     in_plane, out_plane, kernel_size, stride, padding
                 ),
                 bn=nn.BatchNorm2d(out_plane),
-                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                neuron=get_neuron(neuron_type, **kwargs),
                 spike_compressor=get_spike_compressor(spike_compressor)
             )
 
@@ -140,7 +141,7 @@ def vgg_critical_block_checkpointing(
             get_block(
                 f"TEBNProjection{neuron_type_to_str(neuron_type)}",
                 tebn_proj=TEBNProjection(T),
-                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                neuron=get_neuron(neuron_type, **kwargs),
             )
         )
     else:
@@ -155,10 +156,13 @@ def vgg_critical_block_checkpointing(
             get_block(
                 f"BN{neuron_type_to_str(neuron_type)}",
                 bn=nn.BatchNorm2d(out_plane),
-                neuron=get_neuron(neuron_type, T=T, **kwargs),
+                neuron=get_neuron(neuron_type, **kwargs),
                 spike_compressor=get_spike_compressor("NullSpikeCompressor")
             )
         )
+        # This split does reduce peak memory usage if spike compressor is used.
+        # The input to "Conv2d" checkpointing block will be stored in compressed
+        # form when conducting backward() on "BN-neuron" block!!!
 
 
 class MECIFAR10DVSVGG(nn.Module):
@@ -173,6 +177,7 @@ class MECIFAR10DVSVGG(nn.Module):
         **kwargs
     ):
         super().__init__()
+        kwargs["T"] = T
 
         use_tebn = (neuron_type != "PSN") and allow_tebn
         self.features = nn.Sequential(

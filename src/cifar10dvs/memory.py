@@ -203,7 +203,6 @@ def train_step(
             with get_autocast_context(use_amp):
                 y = net(img)  # [T, N, Categories]
                 batch_loss = criterion(y, label)
-                profiler.profile(sort_by="forward_peak_memory")
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
@@ -241,7 +240,7 @@ def train_step(
     }
 
 
-def val_step(net, test_data_loader, device, criterion, profiler):
+def val_step(net, test_data_loader, device, criterion):
     net.eval()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -253,7 +252,6 @@ def val_step(net, test_data_loader, device, criterion, profiler):
 
             y = net(img)  # [T, N, Categories]
             batch_loss = criterion(y, label)
-            profiler.profile(sort_by="forward_peak_memory")
 
             functional.reset_net(net)
             # measure accuracy and record loss
@@ -348,7 +346,6 @@ def main():
             val_data_loader,
             args.device,
             criterion,
-            profiler,
         )
         mem_stats = torch.cuda.memory_stats(args.device)
         peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
@@ -373,6 +370,7 @@ def main():
         LayerWiseMemoryProfiler(
             (net.features, net.dropout, net.classifier),
             search_mode=("direct_children", "self", "self"),
+            model_names=("feature_extractor", "dropout", "classifier"),
             instances=(torch.nn.Module,),
             filename=log_path,
         ),

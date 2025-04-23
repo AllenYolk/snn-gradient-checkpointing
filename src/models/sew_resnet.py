@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 from spikingjelly.activation_based import layer
 
-from ..checkpointing import get_block, neuron_type_to_str
-from ..neuron import get_neuron
-from ..compress import *
-from ..merge_split import RepeatT
+from .checkpointing import get_block, neuron_type_to_str
+from .neuron import get_neuron
+from .compress import *
+from .merge_split import RepeatT
 
 
 def _conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -297,6 +297,7 @@ class SEWResNet(nn.Module):
         **kwargs,  # neuronal parameters
     ):
         super().__init__()
+        kwargs["T"] = T  # for PSN
         self._norm_layer = norm_layer
         self.T = T
         self.in_planes = 64
@@ -504,7 +505,7 @@ class SEWResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 2)  # [T, B, D]
-        return self.fc(x.mean(dim=0))
+        return self.fc(x)  # [T, B, num_classes]
 
     def forward(self, x):
         return self._forward_impl(x)
@@ -513,31 +514,56 @@ class SEWResNet(nn.Module):
 class SEWResNet18(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(neuron_type, BasicBlock, [2, 2, 2, 2], **kwargs)
+        super().__init__(
+            neuron_type,
+            BasicBlock, [2, 2, 2, 2],
+            checkpointing=False,
+            **kwargs
+        )
 
 
 class SEWResNet34(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(neuron_type, BasicBlock, [3, 4, 6, 3], **kwargs)
+        super().__init__(
+            neuron_type,
+            BasicBlock, [3, 4, 6, 3],
+            checkpointing=False,
+            **kwargs
+        )
 
 
 class SEWResNet50(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(neuron_type, Bottleneck, [3, 4, 6, 3], **kwargs)
+        super().__init__(
+            neuron_type,
+            Bottleneck, [3, 4, 6, 3],
+            checkpointing=False,
+            **kwargs
+        )
 
 
 class SEWResNet101(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(neuron_type, Bottleneck, [3, 4, 23, 3], **kwargs)
+        super().__init__(
+            neuron_type,
+            Bottleneck, [3, 4, 23, 3],
+            checkpointing=False,
+            **kwargs
+        )
 
 
 class SEWResNet152(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(neuron_type, Bottleneck, [3, 8, 36, 3], **kwargs)
+        super().__init__(
+            neuron_type,
+            Bottleneck, [3, 8, 36, 3],
+            checkpointing=False,
+            **kwargs
+        )
 
 
 class MESEWResNet18(SEWResNet):

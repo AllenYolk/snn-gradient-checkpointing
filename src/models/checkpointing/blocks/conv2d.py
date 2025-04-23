@@ -1236,7 +1236,7 @@ class Conv2dBNRepeatPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNSlidingRepeatPSNMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNRepeatSlidingPSNMaxPool2d(BaseCheckpointingBlock):
 
     def __init__(
         self,
@@ -1328,4 +1328,273 @@ class Conv2dBNSlidingRepeatPSNMaxPool2d(BaseCheckpointingBlock):
             self.pool.stride,
             self.pool.padding,
             self.pool.dilation,
+        )
+
+
+class MaxPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        pool: nn.MaxPool2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.pool = pool
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        pool_dilation,
+        in_backward=False
+    ):
+        T = x_seq.shape[0]
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        return x_seq.reshape(T, -1, *x_seq.shape[1:])
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.pool.dilation,
+        )
+
+
+class Conv2dBNRepeatLIF(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        T: int,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.T = T
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        T,
+        neuron,
+        in_backward=False
+    ):
+        x = conv2d_bn_ann_forward(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
+        return neuron(x_seq)
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.T,
+            self.neuron,
+        )
+
+
+class Conv2dBNRepeatPSN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        T: int,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.T = T
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        T,
+        neuron_weight,
+        neuron_bias,
+        in_backward=False
+    ):
+        x = conv2d_bn_ann_forward(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
+        return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.T,
+            self.neuron.weight,
+            self.neuron.bias,
+        )
+
+
+class Conv2dBNRepeatSlidingPSN(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        T: int,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.T = T
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        T,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        in_backward=False
+    ):
+        x = conv2d_bn_ann_forward(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.
+        )
+        x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
+        return SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.T,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
         )
