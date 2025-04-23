@@ -126,7 +126,6 @@ def vgg_block_checkpointing(
             )
 
 
-# TODO: implement more critical blocks
 def vgg_critical_block_checkpointing(
     in_plane, out_plane, kernel_size, stride, padding, use_tebn: bool, T,
     neuron_type, spike_compressor: str, **kwargs

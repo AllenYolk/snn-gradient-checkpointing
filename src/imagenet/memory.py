@@ -145,12 +145,6 @@ def parse_args():
         default="/export/home/data_allenyolk/ImageNet0_03125"
     )
     parser.add_argument("--log_dir", type=str, default="./logs")
-    parser.add_argument(
-        "--cache_dataset",
-        dest="cache_dataset",
-        help="Cache the datasets and serialize the transforms",
-        action="store_true",
-    )
     parser.add_argument('-net', "--network", default="SEWResNet18", type=str)
     parser.add_argument('-neuron', "--neuron_type", default='LIF', type=str)
     parser.add_argument(
@@ -178,6 +172,7 @@ def parse_args():
     args.num_workers = 4
     args.learning_rate = 0.1
     args.momentum = 0.9
+    args.cache_dataset = True
     return args
 
 

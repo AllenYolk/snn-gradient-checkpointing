@@ -153,6 +153,30 @@ def conv2d_forward_compiled(
 
 
 @_conditional_compile()
+def avgpool2d_forward_compiled(
+    x_seq, pool_kernel_size, pool_stride, pool_padding
+):
+    T = x_seq.size(0)
+    x_seq = x_seq.flatten(0, 1)
+    x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+    x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+    return x_seq
+
+
+@_conditional_compile()
+def maxpool2d_forward_compiled(
+    x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+):
+    T = x_seq.size(0)
+    x_seq = x_seq.flatten(0, 1)
+    x_seq = F.max_pool2d(
+        x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+    )
+    x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+    return x_seq
+
+
+@_conditional_compile()
 def conv2d_bn_forward_compiled(
     x_seq, weight, bias, stride, padding, dilation, groups, bn_weight, bn_bias,
     bn_running_mean, bn_running_var, training, momentum
