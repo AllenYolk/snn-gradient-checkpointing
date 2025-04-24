@@ -4,7 +4,6 @@ from pathlib import Path
 from tqdm import tqdm
 
 sys.path.append("./src")
-sys.path.append("./src/scifar")
 
 import torch
 import torch.utils.data as data

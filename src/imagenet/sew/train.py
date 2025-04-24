@@ -1,3 +1,5 @@
+"""Modified from SEW ResNet source code.
+"""
 import argparse
 import time
 import sys
@@ -5,7 +7,6 @@ from pathlib import Path
 from tqdm import tqdm
 
 sys.path.append("./src")
-sys.path.append("./src/scifar")
 
 import wandb
 import torch
