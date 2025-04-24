@@ -148,4 +148,5 @@ imgs/
 
 **/*.prof
 
-spikformer-main/
+spikformer*/
+QKFormer*/

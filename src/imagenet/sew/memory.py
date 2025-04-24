@@ -145,7 +145,7 @@ def parse_args():
     )
     parser.add_argument("--log_dir", type=str, default="./logs")
     parser.add_argument('-net', "--network", default="SEWResNet18", type=str)
-    parser.add_argument('-neuron', "--neuron_type", default='LIF', type=str)
+    parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
         "-sc",
         "--spike_compressor",
@@ -166,7 +166,7 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
-    args.batch_size = 32
+    args.batch_size = 64
     args.epochs = 1
     args.num_workers = 4
     args.learning_rate = 0.1

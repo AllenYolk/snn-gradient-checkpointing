@@ -1,4 +1,4 @@
-"""Modified from QKFormer source code.
+"""Modified from Spikformer and QKFormer source code.
 """
 import argparse
 import time
@@ -8,9 +8,11 @@ from tqdm import tqdm
 import PIL
 
 sys.path.append("./src")
+sys.path.append("./src/imagenet/transformer")
 
 import wandb
 import torch
+import torch.nn as nn
 import torch.utils.data as data
 from utils import use_torch_npu
 
@@ -24,11 +26,11 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from spikingjelly.activation_based import functional
 from timm.data import create_transform
-from timm.data.mixup import Mixup
+from timm.loss import LabelSmoothingCrossEntropy
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir
-from utils import TETLoss, TMeanCrossEntropyLoss
+from utils import count_learnable_parameters
 import models
 from models import get_autocast_context, GradScaler, Lomo
 
@@ -41,14 +43,13 @@ def prepare_dataloaders(args):
         if is_train:
             # train transform
             transform = create_transform(
-                input_size=args.input_size,
+                input_size=224,
                 is_training=True,
-                color_jitter=args.color_jitter,
-                auto_augment=args.aa,
+                auto_augment="rand-m9-mstd0.5-inc1",
                 interpolation='bicubic',
-                re_prob=args.reprob,
-                re_mode=args.remode,
-                re_count=args.recount,
+                re_prob=0.25,
+                re_mode="pixel",
+                re_count=1,
                 mean=mean,
                 std=std,
             )
@@ -56,16 +57,8 @@ def prepare_dataloaders(args):
         else:
             # eval transform
             t = []
-            if args.input_size <= 224:
-                crop_pct = 224 / 256
-            else:
-                crop_pct = 1.0
-            size = int(args.input_size / crop_pct)
-            t.append(
-                transforms.Resize(size, interpolation=PIL.Image.BICUBIC
-                                 ),  # to maintain same ratio w.r.t. 224 images
-            )
-            t.append(transforms.CenterCrop(args.input_size))
+            t.append(transforms.Resize(256, interpolation=PIL.Image.BICUBIC))
+            t.append(transforms.CenterCrop(224))
             t.append(transforms.ToTensor())
             t.append(transforms.Normalize(mean, std))
             return transforms.Compose(t)
@@ -142,35 +135,19 @@ def prepare_dataloaders(args):
         drop_last=False
     )
 
-    mixup_fn = None
-    mixup_active = (
-        args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    )
-    if mixup_active:
-        print("Mixup is activated!")
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup,
-            cutmix_alpha=args.cutmix,
-            cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob,
-            switch_prob=args.mixup_switch_prob,
-            mode=args.mixup_mode,
-            label_smoothing=args.smoothing,
-            num_classes=args.nb_classes
-        )
-
-    return train_loader, test_loader, mixup_fn
+    return train_loader, test_loader
 
 
-def prepare_optimizers_and_schedulers(args, net, scaler):
+def prepare_optimizers_and_schedulers(args, net, scaler, train_loader_length):
     optimizer = torch.optim.SGD(
         net.parameters(),
         lr=args.learning_rate,
         momentum=args.momentum,
+        weight_decay=args.l2_factor,
     )
 
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs
+        optimizer, T_max=args.epochs * train_loader_length
     )
 
     if args.lomo:
@@ -195,16 +172,16 @@ def parse_args():
         help="Cache the datasets and serialize the transforms",
         action="store_true",
     )
-    parser.add_argument('-net', "--network", default="SEWResNet18", type=str)
-    parser.add_argument('-neuron', "--neuron_type", default='LIF', type=str)
+    parser.add_argument('-net', "--network", default="Spikformer", type=str)
+    parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
         "-sc",
         "--spike_compressor",
         default="IdentitySpikeCompressor",
         type=str
     )
-    parser.add_argument('-b', "--batch_size", default=32, type=int)
-    parser.add_argument('-e', '--epochs', default=320, type=int)
+    parser.add_argument('-b', "--batch_size", default=64, type=int)
+    parser.add_argument('-e', '--epochs', default=200, type=int)
     parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(
         '-amp',
@@ -212,11 +189,10 @@ def parse_args():
         action='store_true',
         help='automatic mixed precision training'
     )
-    parser.add_argument('-lr', "--learning_rate", default=0.1, type=float)
+    parser.add_argument('-lr', "--learning_rate", default=0.01, type=float)
     parser.add_argument('-mom', '--momentum', default=0.9, type=float)
-    parser.add_argument(
-        "-loss", "--loss", default="tet", type=str, choices=["ce", "tet"]
-    )
+    parser.add_argument('-l2', '--l2_factor', default=0.0001, type=float)
+    parser.add_argument('-smoothing', '--smoothing', default=0.1, type=float)
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-lomo", "--lomo", action='store_true')
@@ -243,7 +219,8 @@ def train_step(
         unit="batch"
     ) as pbar:
         for img, label in pbar:
-            img, label = img.float().to(device), label.to(device)
+            img = img.float().to(device, non_blocking=True)
+            label = label.to(device)
 
             with get_autocast_context(use_amp):
                 y = net(img)
@@ -259,6 +236,7 @@ def train_step(
             optimizer.zero_grad()
 
             functional.reset_net(net)
+            print(y.shape, label.shape)  #! delete this line
             prec1, prec5 = accuracy(y.mean(dim=0).data, label.data, topk=(1, 5))
             losses.update(batch_loss.item(), label.size(0))
             top1.update(prec1.item(), label.size(0))
@@ -270,8 +248,8 @@ def train_step(
                 "top5_acc": top5.avg,
             })
 
-    if lr_scheduler is not None:
-        lr_scheduler.step()
+            if lr_scheduler is not None:
+                lr_scheduler.step()
 
     epoch_end_time = time.time()
     epoch_time = epoch_end_time - epoch_start_time  # unit: second
@@ -283,11 +261,12 @@ def train_step(
     }
 
 
-def val_step(net, test_data_loader, device, criterion):
+def val_step(net, test_data_loader, device):
     net.eval()
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+    criterion = nn.CrossEntropyLoss()
 
     with torch.no_grad():
         for img, label in test_data_loader:
@@ -299,6 +278,7 @@ def val_step(net, test_data_loader, device, criterion):
 
             # measure accuracy and record loss
             functional.reset_net(net)
+            print(y.shape, label.shape)  #! delete this line
             prec1, prec5 = accuracy(y.mean(dim=0).data, label.data, topk=(1, 5))
             losses.update(batch_loss.item(), label.size(0))
             top1.update(prec1.item(), label.size(0))
@@ -317,11 +297,11 @@ def main():
 
     set_seed(args.set_seed)
 
-    run_name_generator = ModelNameGenerator(proj=f"imagenet-me")
+    run_name_generator = ModelNameGenerator(proj=f"imagenet-transformer-me")
     run_name = run_name_generator.generate(args)
     wandb.require("core")
     wandb.init(
-        project=f"imagenet-me",
+        project=f"imagenet-transformer-me",
         entity="pkuml-spiking",
         config=args,
         name=run_name,
@@ -338,20 +318,20 @@ def main():
         k=4,  # for SlidingPSN
     )
     print(net)
+    print(f"Number of parameters: {count_learnable_parameters(net)}")
     net = net.to(args.device)
 
-    if args.loss == "ce":
-        criterion = TMeanCrossEntropyLoss()
+    if args.smoothing > 0.:
+        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
     else:
-        criterion = TETLoss(
-            base_criterion=torch.nn.CrossEntropyLoss(), tet_lambda=0.
-        )
+        criterion = torch.nn.CrossEntropyLoss()
+    print(f"Criterion: {criterion}")
 
     scaler = None
     if args.amp:
         scaler = GradScaler()
     optimizer, lr_scheduler = prepare_optimizers_and_schedulers(
-        args, net, scaler
+        args, net, scaler, len(train_data_loader)
     )
 
     max_val_accuracy = 0.
@@ -371,7 +351,6 @@ def main():
             net,
             val_data_loader,
             args.device,
-            criterion,
         )
 
         wandb.log({

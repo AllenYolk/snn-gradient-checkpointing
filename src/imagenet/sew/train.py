@@ -153,14 +153,14 @@ def parse_args():
         action="store_true",
     )
     parser.add_argument('-net', "--network", default="SEWResNet18", type=str)
-    parser.add_argument('-neuron', "--neuron_type", default='LIF', type=str)
+    parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
         "-sc",
         "--spike_compressor",
         default="IdentitySpikeCompressor",
         type=str
     )
-    parser.add_argument('-b', "--batch_size", default=32, type=int)
+    parser.add_argument('-b', "--batch_size", default=64, type=int)
     parser.add_argument('-e', '--epochs', default=320, type=int)
     parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(
@@ -274,11 +274,11 @@ def main():
 
     set_seed(args.set_seed)
 
-    run_name_generator = ModelNameGenerator(proj=f"imagenet-me")
+    run_name_generator = ModelNameGenerator(proj=f"imagenet-sew-me")
     run_name = run_name_generator.generate(args)
     wandb.require("core")
     wandb.init(
-        project=f"imagenet-me",
+        project=f"imagenet-sew-me",
         entity="pkuml-spiking",
         config=args,
         name=run_name,
