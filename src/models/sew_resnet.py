@@ -95,7 +95,7 @@ class BasicBlockCheckpointing(nn.Module):
         base_width=64,
         dilation=1,
         norm_layer=nn.BatchNorm2d,
-        forced_uint8: bool = True,
+        input_non_binary_int: bool = True,
         **kwargs  # neuronal parameters
     ):
         super().__init__()
@@ -113,7 +113,8 @@ class BasicBlockCheckpointing(nn.Module):
             )
         spike_compressor_class = get_spike_compressor(spike_compressor)
         forced_uint8 = (
-            spike_compressor_class.requires_strictly_binary and forced_uint8
+            spike_compressor_class.requires_strictly_binary and
+            input_non_binary_int
         )
 
         self.conv_bn_sn1 = get_block(
@@ -216,14 +217,15 @@ class BottleneckCheckpointing(nn.Module):
         base_width=64,
         dilation=1,
         norm_layer=nn.BatchNorm2d,
-        forced_uint8: bool = True,
+        input_non_binary_int: bool = True,
         **kwargs,  # neuronal parameters
     ):
         super().__init__()
         width = int(planes * (base_width/64.)) * groups
         spike_compressor_class = get_spike_compressor(spike_compressor)
         forced_uint8 = (
-            spike_compressor_class.requires_strictly_binary and forced_uint8
+            spike_compressor_class.requires_strictly_binary and
+            input_non_binary_int
         )
 
         self.conv_bn_sn1 = get_block(
@@ -362,7 +364,7 @@ class SEWResNet(nn.Module):
             layers[0],
             checkpointing=checkpointing,
             spike_compressor=spike_compressor,
-            forced_1st_uint8=False,  # input to its first res block is binary!
+            input_non_binary_int=False,  # input to its first res block is binary!
             **kwargs
         )
         self.layer2 = self._make_layer(
@@ -374,7 +376,7 @@ class SEWResNet(nn.Module):
             dilate=replace_stride_with_dilation[0],
             checkpointing=checkpointing,
             spike_compressor=spike_compressor,
-            forced_1st_uint8=True,
+            input_non_binary_int=True,
             **kwargs,
         )
         self.layer3 = self._make_layer(
@@ -386,7 +388,7 @@ class SEWResNet(nn.Module):
             dilate=replace_stride_with_dilation[1],
             checkpointing=checkpointing,
             spike_compressor=spike_compressor,
-            forced_1st_uint8=True,
+            input_non_binary_int=True,
             **kwargs,
         )
         self.layer4 = self._make_layer(
@@ -398,7 +400,7 @@ class SEWResNet(nn.Module):
             dilate=replace_stride_with_dilation[2],
             checkpointing=checkpointing,
             spike_compressor=spike_compressor,
-            forced_1st_uint8=True,
+            input_non_binary_int=True,
             **kwargs,
         )
         self.avgpool = layer.AdaptiveAvgPool2d((1, 1), step_mode="m")
@@ -426,7 +428,7 @@ class SEWResNet(nn.Module):
         dilate=False,
         checkpointing=False,
         spike_compressor="IdentitySpikeCompressor",
-        forced_1st_uint8: bool = True,
+        input_non_binary_int: bool = True,
         **kwargs,
     ):
         norm_layer = self._norm_layer
@@ -434,7 +436,8 @@ class SEWResNet(nn.Module):
         previous_dilation = self.dilation
         spike_compressor_class = get_spike_compressor(spike_compressor)
         downsample_forced_uint8 = (
-            spike_compressor_class.requires_strictly_binary and forced_1st_uint8
+            spike_compressor_class.requires_strictly_binary and
+            input_non_binary_int
         )
         if dilate:
             self.dilation *= stride
@@ -472,7 +475,7 @@ class SEWResNet(nn.Module):
                 self.base_width,
                 previous_dilation,
                 norm_layer,
-                forced_uint8=forced_1st_uint8,  # input might by binary
+                input_non_binary_int=input_non_binary_int,
                 **kwargs,
             )
         )

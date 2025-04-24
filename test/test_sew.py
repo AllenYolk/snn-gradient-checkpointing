@@ -33,7 +33,7 @@ def _test_sew18_imagenet(net):
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
     x = torch.randn(B, 3, 224, 224).to(DEVICE)
-    y = net(x)
+    y = net(x).mean(0)
     print(y.shape)
     assert y.shape == (B, 1000)
 
@@ -69,7 +69,7 @@ def _test_sew_cifar10dvs(net):
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
     x = torch.randn(B, 10, 2, 128, 128).to(DEVICE)
-    y = net(x)
+    y = net(x).mean(0)
     print(y.shape)
     assert y.shape == (B, 10)
 
@@ -105,7 +105,7 @@ def _test_sew_dvsgesture(net):
     optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
 
     x = torch.randn(B, 10, 2, 128, 128).to(DEVICE)
-    y = net(x)
+    y = net(x).mean(0)
     print(y.shape)
     assert y.shape == (B, 11)
 
@@ -152,8 +152,8 @@ def test_sew18_equality_imagenet():
 
     B = 2
     x = torch.randn(B, 3, 224, 224).to(DEVICE)
-    y1 = net1(x)
-    y2 = net2(x)
+    y1 = net1(x).mean(0)
+    y2 = net2(x).mean(0)
     print(y1, y2)
     assert torch.allclose(y1, y2)
 
@@ -198,8 +198,8 @@ def test_sew_equality_dvsgesture():
 
     B = 3
     x = torch.randn(B, 10, 2, 128, 128).to(DEVICE)
-    y1 = net1(x)
-    y2 = net2(x)
+    y1 = net1(x).mean(0)
+    y2 = net2(x).mean(0)
     print(y1, y2)
     assert torch.allclose(y1, y2)
 

@@ -7,3 +7,4 @@ from .amp import *
 from .optimizer import *
 from .sew_resnet import *
 from .vgg import *
+from .spikformer import *

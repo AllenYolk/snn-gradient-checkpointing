@@ -322,6 +322,20 @@ def conv2d_bn_ann_forward_compiled(
     return x
 
 
+@_conditional_compile()
+def ssa_core_forward_compiled(qkv, scale):
+    # qkv.shape = [3, T, B, num_heads, num_patches, C//num_heads]
+    q = qkv[0]
+    k = qkv[1]
+    v = qkv[2]  # [T, B, num_heads, num_patches, C//num_heads]
+
+    x = k.transpose(-2, -1) @ v
+    x = (q@x) * scale
+    x = x.transpose(-1, -2)  # [T, B, num_heads, C//num_heads, num_patches]
+    x = x.reshape(x.shape[0], x.shape[1], -1, x.shape[-1])
+    return x  # [T, B, C, num_patches]
+
+
 #===============================================================================
 #                           Spiking Neurons                                    =
 #===============================================================================
