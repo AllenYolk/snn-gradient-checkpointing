@@ -147,3 +147,5 @@ logs/
 imgs/
 
 **/*.prof
+
+spikformer-main/

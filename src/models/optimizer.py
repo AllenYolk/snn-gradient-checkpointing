@@ -86,6 +86,17 @@ class Lomo(Optimizer):
 
             return x
 
+        def hook_no_clip(x):
+            self.optimizer.step()
+
+            with torch.no_grad():
+                for group in self.optimizer.param_groups:
+                    for p in group["params"]:
+                        if p.requires_grad:
+                            p.grad = None
+
+            return x
+
         def hook_amp(x):
             scale = self.scaler._scale.item()
             with torch.no_grad():
@@ -121,8 +132,10 @@ class Lomo(Optimizer):
 
         if hasattr(self, "scaler") and self.scaler is not None:
             return hook_amp
-        else:
+        elif self.clip_grad_norm is not None or self.clip_grad_value is not None:
             return hook
+        else:
+            return hook_no_clip
 
     def step(self):
         # The last parameter is not ready when calling the hook function.
