@@ -128,9 +128,7 @@ def prepare_dataloaders(args):
         drop_last=False
     )
 
-    if args.disable_mixup:
-        mixup_fn = None
-    else:
+    if args.mixup:
         mixup_fn = Mixup(
             mixup_alpha=0.8,
             cutmix_alpha=1.0,
@@ -141,6 +139,8 @@ def prepare_dataloaders(args):
             label_smoothing=args.smoothing,
             num_classes=1000,
         )
+    else:
+        mixup_fn = None
 
     return train_loader, test_loader, mixup_fn
 
@@ -209,7 +209,7 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
-    args.disable_mixup = False
+    args.mixup = False
     args.batch_size = 32
     args.epochs = 200
     args.num_workers = 4

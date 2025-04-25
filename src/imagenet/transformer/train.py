@@ -134,9 +134,7 @@ def prepare_dataloaders(args):
         drop_last=False
     )
 
-    if args.disable_mixup:
-        mixup_fn = None
-    else:
+    if args.mixup:
         mixup_fn = Mixup(
             mixup_alpha=0.8,
             cutmix_alpha=1.0,
@@ -147,6 +145,8 @@ def prepare_dataloaders(args):
             label_smoothing=args.smoothing,
             num_classes=1000,
         )
+    else:
+        mixup_fn = None
 
     return train_loader, test_loader, mixup_fn
 
@@ -201,9 +201,7 @@ def parse_args():
         help="Cache the datasets and serialize the transforms",
         action="store_true",
     )
-    parser.add_argument(
-        "-disable_mixup", "--disable_mixup", action="store_true"
-    )
+    parser.add_argument("-mixup", "--mixup", action="store_true")
     parser.add_argument('-net', "--network", default="Spikformer", type=str)
     parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
