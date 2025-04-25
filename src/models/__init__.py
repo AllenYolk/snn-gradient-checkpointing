@@ -8,3 +8,4 @@ from .optimizer import *
 from .sew_resnet import *
 from .vgg import *
 from .spikformer import *
+from .qkformer import *

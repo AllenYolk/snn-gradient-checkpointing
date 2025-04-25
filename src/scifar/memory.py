@@ -143,7 +143,7 @@ def parse_args():
 
     args = parser.parse_args()
     args.decay_lambda = 0.5
-    args.epochs = 1
+    args.epochs = 300
     args.channels = 128
     args.batch_size = 128
     args.num_workers = 4
@@ -298,7 +298,8 @@ def main():
     )
 
     max_val_accuracy = 0.
-    for epoch in range(args.epochs):
+    real_epochs = 1
+    for epoch in range(real_epochs):
         train_results = train_step(
             net,
             train_data_loader,
@@ -308,7 +309,7 @@ def main():
             scaler,
             profiler,
             epoch,
-            args.epochs,
+            real_epochs,
         )
         val_results = val_step(
             net,
@@ -321,7 +322,7 @@ def main():
         peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
 
         print(
-            f"Epoch {epoch + 1}/{args.epochs}: "
+            f"Epoch {epoch + 1}/{real_epochs}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
@@ -356,7 +357,7 @@ def main():
         f"Peak reserved memory: {peak_reserved} MB"
     )
 
-    for epoch in range(args.epochs, args.epochs + 1):
+    for epoch in range(real_epochs, real_epochs + 1):
         train_results = train_step(
             net,
             train_data_loader,
@@ -366,12 +367,12 @@ def main():
             scaler,
             profiler,
             epoch,
-            args.epochs + 1,
+            real_epochs,
             early_exit=True
         )
         profiler.save_data((None, mem_data_path))
         print(
-            f"Epoch {epoch + 1}/{args.epochs+1}: "
+            f"Profiling Epoch: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "

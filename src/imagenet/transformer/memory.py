@@ -1,18 +1,12 @@
-"""Modified from Spikformer and QKFormer source code.
-"""
 import argparse
-import time
 import sys
 from pathlib import Path
 from tqdm import tqdm
 import PIL
 
 sys.path.append("./src")
-sys.path.append("./src/imagenet/transformer")
 
-import wandb
 import torch
-import torch.nn as nn
 import torch.utils.data as data
 from utils import use_torch_npu
 
@@ -31,8 +25,8 @@ from timm.scheduler import create_scheduler_v2
 from timm.optim import create_optimizer_v2
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy, save_on_master, mkdir
-from utils import count_learnable_parameters
+from utils import accuracy, save_on_master, mkdir, count_learnable_parameters
+from utils.profiler import *
 import models
 from models import get_autocast_context, GradScaler, Lomo
 
@@ -181,12 +175,7 @@ def parse_args():
         type=str,
         default="/export/home/data_allenyolk/ImageNet0_03125"
     )
-    parser.add_argument(
-        "--cache_dataset",
-        dest="cache_dataset",
-        help="Cache the datasets and serialize the transforms",
-        action="store_true",
-    )
+    parser.add_argument("--log_dir", type=str, default="./logs")
     parser.add_argument('-net', "--network", default="Spikformer", type=str)
     parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
@@ -195,31 +184,40 @@ def parse_args():
         default="IdentitySpikeCompressor",
         type=str
     )
-    parser.add_argument('-b', "--batch_size", default=32, type=int)
-    parser.add_argument('-e', '--epochs', default=200, type=int)
-    parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(
         '-amp',
         "--amp",
         action='store_true',
         help='automatic mixed precision training'
     )
-    parser.add_argument('-lr', "--learning_rate", default=1e-3, type=float)
-    parser.add_argument('-l2', '--l2_factor', default=5e-2, type=float)
-    parser.add_argument('-smoothing', '--smoothing', default=0.1, type=float)
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
+    args.batch_size = 32
+    args.epochs = 200
+    args.num_workers = 4
+    args.learning_rate = 1e-3
+    args.l2_factor = 5e-2
+    args.smoothing = 0.1
+    args.cache_dataset = True
     return args
 
 
 def train_step(
-    net, train_data_loader, criterion, optimizer, lr_scheduler, device, scaler,
-    current_epoch, total_epoch
+    net,
+    train_data_loader,
+    criterion,
+    optimizer,
+    lr_scheduler,
+    device,
+    scaler,
+    profiler,
+    current_epoch,
+    total_epoch,
+    early_exit=False,
 ):
-    epoch_start_time = time.time()
     net.train()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -242,10 +240,12 @@ def train_step(
 
             if use_amp:
                 scaler.scale(batch_loss).backward()
+                profiler.profile(sort_by="backward_peak_memory")
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 batch_loss.backward()
+                profiler.profile(sort_by="backward_peak_memory")
                 optimizer.step()
             optimizer.zero_grad()
 
@@ -265,20 +265,20 @@ def train_step(
                 # will prevent scheduler update that should happen
                 # at the end of the epoch
                 lr_scheduler.step_update(
-                    i + current_epoch * len(train_data_loader)
+                    current_epoch * len(train_data_loader) + i
                 )
+
+            if early_exit and i > 5:
+                break
 
     if lr_scheduler is not None:
         # will prevent scheduler update that should happen at each iteration
         lr_scheduler.step(current_epoch + 1)
 
-    epoch_end_time = time.time()
-    epoch_time = epoch_end_time - epoch_start_time  # unit: second
     return {
         "loss": losses.avg,
         "top1_acc": top1.avg,
         "top5_acc": top5.avg,
-        "time": epoch_time
     }
 
 
@@ -319,13 +319,11 @@ def main():
 
     run_name_generator = ModelNameGenerator(proj=f"imagenet-transformer-me")
     run_name = run_name_generator.generate(args)
-    wandb.require("core")
-    wandb.init(
-        project=f"imagenet-transformer-me",
-        entity="pkuml-spiking",
-        config=args,
-        name=run_name,
-    )
+    log_path = Path(args.log_dir) / "ImageNet-transformer"
+    if not log_path.exists():
+        log_path.mkdir(parents=True)
+    mem_data_path = log_path / (run_name+".prof.pt")
+    log_path = log_path / (run_name+".prof.txt")
 
     train_data_loader, val_data_loader = prepare_dataloaders(args)
 
@@ -338,7 +336,7 @@ def main():
         k=4,  # for SlidingPSN
     )
     print(net)
-    print(f"Number of parameters: {count_learnable_parameters(net)}")
+    print("Number of learnable parameters: ", count_learnable_parameters(net))
     net = net.to(args.device)
 
     if args.smoothing > 0.:
@@ -354,8 +352,22 @@ def main():
         args, net, scaler, len(train_data_loader)
     )
 
+    print("Stage 1: Peak Memory Checking")
+    profiler = MemoryProfilerList()
+
+    torch.cuda.reset_peak_memory_stats(args.device)
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        "Before training: "
+        f"peak_allocated={peak_allocated:.2f} MB, "
+        f"peak_reserved={peak_reserved:.2f} MB"
+    )
+
+    real_epochs = 1
     max_val_accuracy = 0.
-    for epoch in range(args.epochs):
+    for epoch in range(real_epochs):
         train_results = train_step(
             net,
             train_data_loader,
@@ -364,39 +376,99 @@ def main():
             lr_scheduler,
             args.device,
             scaler,
+            profiler,
             epoch,
-            args.epochs,
+            real_epochs,
         )
         val_results = val_step(
             net,
             val_data_loader,
             args.device,
         )
-
-        wandb.log({
-            "loss/train_loss": train_results["loss"],
-            "acc/train_top1_acc": train_results["top1_acc"],
-            "acc/train_top5_acc": train_results["top5_acc"],
-            "time/train_epoch_time": train_results["time"],
-            "loss/val_loss": val_results["loss"],
-            "acc/val_top1_acc": val_results["top1_acc"],
-            "acc/val_top5_acc": val_results["top5_acc"],
-        })
+        mem_stats = torch.cuda.memory_stats(args.device)
+        peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+        peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
         print(
-            f"Epoch {epoch + 1}/{args.epochs}: "
+            f"Epoch {epoch + 1}/{real_epochs}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
-            f"time/train_epoch_time={train_results['time']}, "
             f"val_loss={val_results['loss']}, "
             f"val_top1_acc={val_results['top1_acc']}, "
             f"val_top5_acc={val_results['top5_acc']}, "
+            f"peak_allocated={peak_allocated:.2f} MB, "
+            f"peak_reserved={peak_reserved:.2f} MB"
         )
         if val_results["top1_acc"] > max_val_accuracy:
             max_val_accuracy = val_results["top1_acc"]
 
-    wandb.summary["acc/max_val_top1_acc"] = max_val_accuracy
-    wandb.finish()
+    print("Stage 2: Memory Profiling")
+    if args.network.endswith("Spikformer"):
+        model_list = (net.patch_embed, *[b for b in net.block], net.head)
+        search_mode_list = (
+            "direct_children", *["direct_children" for _ in net.block], "self"
+        )
+        model_name_list = (
+            "patch_embed", *[f"block{i}" for i in range(net.depth)], "head"
+        )
+    elif args.network.endswith("QKFormer"):
+        model_list = (
+            net.patch_embed1, *[b for b in net.block1], net.patch_embed2,
+            *[b for b in net.block2], net.patch_embed3,
+            *[b for b in net.block3], net.head
+        )
+        search_mode_list = (
+            "direct_children", *["direct_children" for _ in net.block1],
+            "direct_children", *["direct_children" for _ in net.block2],
+            "direct_children", *["direct_children" for _ in net.block3], "self"
+        )
+        model_name_list = (
+            "patch_embed1", *[f"block1_{i}" for i in range(net.depth)],
+            "patch_embed2", *[f"block2_{i}" for i in range(net.depth)],
+            "patch_embed3", *[f"block3_{i}" for i in range(net.depth)], "head"
+        )
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename=log_path),
+        LayerWiseMemoryProfiler(
+            model_list,
+            search_mode=search_mode_list,
+            model_names=model_name_list,
+            instances=(torch.nn.Module,),
+            filename=log_path,
+        ),
+    )
+
+    torch.cuda.reset_peak_memory_stats(args.device)
+    mem_stats = torch.cuda.memory_stats(args.device)
+    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
+    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
+    print(
+        "Before training: "
+        f"peak_allocated={peak_allocated:.2f} MB, "
+        f"peak_reserved={peak_reserved:.2f} MB"
+    )
+
+    for epoch in range(real_epochs, real_epochs + 1):
+        train_results = train_step(
+            net,
+            train_data_loader,
+            criterion,
+            optimizer,
+            lr_scheduler,
+            args.device,
+            scaler,
+            profiler,
+            epoch,
+            real_epochs + 1,
+            early_exit=True,
+        )
+        profiler.save_data((None, mem_data_path))
+        print(
+            f"Profiling Epoch: "
+            f"train_loss={train_results['loss']}, "
+            f"train_top1_acc={train_results['top1_acc']}, "
+            f"train_top5_acc={train_results['top5_acc']}, "
+        )
 
 
 if __name__ == '__main__':

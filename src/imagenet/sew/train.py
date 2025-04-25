@@ -160,7 +160,7 @@ def parse_args():
         default="IdentitySpikeCompressor",
         type=str
     )
-    parser.add_argument('-b', "--batch_size", default=64, type=int)
+    parser.add_argument('-b', "--batch_size", default=32, type=int)
     parser.add_argument('-e', '--epochs', default=320, type=int)
     parser.add_argument('-nw', "--num_workers", default=4, type=int)
     parser.add_argument(

@@ -166,8 +166,8 @@ def parse_args():
     parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
-    args.batch_size = 64
-    args.epochs = 1
+    args.batch_size = 32
+    args.epochs = 320
     args.num_workers = 4
     args.learning_rate = 0.1
     args.momentum = 0.9
@@ -277,9 +277,9 @@ def main():
 
     set_seed(args.set_seed)
 
-    run_name_generator = ModelNameGenerator(proj=f"imagenet-me")
+    run_name_generator = ModelNameGenerator(proj=f"imagenet-sew-me")
     run_name = run_name_generator.generate(args)
-    log_path = Path(args.log_dir) / "ImageNet"
+    log_path = Path(args.log_dir) / "ImageNet-sew"
     if not log_path.exists():
         log_path.mkdir(parents=True)
     mem_data_path = log_path / (run_name+".prof.pt")
@@ -326,8 +326,9 @@ def main():
         f"peak_reserved={peak_reserved:.2f} MB"
     )
 
+    real_epochs = 1
     max_val_accuracy = 0.
-    for epoch in range(args.epochs):
+    for epoch in range(real_epochs):
         train_results = train_step(
             net,
             train_data_loader,
@@ -338,7 +339,7 @@ def main():
             scaler,
             profiler,
             epoch,
-            args.epochs,
+            real_epochs,
         )
         val_results = val_step(
             net,
@@ -350,7 +351,7 @@ def main():
         peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
         peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
         print(
-            f"Epoch {epoch + 1}/{args.epochs}: "
+            f"Epoch {epoch + 1}/{real_epochs}: "
             f"train_loss={train_results['loss']}, "
             f"train_top1_acc={train_results['top1_acc']}, "
             f"train_top5_acc={train_results['top5_acc']}, "
@@ -394,7 +395,7 @@ def main():
         f"peak_reserved={peak_reserved:.2f} MB"
     )
 
-    for epoch in range(args.epochs, args.epochs + 1):
+    for epoch in range(real_epochs, real_epochs + 1):
         train_results = train_step(
             net,
             train_data_loader,
@@ -405,7 +406,7 @@ def main():
             scaler,
             profiler,
             epoch,
-            args.epochs + 1,
+            real_epochs + 1,
             early_exit=True,
         )
         profiler.save_data((None, mem_data_path))

@@ -193,8 +193,33 @@ def conv2d_bn_forward_compiled(
         training=training,
         momentum=momentum
     )
-    y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
-    return y_seq
+    x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+    return x_seq
+
+
+@_conditional_compile()
+def conv2d_bn_maxpool2d_forward_compiled(
+    x_seq, weight, bias, stride, padding, dilation, groups, bn_weight, bn_bias,
+    bn_running_mean, bn_running_var, training, momentum, pool_kernel_size,
+    pool_stride, pool_padding, pool_dilation
+):
+    T, N = x_seq.size(0), x_seq.size(1)
+    x_seq = x_seq.flatten(0, 1)
+    x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+    x_seq = F.batch_norm(
+        x_seq,
+        bn_running_mean,
+        bn_running_var,
+        bn_weight,
+        bn_bias,
+        training=training,
+        momentum=momentum
+    )
+    x_seq = F.max_pool2d(
+        x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+    )
+    x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+    return x_seq
 
 
 @_conditional_compile()

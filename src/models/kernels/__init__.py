@@ -34,6 +34,8 @@ api = {
         maxpool2d_forward_compiled,
     "conv2d_bn_forward":
         conv2d_bn_forward_compiled,
+    "conv2d_bn_maxpool2d_forward":
+        conv2d_bn_maxpool2d_forward_compiled,
     "conv2d_tebn_forward":
         conv2d_tebn_forward_compiled,
     "avgpool2d_conv2d_bn_forward":
@@ -108,6 +110,7 @@ conv2d_forward = api["conv2d_forward"]
 avgpool2d_forward = api["avgpool2d_forward"]
 maxpool2d_forward = api["maxpool2d_forward"]
 conv2d_bn_forward = api["conv2d_bn_forward"]
+conv2d_bn_maxpool2d_forward = api["conv2d_bn_maxpool2d_forward"]
 conv2d_tebn_forward = api["conv2d_tebn_forward"]
 avgpool2d_conv2d_bn_forward = api["avgpool2d_conv2d_bn_forward"]
 avgpool2d_conv2d_tebn_forward = api["avgpool2d_conv2d_tebn_forward"]

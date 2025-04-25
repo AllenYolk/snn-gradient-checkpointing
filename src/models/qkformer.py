@@ -247,11 +247,139 @@ class SSACheckpointing(nn.Module):
         return x.reshape(T, B, C, H, W).contiguous()  # [T, B, C, H, W]
 
 
+class QKA(nn.Module):
+
+    def __init__(
+        self,
+        neuron_type,
+        dim,
+        num_heads=8,
+        **kwargs,
+    ):
+        super().__init__()
+        if dim % num_heads != 0:
+            raise ValueError(
+                f"dim {dim} should be divided by num_heads {num_heads}."
+            )
+        self.dim = dim
+        self.num_heads = num_heads
+
+        self.q_network = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv1d(dim, dim, kernel_size=1, stride=1, bias=False),
+                nn.BatchNorm1d(dim)
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )
+        self.k_network = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv1d(dim, dim, kernel_size=1, stride=1, bias=False),
+                nn.BatchNorm1d(dim)
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )
+
+        self.attn_neuron = get_neuron(neuron_type, **kwargs)
+
+        self.proj_network = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv1d(dim, dim, kernel_size=1, stride=1),
+                nn.BatchNorm1d(dim)
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )
+
+    def forward(self, x):
+        # x.shape = [T, B, C, H, W]
+        H, W = x.shape[-2], x.shape[-1]
+        x = x.flatten(3)
+        T, B, C, N = x.shape
+
+        q_conv_out = self.q_network(x)  # [T, B, C, N]
+        q = q_conv_out.reshape(T, B, self.num_heads, C // self.num_heads, N)
+
+        k_conv_out = self.k_network(x)  # [T, B, C, N]
+        k = k_conv_out.reshape(T, B, self.num_heads, C // self.num_heads, N)
+
+        q = torch.sum(q, dim=3, keepdim=True)
+        attn = self.attn_neuron(q)  # [T, B, h, 1, N]; token-wise
+        x = torch.mul(attn, k)  # [T, B, h, C//h, N]
+        x = x.flatten(2, 3)  # [T, B, C, N]
+
+        x = self.proj_network(x)
+        return x.reshape(T, B, C, H, W).contiguous()  # [T, B, C, H, W]
+
+
+class QKACheckpointing(nn.Module):
+
+    def __init__(
+        self, neuron_type, spike_compressor: str, dim, num_heads=8, **kwargs
+    ):
+        super().__init__()
+        if dim % num_heads != 0:
+            raise ValueError(
+                f"dim {dim} should be divided by num_heads {num_heads}."
+            )
+        self.dim = dim
+        self.num_heads = num_heads
+
+        spike_compressor_class = get_spike_compressor(spike_compressor)
+        qkv_forced_uint8 = spike_compressor_class.requires_strictly_binary
+        qkv_spike_compressor = (
+            "Uint8SpikeCompressor" if qkv_forced_uint8 else spike_compressor
+        )
+
+        self.q_network = get_block(
+            f"Conv1dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv1d(dim, dim, kernel_size=1, stride=1, bias=False),
+            bn=nn.BatchNorm1d(dim),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(qkv_spike_compressor),
+        )
+        self.k_network = get_block(
+            f"Conv1dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv1d(dim, dim, kernel_size=1, stride=1, bias=False),
+            bn=nn.BatchNorm1d(dim),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(qkv_spike_compressor),
+        )
+
+        self.attn_network = get_block(
+            f"QKACore{neuron_type_to_str(neuron_type)}",
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+        self.proj_network = get_block(
+            f"Conv1dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv1d(dim, dim, kernel_size=1, stride=1),
+            bn=nn.BatchNorm1d(dim),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+    def forward(self, x):
+        # x.shape = [T, B, C, H, W]; non-binary int-valued tensor
+        H, W = x.shape[-2], x.shape[-1]
+        x = x.flatten(3)
+        T, B, C, N = x.shape
+
+        qk = torch.empty([2, T, B, C, N], device=x.device, dtype=x.dtype)
+        qk[0] = self.q_network(x)
+        qk[1] = self.k_network(x)
+        qk = qk.reshape(2, T, B, self.num_heads, C // self.num_heads, N)
+
+        x = self.attn_network(qk)  # [T, B, C, N]
+        x = self.proj_network(x)
+        return x.reshape(T, B, C, H, W).contiguous()  # [T, B, C, H, W]
+
+
 class Block(nn.Module):
 
     def __init__(
         self,
         neuron_type,
+        attn_type: str,
         dim,
         num_heads,
         mlp_ratio=4.,
@@ -261,18 +389,33 @@ class Block(nn.Module):
     ):
         super().__init__()
 
-        self.attn = SSACheckpointing(
-            neuron_type,
-            spike_compressor,
-            dim,
-            num_heads=num_heads,
-            **kwargs,
-        ) if checkpointing else SSA(
-            neuron_type,
-            dim,
-            num_heads=num_heads,
-            **kwargs,
-        )
+        if attn_type == "SSA":
+            self.attn = SSACheckpointing(
+                neuron_type,
+                spike_compressor,
+                dim,
+                num_heads=num_heads,
+                **kwargs,
+            ) if checkpointing else SSA(
+                neuron_type,
+                dim,
+                num_heads=num_heads,
+                **kwargs,
+            )
+        elif attn_type == "QKA":
+            self.attn = QKACheckpointing(
+                neuron_type,
+                spike_compressor,
+                dim,
+                num_heads=num_heads,
+                **kwargs,
+            ) if checkpointing else QKA(
+                neuron_type,
+                dim,
+                num_heads=num_heads,
+                **kwargs,
+            )
+
         self.mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = MLPCheckpointing(
             neuron_type,
@@ -295,7 +438,7 @@ class Block(nn.Module):
         return x  # not binary!
 
 
-class SPS(nn.Module):
+class PatchEmbedInit(nn.Module):
 
     def __init__(
         self,
@@ -326,19 +469,34 @@ class SPS(nn.Module):
             layer.SeqToANNContainer(
                 nn.Conv2d(
                     in_channels,
-                    embed_dims // 8,
+                    embed_dims // 2,
                     kernel_size=3,
                     stride=1,
                     padding=1,
                     bias=False
-                ),
-                nn.BatchNorm2d(embed_dims // 8),
+                ), nn.BatchNorm2d(embed_dims // 2),
+                nn.MaxPool2d(
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    dilation=1,
+                    ceil_mode=False
+                )
             ),
             get_neuron(neuron_type, **kwargs),
         )
 
         self.proj_conv_1 = nn.Sequential(
             layer.SeqToANNContainer(
+                nn.Conv2d(
+                    embed_dims // 2,
+                    embed_dims,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False
+                ),
+                nn.BatchNorm2d(embed_dims),
                 nn.MaxPool2d(
                     kernel_size=3,
                     stride=2,
@@ -346,73 +504,12 @@ class SPS(nn.Module):
                     dilation=1,
                     ceil_mode=False
                 ),
-                nn.Conv2d(
-                    embed_dims // 8,
-                    embed_dims // 4,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                    bias=False
-                ),
-                nn.BatchNorm2d(embed_dims // 4),
             ),
             get_neuron(neuron_type, **kwargs),
         )
 
         self.proj_conv_2 = nn.Sequential(
             layer.SeqToANNContainer(
-                nn.MaxPool2d(
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                    dilation=1,
-                    ceil_mode=False
-                ),
-                nn.Conv2d(
-                    embed_dims // 4,
-                    embed_dims // 2,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                    bias=False
-                ),
-                nn.BatchNorm2d(embed_dims // 2),
-            ),
-            get_neuron(neuron_type, **kwargs),
-        )
-
-        self.proj_conv_3 = nn.Sequential(
-            layer.SeqToANNContainer(
-                nn.MaxPool2d(
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                    dilation=1,
-                    ceil_mode=False
-                ),
-                nn.Conv2d(
-                    embed_dims // 2,
-                    embed_dims,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                    bias=False
-                ),
-                nn.BatchNorm2d(embed_dims),
-            ),
-            get_neuron(neuron_type, **kwargs),
-            layer.MaxPool2d(
-                kernel_size=3,
-                stride=2,
-                padding=1,
-                dilation=1,
-                ceil_mode=False,
-                step_mode="m"
-            ),
-        )
-
-        self.positional_encoding = nn.Sequential(
-            layer.SeqToANNContainer(
                 nn.Conv2d(
                     embed_dims,
                     embed_dims,
@@ -424,21 +521,35 @@ class SPS(nn.Module):
                 nn.BatchNorm2d(embed_dims),
             ),
             get_neuron(neuron_type, **kwargs),
-        )  # conv as learnable positional encoding
+        )
+
+        self.proj_res = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv2d(
+                    embed_dims // 2,
+                    embed_dims,
+                    kernel_size=1,
+                    stride=2,
+                    padding=0,
+                    bias=False
+                ),
+                nn.BatchNorm2d(embed_dims),
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )  # residual connection as positional embedding!!
 
     def forward(self, x):
         x = self.proj_conv_0(x)
+        x_feat = x
         x = self.proj_conv_1(x)
         x = self.proj_conv_2(x)
-        x = self.proj_conv_3(x)
 
-        x_feat = x
-        x = self.positional_encoding(x)
+        x_feat = self.proj_res(x_feat)
         x = x + x_feat
         return x
 
 
-class SPSCheckpointing(nn.Module):
+class PatchEmbedInitCheckpointing(nn.Module):
 
     def __init__(
         self,
@@ -467,43 +578,9 @@ class SPSCheckpointing(nn.Module):
         self.num_patches = self.H * self.W
 
         self.proj_conv_0 = get_block(
-            f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
+            f"Conv2dBNMaxPool2d{neuron_type_to_str(neuron_type)}",
             proj=nn.Conv2d(
                 in_channels,
-                embed_dims // 8,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=False
-            ),
-            bn=nn.BatchNorm2d(embed_dims // 8),
-            neuron=get_neuron(neuron_type, **kwargs),
-            pool=nn.MaxPool2d(
-                kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
-            ),
-            spike_compressor=get_spike_compressor("NullSpikeCompressor"),
-        )
-        self.proj_conv_1 = get_block(
-            f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
-            proj=nn.Conv2d(
-                embed_dims // 8,
-                embed_dims // 4,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=False
-            ),
-            bn=nn.BatchNorm2d(embed_dims // 4),
-            neuron=get_neuron(neuron_type, **kwargs),
-            pool=nn.MaxPool2d(
-                kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
-            ),
-            spike_compressor=get_spike_compressor(spike_compressor),
-        )
-        self.proj_conv_2 = get_block(
-            f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
-            proj=nn.Conv2d(
-                embed_dims // 4,
                 embed_dims // 2,
                 kernel_size=3,
                 stride=1,
@@ -511,14 +588,14 @@ class SPSCheckpointing(nn.Module):
                 bias=False
             ),
             bn=nn.BatchNorm2d(embed_dims // 2),
-            neuron=get_neuron(neuron_type, **kwargs),
             pool=nn.MaxPool2d(
                 kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
             ),
-            spike_compressor=get_spike_compressor(spike_compressor),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor("NullSpikeCompressor"),
         )
-        self.proj_conv_3 = get_block(
-            f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
+        self.proj_conv_1 = get_block(
+            f"Conv2dBNMaxPool2d{neuron_type_to_str(neuron_type)}",
             proj=nn.Conv2d(
                 embed_dims // 2,
                 embed_dims,
@@ -528,14 +605,13 @@ class SPSCheckpointing(nn.Module):
                 bias=False
             ),
             bn=nn.BatchNorm2d(embed_dims),
-            neuron=get_neuron(neuron_type, **kwargs),
             pool=nn.MaxPool2d(
                 kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
             ),
+            neuron=get_neuron(neuron_type, **kwargs),
             spike_compressor=get_spike_compressor(spike_compressor),
         )
-
-        self.positional_encoding = get_block(
+        self.proj_conv_2 = get_block(
             f"Conv2dBN{neuron_type_to_str(neuron_type)}",
             proj=nn.Conv2d(
                 embed_dims,
@@ -547,23 +623,214 @@ class SPSCheckpointing(nn.Module):
             ),
             bn=nn.BatchNorm2d(embed_dims),
             neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+        self.proj_res = get_block(
+            f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv2d(
+                embed_dims // 2,
+                embed_dims,
+                kernel_size=1,
+                stride=2,
+                padding=0,
+                bias=False
+            ),
+            bn=nn.BatchNorm2d(embed_dims),
+            neuron=get_neuron(neuron_type, **kwargs),
             spike_compressor=get_spike_compressor(spike_compressor)
         )
 
     def forward(self, x):
         # x is a float tensor
         x = self.proj_conv_0(x)
+        x_feat = x
         x = self.proj_conv_1(x)
         x = self.proj_conv_2(x)
-        x = self.proj_conv_3(x)
 
-        x_feat = x
-        x = self.positional_encoding(x)
+        x_feat = self.proj_res(x_feat)
         x = x + x_feat
-        return x  # non-binary int tensor
+        return x  # non-binary int-valued tensor
 
 
-class Spikformer(nn.Module):
+class PatchEmbedStage(nn.Module):
+
+    def __init__(
+        self,
+        neuron_type,
+        img_size_h=128,
+        img_size_w=128,
+        patch_size=4,
+        embed_dims=256,
+        **kwargs
+    ):
+        super().__init__()
+        self.image_size = [img_size_h, img_size_w]
+        patch_size = (patch_size, patch_size
+                     ) if isinstance(patch_size, int) else patch_size
+        if len(patch_size) != 2:
+            raise ValueError(
+                f"patch_size should be a tuple of length 2 or an int, "
+                f"but got {len(patch_size)}"
+            )
+        self.patch_size = patch_size
+        self.H = self.image_size[0] // self.patch_size[0]
+        self.W = self.image_size[1] // self.patch_size[1]
+        self.num_patches = self.H * self.W
+
+        self.proj_conv_1 = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv2d(
+                    embed_dims // 2,
+                    embed_dims,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False
+                ),
+                nn.BatchNorm2d(embed_dims),
+                nn.MaxPool2d(
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    dilation=1,
+                    ceil_mode=False
+                ),
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )
+
+        self.proj_conv_2 = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv2d(
+                    embed_dims,
+                    embed_dims,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False
+                ),
+                nn.BatchNorm2d(embed_dims),
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )
+
+        self.proj_res = nn.Sequential(
+            layer.SeqToANNContainer(
+                nn.Conv2d(
+                    embed_dims // 2,
+                    embed_dims,
+                    kernel_size=1,
+                    stride=2,
+                    padding=0,
+                    bias=False
+                ),
+                nn.BatchNorm2d(embed_dims),
+            ),
+            get_neuron(neuron_type, **kwargs),
+        )  # residual connection as positional embedding!!
+
+    def forward(self, x):
+        x_feat = x
+        x = self.proj_conv_1(x)
+        x = self.proj_conv_2(x)
+
+        x_feat = self.proj_res(x_feat)
+        x = x + x_feat
+        return x
+
+
+class PatchEmbedStageCheckpointing(nn.Module):
+
+    def __init__(
+        self,
+        neuron_type,
+        spike_compressor: str,
+        img_size_h=128,
+        img_size_w=128,
+        patch_size=4,
+        embed_dims=256,
+        **kwargs
+    ):
+        super().__init__()
+        self.image_size = [img_size_h, img_size_w]
+        patch_size = (patch_size, patch_size
+                     ) if isinstance(patch_size, int) else patch_size
+        if len(patch_size) != 2:
+            raise ValueError(
+                f"patch_size should be a tuple of length 2 or an int, "
+                f"but got {len(patch_size)}"
+            )
+        self.patch_size = patch_size
+        self.H = self.image_size[0] // self.patch_size[0]
+        self.W = self.image_size[1] // self.patch_size[1]
+        self.num_patches = self.H * self.W
+
+        spike_compressor_class = get_spike_compressor(spike_compressor)
+        first_forced_uint8 = spike_compressor_class.requires_strictly_binary
+        first_spike_compressor = (
+            "Uint8SpikeCompressor" if first_forced_uint8 else spike_compressor
+        )
+
+        self.proj_conv_1 = get_block(
+            f"Conv2dBNMaxPool2d{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv2d(
+                embed_dims // 2,
+                embed_dims,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False
+            ),
+            bn=nn.BatchNorm2d(embed_dims),
+            pool=nn.MaxPool2d(
+                kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
+            ),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(first_spike_compressor),
+        )
+        self.proj_conv_2 = get_block(
+            f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv2d(
+                embed_dims,
+                embed_dims,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False
+            ),
+            bn=nn.BatchNorm2d(embed_dims),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(spike_compressor),
+        )
+
+        self.proj_res = get_block(
+            f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+            proj=nn.Conv2d(
+                embed_dims // 2,
+                embed_dims,
+                kernel_size=1,
+                stride=2,
+                padding=0,
+                bias=False
+            ),
+            bn=nn.BatchNorm2d(embed_dims),
+            neuron=get_neuron(neuron_type, **kwargs),
+            spike_compressor=get_spike_compressor(first_spike_compressor)
+        )
+
+    def forward(self, x):
+        # x is a non-binary tensor
+        x_feat = x
+        x = self.proj_conv_1(x)
+        x = self.proj_conv_2(x)
+
+        x_feat = self.proj_res(x_feat)  # non-binary int-valued tensor
+        x = x + x_feat
+        return x  # non-binary int-valued tensor
+
+
+class QKFormer(nn.Module):
 
     def __init__(
         self,
@@ -577,7 +844,7 @@ class Spikformer(nn.Module):
         embed_dims=512,
         num_heads=8,
         mlp_ratios=4,
-        depths=8,
+        depths=10,
         **kwargs,
     ):
         super().__init__()
@@ -585,25 +852,65 @@ class Spikformer(nn.Module):
         self.depths = depths
         self.T = T
 
-        self.patch_embed = SPS(
+        self.patch_embed1 = PatchEmbedInit(
             neuron_type,
             img_size_h=img_size_h,
             img_size_w=img_size_w,
             patch_size=patch_size,
             in_channels=in_channels,
+            embed_dims=embed_dims // 4,
+            **kwargs
+        )
+        self.block1 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 4,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=False,
+                **kwargs
+            ) for _ in range(1)
+        ])
+
+        self.patch_embed2 = PatchEmbedStage(
+            neuron_type,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            embed_dims=embed_dims // 2,
+            **kwargs
+        )
+        self.block2 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 2,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=False,
+                **kwargs
+            ) for _ in range(2)
+        ])
+
+        self.patch_embed3 = PatchEmbedStage(
+            neuron_type,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
             embed_dims=embed_dims,
             **kwargs
         )
-
-        self.block = nn.ModuleList([
+        self.block3 = nn.ModuleList([
             Block(
                 neuron_type,
+                attn_type="SSA",
                 dim=embed_dims,
                 num_heads=num_heads,
                 mlp_ratio=mlp_ratios,
                 checkpointing=False,
                 **kwargs
-            ) for _ in range(depths)
+            ) for _ in range(depths - 3)
         ])
 
         # classification head
@@ -623,9 +930,18 @@ class Spikformer(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward_features(self, x):
-        x = self.patch_embed(x)
-        for blk in self.block:
+        x = self.patch_embed1(x)
+        for blk in self.block1:
             x = blk(x)  # [T, B, C, H, W]
+
+        x = self.patch_embed2(x)
+        for blk in self.block2:
+            x = blk(x)
+
+        x = self.patch_embed3(x)
+        for blk in self.block3:
+            x = blk(x)
+
         return x.flatten(3).mean(3)
 
     def forward(self, x):
@@ -635,7 +951,7 @@ class Spikformer(nn.Module):
         return x  # [B, num_classes]
 
 
-class MESpikformer(nn.Module):
+class MEQKFormer(nn.Module):
 
     def __init__(
         self,
@@ -650,7 +966,7 @@ class MESpikformer(nn.Module):
         embed_dims=512,
         num_heads=8,
         mlp_ratios=4,
-        depths=8,
+        depths=10,
         **kwargs,
     ):
         super().__init__()
@@ -659,27 +975,71 @@ class MESpikformer(nn.Module):
         self.T = T
         kwargs["T"] = T
 
-        self.patch_embed = SPSCheckpointing(
+        self.patch_embed1 = PatchEmbedInitCheckpointing(
             neuron_type,
             spike_compressor,
             img_size_h=img_size_h,
             img_size_w=img_size_w,
             patch_size=patch_size,
             in_channels=in_channels,
+            embed_dims=embed_dims // 4,
+            **kwargs
+        )
+        self.block1 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 4,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=True,
+                spike_compressor=spike_compressor,
+                **kwargs
+            ) for _ in range(1)
+        ])
+
+        self.patch_embed2 = PatchEmbedStageCheckpointing(
+            neuron_type,
+            spike_compressor,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            embed_dims=embed_dims // 2,
+            **kwargs
+        )
+        self.block2 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 2,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=True,
+                spike_compressor=spike_compressor,
+                **kwargs
+            ) for _ in range(2)
+        ])
+
+        self.patch_embed3 = PatchEmbedStageCheckpointing(
+            neuron_type,
+            spike_compressor,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
             embed_dims=embed_dims,
             **kwargs
         )
-
-        self.block = nn.ModuleList([
+        self.block3 = nn.ModuleList([
             Block(
                 neuron_type,
+                attn_type="SSA",
                 dim=embed_dims,
                 num_heads=num_heads,
                 mlp_ratio=mlp_ratios,
                 checkpointing=True,
                 spike_compressor=spike_compressor,
                 **kwargs
-            ) for i in range(depths)
+            ) for _ in range(depths - 3)
         ])
 
         # classification head
@@ -699,9 +1059,17 @@ class MESpikformer(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward_features(self, x):
-        x = self.patch_embed(x)
-        for blk in self.block:
+        x = self.patch_embed1(x)
+        for blk in self.block1:
             x = blk(x)  # [T, B, C, H, W]
+
+        x = self.patch_embed2(x)
+        for blk in self.block2:
+            x = blk(x)
+
+        x = self.patch_embed3(x)
+        for blk in self.block3:
+            x = blk(x)
         return x.flatten(3).mean(3)
 
     def forward(self, x):
