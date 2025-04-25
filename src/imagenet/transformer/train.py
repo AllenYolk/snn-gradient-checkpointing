@@ -25,8 +25,8 @@ else:
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from spikingjelly.activation_based import functional
-from timm.data import create_transform
-from timm.loss import LabelSmoothingCrossEntropy
+from timm.data import create_transform, Mixup
+from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.scheduler import create_scheduler_v2
 from timm.optim import create_optimizer_v2
 
@@ -134,7 +134,21 @@ def prepare_dataloaders(args):
         drop_last=False
     )
 
-    return train_loader, test_loader
+    if args.disable_mixup:
+        mixup_fn = None
+    else:
+        mixup_fn = Mixup(
+            mixup_alpha=0.8,
+            cutmix_alpha=1.0,
+            cutmix_minmax=None,
+            prob=1.,
+            switch_prob=0.5,
+            mode="batch",
+            label_smoothing=args.smoothing,
+            num_classes=1000,
+        )
+
+    return train_loader, test_loader, mixup_fn
 
 
 def prepare_optimizers_and_schedulers(
@@ -187,6 +201,9 @@ def parse_args():
         help="Cache the datasets and serialize the transforms",
         action="store_true",
     )
+    parser.add_argument(
+        "-disable_mixup", "--disable_mixup", action="store_true"
+    )
     parser.add_argument('-net', "--network", default="Spikformer", type=str)
     parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
@@ -216,8 +233,16 @@ def parse_args():
 
 
 def train_step(
-    net, train_data_loader, criterion, optimizer, lr_scheduler, device, scaler,
-    current_epoch, total_epoch
+    net,
+    train_data_loader,
+    criterion,
+    optimizer,
+    lr_scheduler,
+    device,
+    scaler,
+    mixup_fn,
+    current_epoch,
+    total_epoch,
 ):
     epoch_start_time = time.time()
     net.train()
@@ -235,6 +260,8 @@ def train_step(
         for i, (img, label) in enumerate(pbar):
             img = img.float().to(device, non_blocking=True)
             label = label.to(device, non_blocking=True)
+            if mixup_fn is not None:
+                img, label = mixup_fn(img, label)
 
             with get_autocast_context(use_amp):
                 y = net(img)
@@ -250,7 +277,8 @@ def train_step(
             optimizer.zero_grad()
 
             functional.reset_net(net)
-            prec1, prec5 = accuracy(y.data, label.data, topk=(1, 5))
+            label_idx = label.argmax(dim=1) if mixup_fn is not None else label
+            prec1, prec5 = accuracy(y.data, label_idx.data, topk=(1, 5))
             losses.update(batch_loss.item(), label.size(0))
             top1.update(prec1.item(), label.size(0))
             top5.update(prec5.item(), label.size(0))
@@ -327,7 +355,7 @@ def main():
         name=run_name,
     )
 
-    train_data_loader, val_data_loader = prepare_dataloaders(args)
+    train_data_loader, val_data_loader, mixup_fn = prepare_dataloaders(args)
 
     net = getattr(models, args.network)(
         neuron_type=args.neuron_type,
@@ -338,10 +366,13 @@ def main():
         k=4,  # for SlidingPSN
     )
     print(net)
-    print(f"Number of parameters: {count_learnable_parameters(net)}")
+    print(f"Number of learnable parameters: {count_learnable_parameters(net)}")
     net = net.to(args.device)
 
-    if args.smoothing > 0.:
+    if mixup_fn is not None:
+        print(f"Mixup enabled!")
+        criterion = SoftTargetCrossEntropy()
+    elif args.smoothing > 0.:
         criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
     else:
         criterion = torch.nn.CrossEntropyLoss()
@@ -364,6 +395,7 @@ def main():
             lr_scheduler,
             args.device,
             scaler,
+            mixup_fn,
             epoch,
             args.epochs,
         )
