@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.autograd as autograd
 
 from ..compress import *
 from ..neuron import SlidingPSN, PSN

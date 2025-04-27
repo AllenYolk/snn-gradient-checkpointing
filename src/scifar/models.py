@@ -43,23 +43,25 @@ class MESequentialCIFARNet(nn.Module):
                     in_channels = channels
 
                 if i == 0 and j == 0:
-                    conv_block = get_block(
-                        block_type=f"Conv1dBN{neuron_str}",
-                        proj=nn.Conv1d(
-                            in_channels,
-                            channels,
-                            kernel_size=3,
-                            padding=1,
-                            bias=True
-                        ),
-                        bn=nn.BatchNorm1d(channels),
-                        neuron=get_neuron(neuron_type, **kwargs),
-                        spike_compressor=get_spike_compressor(
-                            "NullSpikeCompressor"
-                        ),
-                    )
+                    conv_block = [
+                        get_block(
+                            block_type=f"Conv1dBN{neuron_str}",
+                            proj=nn.Conv1d(
+                                in_channels,
+                                channels,
+                                kernel_size=3,
+                                padding=1,
+                                bias=True
+                            ),
+                            bn=nn.BatchNorm1d(channels),
+                            neuron=get_neuron(neuron_type, **kwargs),
+                            spike_compressor=get_spike_compressor(
+                                "NullSpikeCompressor"
+                            ),
+                        )
+                    ]
                 elif i == 0 and j == 2:
-                    conv_block = nn.Sequential(
+                    conv_block = [
                         get_block(
                             f"Conv1d",
                             proj=nn.Conv1d(
@@ -70,7 +72,7 @@ class MESequentialCIFARNet(nn.Module):
                                 bias=True
                             ),
                             spike_compressor=get_spike_compressor(
-                                spike_compressor
+                                "BitSpikeCompressor"
                             ),
                         ),
                         get_block(
@@ -78,37 +80,45 @@ class MESequentialCIFARNet(nn.Module):
                             bn=nn.BatchNorm1d(channels),
                             neuron=get_neuron(neuron_type, **kwargs),
                         )
-                    )
+                    ]
                 elif j == 0:
-                    conv_block = get_block(
-                        block_type=f"AvgPool1dConv1dBN{neuron_str}",
-                        pool=nn.AvgPool1d(2, 2),
-                        proj=nn.Conv1d(
-                            in_channels,
-                            channels,
-                            kernel_size=3,
-                            padding=1,
-                            bias=True
-                        ),
-                        bn=nn.BatchNorm1d(channels),
-                        neuron=get_neuron(neuron_type, **kwargs),
-                        spike_compressor=get_spike_compressor(spike_compressor),
-                    )
+                    conv_block = [
+                        get_block(
+                            block_type=f"AvgPool1dConv1dBN{neuron_str}",
+                            pool=nn.AvgPool1d(2, 2),
+                            proj=nn.Conv1d(
+                                in_channels,
+                                channels,
+                                kernel_size=3,
+                                padding=1,
+                                bias=True
+                            ),
+                            bn=nn.BatchNorm1d(channels),
+                            neuron=get_neuron(neuron_type, **kwargs),
+                            spike_compressor=get_spike_compressor(
+                                spike_compressor
+                            ),
+                        )
+                    ]
                 else:
-                    conv_block = get_block(
-                        block_type=f"Conv1dBN{neuron_str}",
-                        proj=nn.Conv1d(
-                            in_channels,
-                            channels,
-                            kernel_size=3,
-                            padding=1,
-                            bias=True
-                        ),
-                        bn=nn.BatchNorm1d(channels),
-                        neuron=get_neuron(neuron_type, **kwargs),
-                        spike_compressor=get_spike_compressor(spike_compressor),
-                    )
-                conv.append(conv_block)
+                    conv_block = [
+                        get_block(
+                            block_type=f"Conv1dBN{neuron_str}",
+                            proj=nn.Conv1d(
+                                in_channels,
+                                channels,
+                                kernel_size=3,
+                                padding=1,
+                                bias=True
+                            ),
+                            bn=nn.BatchNorm1d(channels),
+                            neuron=get_neuron(neuron_type, **kwargs),
+                            spike_compressor=get_spike_compressor(
+                                spike_compressor
+                            ),
+                        )
+                    ]
+                conv += conv_block
 
         self.conv = nn.Sequential(*conv)
         self.fc = get_block(
