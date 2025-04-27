@@ -23,7 +23,7 @@ from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir, count_learnable_parameters
 from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
 from utils.profiler import *
-from modules import get_autocast_context, GradScaler
+from modules import get_autocast_context, GradScaler, BaseCheckpointingBlock
 import models
 
 
@@ -373,14 +373,18 @@ def main():
                 net.avgpool, net.fc
             ),
             search_mode=(
-                "self", "direct_children", "direct_children", "direct_children",
-                "direct_children", "self", "self"
+                "self", "submodules", "submodules", "submodules", "submodules",
+                "self", "self"
             ),
             model_names=(
                 "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool",
                 "fc"
             ),
-            instances=(torch.nn.Module,),
+            instances=(
+                BaseCheckpointingBlock,
+                torch.nn.Linear,
+                torch.nn.AdaptiveAvgPool2d,
+            ),
             filename=log_path,
         ),
     )
