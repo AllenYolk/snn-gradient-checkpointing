@@ -60,12 +60,14 @@ class BasicBlock(nn.Module):
             )
 
         self.conv1 = layer.SeqToANNContainer(
-            _conv3x3(in_planes, planes, stride), norm_layer(planes)
+            _conv3x3(in_planes, planes, stride),
+            norm_layer(planes),
         )
         self.sn1 = get_neuron(neuron_type, **kwargs)
 
         self.conv2 = layer.SeqToANNContainer(
-            _conv3x3(planes, planes), norm_layer(planes)
+            _conv3x3(planes, planes),
+            norm_layer(planes),
         )
         self.downsample = downsample
         self.stride = stride
@@ -179,7 +181,8 @@ class Bottleneck(nn.Module):
         self.sn1 = get_neuron(neuron_type, **kwargs)
 
         self.conv2 = layer.SeqToANNContainer(
-            _conv3x3(width, width, stride, groups, dilation), norm_layer(width)
+            _conv3x3(width, width, stride, groups, dilation),
+            norm_layer(width),
         )
         self.sn2 = get_neuron(neuron_type, **kwargs)
 

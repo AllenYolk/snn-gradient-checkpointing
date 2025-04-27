@@ -433,7 +433,7 @@ def main():
             "direct_children", *["direct_children" for _ in net.block], "self"
         )
         model_name_list = (
-            "patch_embed", *[f"block{i}" for i in range(net.depth)], "head"
+            "patch_embed", *[f"block{i}" for i in range(net.depths)], "head"
         )
     elif args.network.endswith("QKFormer"):
         model_list = (
@@ -447,9 +447,13 @@ def main():
             "direct_children", *["direct_children" for _ in net.block3], "self"
         )
         model_name_list = (
-            "patch_embed1", *[f"block1_{i}" for i in range(net.depth)],
-            "patch_embed2", *[f"block2_{i}" for i in range(net.depth)],
-            "patch_embed3", *[f"block3_{i}" for i in range(net.depth)], "head"
+            "patch_embed1",
+            *[f"block1_{i}" for i in range(1)],
+            "patch_embed2",
+            *[f"block2_{i}" for i in range(2)],
+            "patch_embed3",
+            *[f"block3_{i}" for i in range(net.depths - 3)],
+            "head",
         )
     profiler = MemoryProfilerList(
         CategoryMemoryProfiler(net, optimizer, filename=log_path),
@@ -481,6 +485,7 @@ def main():
             lr_scheduler,
             args.device,
             scaler,
+            mixup_fn,
             profiler,
             epoch,
             real_epochs + 1,
