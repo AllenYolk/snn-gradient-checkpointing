@@ -473,15 +473,20 @@ def psn_forward_compiled(x_seq, weight, bias):
 
 @_conditional_compile()
 def sliding_psn_forward_compiled(x_seq, weight, bias, k):
-    # x_seq.shape = [T, N, ...]; weight.shape = [k], bias.shape = []
-    x_seq_shape = x_seq.shape
-    x_seq = x_seq.flatten(1).t().unsqueeze(1)  # [T, N, ...] -> [(N*...), 1, T]
-    x_seq = F.pad(x_seq, pad=(k - 1, 0), mode="constant", value=0.)
-    x_seq = F.conv1d(x_seq, weight.reshape(1, 1, -1), stride=1)
-    x_seq = x_seq = x_seq.squeeze(1).t().view(
-        x_seq_shape
-    )  # [(N*...), 1, T] -> [T, N, ...]
-    return surrogate.atan.apply(x_seq + bias, 2.)
+    T = x_seq.shape[0]
+    gemm_weight = torch.zeros([T, T], device=weight.device)
+    for i in range(T):
+        end = i + 1
+        start = max(0, i + 1 - k)
+        length = min(end - start, k)
+        gemm_weight[i][start:end] = weight[k - length:k]
+
+    h_seq = torch.addmm(
+        bias,
+        gemm_weight,
+        x_seq.flatten(1),
+    ).reshape(x_seq.shape)
+    return surrogate.atan.apply(h_seq, 2.)
 
 
 #===============================================================================

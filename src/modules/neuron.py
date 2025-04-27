@@ -101,7 +101,7 @@ class SlidingPSN(neuron.SlidingPSN):
             exp_init=True,
             surrogate_function=surrogate.ATan(),
             step_mode="m",
-            backend="conv"
+            backend="gemm"
         )
 
     def forward(self, x_seq):  # disable single-step forward!!!

@@ -602,3 +602,178 @@ class TEBNProjectionSlidingPSNAvgPool2d(BaseCheckpointingBlock):
             self.pool.stride,
             self.pool.padding,
         )
+
+
+class TEBNLIFAvgPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        pool: nn.AvgPool2d,
+    ):
+        super().__init__()
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.pool = pool
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        tebn_proj_weight,
+        neuron,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        in_backward=False
+    ):
+        x_seq = tebn_forward(
+            x_seq,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight,
+        )
+        x_seq = neuron(x_seq)
+        return avgpool2d_forward(
+            x_seq, pool_kernel_size, pool_stride, pool_padding
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
+            x_seq,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.tebn_proj.p,
+            self.neuron,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+        )
+
+
+class TEBNSlidingPSNAvgPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        bn: nn.BatchNorm2d,
+        tebn_proj: TEBNProjection,
+        neuron: nn.Module,
+        pool: nn.AvgPool2d,
+    ):
+        super().__init__()
+        self.bn = bn
+        self.tebn_proj = tebn_proj
+        self.neuron = neuron
+        self.pool = pool
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        tebn_proj_weight,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        in_backward=False
+    ):
+        x_seq = tebn_forward(
+            x_seq,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            momentum=0.1 if in_backward else 0.,
+            tebn_proj_weight=tebn_proj_weight,
+        )
+        x_seq = SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+        return avgpool2d_forward(
+            x_seq, pool_kernel_size, pool_stride, pool_padding
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
+            x_seq,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.tebn_proj.p,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+        )
+
+
+class SlidingPSNAvgPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        neuron: nn.Module,
+        pool: nn.AvgPool2d,
+    ):
+        super().__init__()
+        self.neuron = neuron
+        self.pool = pool
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        neuron_weight,
+        neuron_bias,
+        neuron_k,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        in_backward=False
+    ):
+        x_seq = SlidingPSN.forward_function(
+            x_seq, neuron_weight, neuron_bias, neuron_k
+        )
+        return avgpool2d_forward(
+            x_seq, pool_kernel_size, pool_stride, pool_padding
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
+            x_seq,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.neuron.k,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+        )

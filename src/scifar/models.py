@@ -60,7 +60,7 @@ class MESequentialCIFARNet(nn.Module):
                             ),
                         )
                     ]
-                elif i == 0 and j == 2:
+                elif i == 0 and j == 2:  # critical layer
                     conv_block = [
                         get_block(
                             f"Conv1d",
