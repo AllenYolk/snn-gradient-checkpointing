@@ -31,8 +31,8 @@ from timm.optim import create_optimizer_v2
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir
-from utils import count_learnable_parameters
-from modules import get_autocast_context, GradScaler, Lomo
+from utils import count_learnable_parameters, Lomo
+from modules import get_autocast_context, GradScaler
 import models
 
 

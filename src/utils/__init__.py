@@ -9,3 +9,4 @@ from .npu import *
 from .loss import *
 from .profiler import *
 from .dist import *
+from .optimizer import *

@@ -26,9 +26,9 @@ from utils import accuracy, TETLoss, TMeanCrossEntropyLoss
 from utils import count_learnable_parameters
 from utils.transforms import TransformedDatasetWrapper
 from utils.profiler import *
+from utils.optimizer import Lomo
 from augmentation import CIFAR10DVSNDA
 from cifar10dvs_dataset import CIFAR10DVS, move_data
-from modules.optimizer import Lomo
 from modules.amp import get_autocast_context, GradScaler
 import models
 

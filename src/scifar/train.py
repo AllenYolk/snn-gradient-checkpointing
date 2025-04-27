@@ -24,12 +24,12 @@ from torchvision.transforms.functional import InterpolationMode
 from spikingjelly.activation_based import functional
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy
+from utils import accuracy, Lomo
 from augmentation import SequentialCIFARClassificationPresetTrain
 from augmentation import CIFAR100_MEAN, CIFAR100_STD
 from augmentation import CIFAR10_MEAN, CIFAR10_STD
 from utils.transforms import RandomMixup, RandomCutmix
-from modules import get_autocast_context, GradScaler, Lomo
+from modules import get_autocast_context, GradScaler
 import models as models
 
 

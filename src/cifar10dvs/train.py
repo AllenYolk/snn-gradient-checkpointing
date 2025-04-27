@@ -26,9 +26,9 @@ from spikingjelly.datasets.cifar10_dvs import CIFAR10DVS as SJCIFAR10DVS
 from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, TETLoss, TMeanCrossEntropyLoss
 from utils.transforms import TransformedDatasetWrapper
+from utils.optimizer import Lomo
 from augmentation import CIFAR10DVSNDA
 from cifar10dvs_dataset import CIFAR10DVS, move_data
-from modules.optimizer import Lomo
 from modules.amp import get_autocast_context, GradScaler
 import models
 
