@@ -1,13 +1,11 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from .base import BaseCheckpointingBlock
-from ...compress import *
-from ...neuron import SlidingPSN, PSN
-from ...kernels import *
-from ..checkpointing import SNNCheckpointingBlockFunction
-from ...tebn import TEBNProjection
+from ..compress import *
+from ..neuron import SlidingPSN, PSN
+from ..kernels import *
+from .checkpointing import SNNCheckpointingBlockFunction, BaseCheckpointingBlock
+from ..tebn import TEBNProjection
 
 
 class Conv2d(BaseCheckpointingBlock):

@@ -8,7 +8,6 @@ from tqdm import tqdm
 import PIL
 
 sys.path.append("./src")
-sys.path.append("./src/imagenet/transformer")
 
 import wandb
 import torch
@@ -33,8 +32,8 @@ from timm.optim import create_optimizer_v2
 from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir
 from utils import count_learnable_parameters
+from modules import get_autocast_context, GradScaler, Lomo
 import models
-from models import get_autocast_context, GradScaler, Lomo
 
 
 def prepare_dataloaders(args):

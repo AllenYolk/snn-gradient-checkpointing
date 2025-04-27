@@ -4,7 +4,7 @@ sys.path.insert(0, "./src")
 
 import torch
 
-from models import SJLIF, HandWrittenLIF, MELIF
+from modules import SJLIF, HandWrittenLIF, MELIF
 
 
 def test_forward_equality_not_detached():

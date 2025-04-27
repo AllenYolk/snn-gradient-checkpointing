@@ -23,8 +23,8 @@ from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir, count_learnable_parameters
 from utils import TETLoss, TMeanCrossEntropyLoss
 from utils.profiler import *
+from modules import get_autocast_context, GradScaler, Lomo
 import models
-from models import get_autocast_context, GradScaler, Lomo
 
 
 def prepare_dataloaders(args):

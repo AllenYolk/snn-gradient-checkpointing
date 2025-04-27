@@ -5,7 +5,7 @@ sys.path.append("./src")
 import torch
 from nvidia import nvcomp
 
-from models.compress import *
+from modules.compress import *
 
 
 def test_manual():

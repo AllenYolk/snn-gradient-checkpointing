@@ -6,12 +6,10 @@ from tqdm import tqdm
 import PIL
 
 sys.path.append("./src")
-sys.path.append("./src/cifar10dvs")
 
 import numpy as np
 import wandb
 import torch
-import torch.nn as nn
 import torch.utils.data as data
 from utils import use_torch_npu
 
@@ -30,9 +28,9 @@ from utils import accuracy, TETLoss, TMeanCrossEntropyLoss
 from utils.transforms import TransformedDatasetWrapper
 from augmentation import CIFAR10DVSNDA
 from cifar10dvs_dataset import CIFAR10DVS, move_data
+from modules.optimizer import Lomo
+from modules.amp import get_autocast_context, GradScaler
 import models
-from models.optimizer import Lomo
-from models.amp import get_autocast_context, GradScaler
 
 
 def prepare_dataloaders(args):

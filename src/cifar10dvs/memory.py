@@ -5,11 +5,9 @@ from tqdm import tqdm
 import PIL
 
 sys.path.append("./src")
-sys.path.append("./src/cifar10dvs")
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.utils.data as data
 from utils import use_torch_npu
 
@@ -24,14 +22,15 @@ from spikingjelly.activation_based import functional
 from spikingjelly.datasets.cifar10_dvs import CIFAR10DVS as SJCIFAR10DVS
 
 from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy, TETLoss, count_learnable_parameters
+from utils import accuracy, TETLoss, TMeanCrossEntropyLoss
+from utils import count_learnable_parameters
 from utils.transforms import TransformedDatasetWrapper
 from utils.profiler import *
 from augmentation import CIFAR10DVSNDA
 from cifar10dvs_dataset import CIFAR10DVS, move_data
+from modules.optimizer import Lomo
+from modules.amp import get_autocast_context, GradScaler
 import models
-from models.optimizer import Lomo
-from models.amp import get_autocast_context, GradScaler
 
 
 def prepare_dataloaders(args):
@@ -296,10 +295,7 @@ def main():
     net = net.to(args.device)
 
     if args.loss == "ce":
-        criterion = nn.Sequential(
-            models.AverageT(),
-            torch.nn.CrossEntropyLoss(),
-        )
+        criterion = TMeanCrossEntropyLoss()
     else:
         criterion = TETLoss(
             base_criterion=torch.nn.CrossEntropyLoss(),

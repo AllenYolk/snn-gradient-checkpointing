@@ -1,12 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from .base import BaseCheckpointingBlock
-from ...compress import *
-from ...neuron import SlidingPSN, PSN
-from ...kernels import *
-from ..checkpointing import SNNCheckpointingBlockFunction
+from ..compress import *
+from ..neuron import SlidingPSN, PSN
+from ..kernels import *
+from .checkpointing import SNNCheckpointingBlockFunction, BaseCheckpointingBlock
 
 
 class LinearLIF(BaseCheckpointingBlock):

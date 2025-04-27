@@ -1,6 +1,7 @@
 import sys
 
 sys.path.append("./src")
+sys.path.append("./src/cifar10dvs")
 
 import torch
 import torch.nn.functional as F

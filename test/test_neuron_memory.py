@@ -5,7 +5,7 @@ sys.path.insert(0, "./src")
 import torch
 import torch.nn as nn
 
-from models import SJLIF, HandWrittenLIF, MELIF
+from modules import SJLIF, HandWrittenLIF, MELIF
 from utils import *
 
 

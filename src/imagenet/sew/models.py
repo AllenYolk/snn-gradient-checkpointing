@@ -1,11 +1,15 @@
+import sys
+
+sys.path.append("./src")
+
 import torch
 import torch.nn as nn
 from spikingjelly.activation_based import layer
 
-from .checkpointing import get_block, neuron_type_to_str
-from .neuron import get_neuron
-from .compress import *
-from .merge_split import RepeatT
+from modules.blocks import get_block, neuron_type_to_str
+from modules.neuron import get_neuron
+from modules.compress import *
+from modules.merge_split import RepeatT
 
 
 def _conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):

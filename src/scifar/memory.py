@@ -4,7 +4,6 @@ import sys
 from tqdm import tqdm
 
 sys.path.append("./src")
-sys.path.append("./src/scifar")
 
 import torch
 import torch.nn.functional as F
@@ -30,8 +29,8 @@ from augmentation import SequentialCIFARClassificationPresetTrain
 from augmentation import CIFAR100_MEAN, CIFAR100_STD
 from augmentation import CIFAR10_MEAN, CIFAR10_STD
 from utils.transforms import RandomMixup, RandomCutmix
-import models
-from models import get_autocast_context, GradScaler, Lomo
+from modules import get_autocast_context, GradScaler, Lomo
+import models as models
 
 
 def prepare_dataloaders(args):

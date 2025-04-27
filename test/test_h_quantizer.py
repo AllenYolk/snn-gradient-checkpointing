@@ -3,13 +3,12 @@ import sys
 sys.path.insert(0, "./src")
 
 import torch
-from spikingjelly.activation_based import surrogate
 import numpy as np
 import matplotlib.pyplot as plt
 import scienceplots
 
-from models.neuron import atan_derivative
-from models.compress.h_quantizer import *
+from modules.neuron import atan_derivative
+from modules.compress.h_quantizer import *
 
 plt.style.use(["science", "nature", "grid", "no-latex"])
 

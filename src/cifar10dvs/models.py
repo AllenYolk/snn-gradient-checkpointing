@@ -1,11 +1,15 @@
+import sys
+
+sys.path.append("./src")
+
 import torch
 import torch.nn as nn
 from spikingjelly.activation_based import layer
 
-from .checkpointing import get_block, neuron_type_to_str
-from .neuron import get_neuron
-from .compress import *
-from .tebn import TEBNProjection
+from modules.blocks import get_block, neuron_type_to_str
+from modules.neuron import get_neuron
+from modules.compress import *
+from modules.tebn import TEBNProjection
 
 
 def vgg_block(
@@ -36,7 +40,6 @@ class CIFAR10DVSVGG(nn.Module):
 
     def __init__(self, T, neuron_type, dropout=0.25, allow_tebn=True, **kwargs):
         super().__init__()
-        kwargs["T"] = T
 
         use_tebn = (neuron_type != "PSN") and allow_tebn
         self.features = nn.Sequential(

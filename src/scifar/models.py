@@ -1,10 +1,14 @@
+import sys
+
+sys.path.append("./src")
+
 import torch
 import torch.nn as nn
 from spikingjelly.activation_based import layer, functional
 
-from .checkpointing import get_block, neuron_type_to_str
-from .neuron import get_neuron
-from .compress import *
+from modules.blocks import get_block, neuron_type_to_str
+from modules.neuron import get_neuron
+from modules.compress import *
 
 
 class MESequentialCIFARNet(nn.Module):

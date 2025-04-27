@@ -1,5 +1,8 @@
-from .blocks import *
-from .checkpointing import *
+from .conv1d import *
+from .conv2d import *
+from .linear import *
+from .bn_neuron import *
+from .attention import *
 
 
 def get_block(block_type, **kwargs):

@@ -4,10 +4,8 @@ import random
 sys.path.insert(0, "./src")
 
 import torch
-from nvidia import nvcomp
 
-from models import *
-from utils import tensor_size
+from modules import *
 
 
 def _test_spike_compressor(compressor, trials=10):

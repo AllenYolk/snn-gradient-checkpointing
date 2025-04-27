@@ -5,22 +5,23 @@ sys.path.insert(0, "./src")
 import torch
 import torch.nn as nn
 
-from models import *
+from modules import *
 from utils import *
 
 
 def test_lif_address_referenced():
-    T = 1000
+    T = 10
     N = 64
-    C = 200
+    C = 20
     x = torch.randn(T, N, C) + 0.6
+    x = x.to("cuda")
     print(f"network input: {x.data_ptr()}")
 
     net = nn.Sequential(
         nn.ReLU(),
         HandWrittenLIF(),
         nn.ReLU(),
-    )
+    ).to("cuda")
     x.requires_grad = True
 
     s = net(x)
@@ -32,10 +33,11 @@ def test_lif_address_referenced():
 
 
 def test_linear_lif_address_referenced():
-    T = 1000
+    T = 10
     N = 64
-    C = 200
+    C = 20
     x = torch.randn(T, N, C) + 0.6
+    x = x.to("cuda")
     print(f"network input: {x.data_ptr()}")
 
     h_quantizer_type = "NullHQuantizer"
@@ -68,7 +70,7 @@ def test_linear_lif_address_referenced():
             ),
             spike_compressor=SparseSpikeCompressor(),
         )
-    )
+    ).to("cuda")
     x.requires_grad = True
 
     s = net(x)

@@ -26,8 +26,8 @@ from spikingjelly.activation_based import functional
 from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir
 from utils import TETLoss, TMeanCrossEntropyLoss
+from modules import get_autocast_context, GradScaler, Lomo
 import models
-from models import get_autocast_context, GradScaler, Lomo
 
 
 def prepare_dataloaders(args):

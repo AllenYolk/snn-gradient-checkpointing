@@ -5,7 +5,7 @@ sys.path.insert(0, "./src")
 import torch
 import torch.nn as nn
 
-from models import *
+from modules import *
 
 
 def make_parameters_equal(net, reference_net):
