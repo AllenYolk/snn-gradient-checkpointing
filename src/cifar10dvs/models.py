@@ -153,15 +153,15 @@ def vgg_critical_block_checkpointing(
     elif neuron_type == "PSN":
         return [
             get_block(
-                f"Conv2d",
+                f"Conv2dBN",
                 proj=nn.Conv2d(
                     in_plane, out_plane, kernel_size, stride, padding
                 ),
+                bn=nn.BatchNorm2d(out_plane),
                 spike_compressor=get_spike_compressor(spike_compressor)
             ),
             get_block(
-                f"BNPSNAvgPool2d",
-                bn=nn.BatchNorm2d(out_plane),
+                f"PSNAvgPool2d",
                 neuron=get_neuron(neuron_type, **kwargs),
                 pool=nn.AvgPool2d(2)
             )

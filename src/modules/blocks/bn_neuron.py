@@ -924,6 +924,45 @@ class TEBNProjectionSlidingPSNAvgPool2d(BaseCheckpointingBlock):
         )
 
 
+class PSNAvgPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        neuron: nn.Module,
+        pool: nn.AvgPool2d,
+    ):
+        super().__init__()
+        self.neuron = neuron
+        self.pool = pool
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        neuron_weight,
+        neuron_bias,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        in_backward=False
+    ):
+        x_seq = PSN.forward_function(x_seq, neuron_weight, neuron_bias)
+        return avgpool2d_forward(
+            x_seq, pool_kernel_size, pool_stride, pool_padding
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            get_spike_compressor("NullSpikeCompressor"),
+            x_seq,
+            self.neuron.weight,
+            self.neuron.bias,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+        )
+
+
 class SlidingPSNAvgPool2d(BaseCheckpointingBlock):
 
     def __init__(
