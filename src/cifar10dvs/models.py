@@ -132,8 +132,8 @@ def vgg_critical_block_checkpointing(
     spike_compressor: str, **kwargs
 ):
     kwargs["T"] = T
-    neuron_type = neuron_type_to_str(neuron_type)
-    if neuron_type == "SlidingPSN":
+    neuron_type_extracted = neuron_type_to_str(neuron_type)
+    if neuron_type_extracted == "SlidingPSN":
         return [
             get_block(
                 f"Conv2dTEBN",
@@ -150,7 +150,7 @@ def vgg_critical_block_checkpointing(
                 pool=nn.AvgPool2d(2),
             )
         ]
-    elif neuron_type == "PSN":
+    elif neuron_type_extracted == "PSN":
         return [
             get_block(
                 f"Conv2dBN",
@@ -177,7 +177,7 @@ def vgg_critical_block_checkpointing(
                 spike_compressor=get_spike_compressor(spike_compressor)
             ),
             get_block(
-                f"TEBN{neuron_type}AvgPool2d",
+                f"TEBN{neuron_type_extracted}AvgPool2d",
                 bn=nn.BatchNorm2d(out_plane),
                 tebn_proj=TEBNProjection(T),
                 neuron=get_neuron(neuron_type, **kwargs),
