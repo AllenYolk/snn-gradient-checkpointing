@@ -167,6 +167,7 @@ def vgg_critical_block_checkpointing(
             )
         ]
     else:
+        # In this case, peak allocated memory is achieved when backwarding on Conv2d!
         return [
             get_block(
                 f"Conv2d",

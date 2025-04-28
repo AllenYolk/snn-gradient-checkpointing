@@ -27,7 +27,7 @@ from timm.optim import create_optimizer_v2
 from utils import set_seed, ModelNameGenerator, AverageMeter, Lomo
 from utils import accuracy, save_on_master, mkdir, count_learnable_parameters
 from utils.profiler import *
-from modules import get_autocast_context, GradScaler
+from modules import get_autocast_context, GradScaler, BaseCheckpointingBlock
 import models
 
 
@@ -430,7 +430,7 @@ def main():
     if args.network.endswith("Spikformer"):
         model_list = (net.patch_embed, *[b for b in net.block], net.head)
         search_mode_list = (
-            "direct_children", *["direct_children" for _ in net.block], "self"
+            "submodules", *["submodules" for _ in net.block], "self"
         )
         model_name_list = (
             "patch_embed", *[f"block{i}" for i in range(net.depths)], "head"
@@ -442,9 +442,7 @@ def main():
             *[b for b in net.block3], net.head
         )
         search_mode_list = (
-            "direct_children", *["direct_children" for _ in net.block1],
-            "direct_children", *["direct_children" for _ in net.block2],
-            "direct_children", *["direct_children" for _ in net.block3], "self"
+            *["submodules" for _ in range(3 + net.depths)], "self"
         )
         model_name_list = (
             "patch_embed1",
@@ -461,7 +459,7 @@ def main():
             model_list,
             search_mode=search_mode_list,
             model_names=model_name_list,
-            instances=(torch.nn.Module,),
+            instances=(BaseCheckpointingBlock, torch.nn.Linear),
             filename=log_path,
         ),
     )

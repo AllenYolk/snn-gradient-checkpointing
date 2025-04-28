@@ -470,23 +470,61 @@ class SPSCheckpointing(nn.Module):
         self.W = self.image_size[1] // self.patch_size[1]
         self.num_patches = self.H * self.W
 
-        self.proj_conv_0 = get_block(
-            f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
-            proj=nn.Conv2d(
-                in_channels,
-                embed_dims // 8,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=False
-            ),
-            bn=nn.BatchNorm2d(embed_dims // 8),
-            neuron=get_neuron(neuron_type, **kwargs),
-            pool=nn.MaxPool2d(
-                kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False
-            ),
-            spike_compressor=get_spike_compressor("NullSpikeCompressor"),
-        )
+        if neuron_type_to_str(neuron_type) == "LIF":
+            # Critical layer. Peak memory is achieved at the LIF layer.
+            # Splitting brings no benefit, so we keep it as a whole.
+            self.proj_conv_0 = get_block(
+                f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
+                proj=nn.Conv2d(
+                    in_channels,
+                    embed_dims // 8,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False
+                ),
+                bn=nn.BatchNorm2d(embed_dims // 8),
+                neuron=get_neuron(neuron_type, **kwargs),
+                pool=nn.MaxPool2d(
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    dilation=1,
+                    ceil_mode=False
+                ),
+                spike_compressor=get_spike_compressor("NullSpikeCompressor"),
+            )
+        else:
+            # For PSN / SlidingPSN, we split the critical layer!
+            self.proj_conv_0 = nn.Sequential(
+                get_block(
+                    f"Conv2dBN",
+                    proj=nn.Conv2d(
+                        in_channels,
+                        embed_dims // 8,
+                        kernel_size=3,
+                        stride=1,
+                        padding=1,
+                        bias=False
+                    ),
+                    bn=nn.BatchNorm2d(embed_dims // 8),
+                    spike_compressor=get_spike_compressor(
+                        "NullSpikeCompressor"
+                    ),
+                ),
+                get_block(
+                    f"{neuron_type_to_str(neuron_type)}MaxPool2d",
+                    neuron=get_neuron(neuron_type, **kwargs),
+                    pool=nn.MaxPool2d(
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        dilation=1,
+                        ceil_mode=False
+                    ),
+                )
+            )
+
         self.proj_conv_1 = get_block(
             f"Conv2dBN{neuron_type_to_str(neuron_type)}MaxPool2d",
             proj=nn.Conv2d(
@@ -588,6 +626,7 @@ class Spikformer(nn.Module):
         self.num_classes = num_classes
         self.depths = depths
         self.T = T
+        kwargs["T"] = T
 
         self.patch_embed = SPS(
             neuron_type,

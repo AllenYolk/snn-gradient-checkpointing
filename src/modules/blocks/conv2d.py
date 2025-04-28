@@ -1377,6 +1377,84 @@ class Conv2dBNSlidingPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
 
+class Conv2dBNMaxPool2d(BaseCheckpointingBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        bn: nn.BatchNorm2d,
+        pool: nn.MaxPool2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
+    ):
+        super().__init__()
+        self.proj = proj
+        self.bn = bn
+        self.pool = pool
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bn_weight,
+        bn_bias,
+        bn_running_mean,
+        bn_running_var,
+        training,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        pool_dilation,
+        in_backward=False
+    ):
+        return conv2d_bn_maxpool2d_forward(
+            x_seq,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bn_weight,
+            bn_bias,
+            bn_running_mean,
+            bn_running_var,
+            training,
+            0.1 if in_backward else 0.,
+            pool_kernel_size,
+            pool_stride,
+            pool_padding,
+            pool_dilation,
+        )
+
+    def forward(self, x: torch.Tensor):
+        return SNNCheckpointingBlockFunction.apply(
+            self.conventional_forward,
+            self.spike_compressor,
+            x,
+            self.proj.weight,
+            self.proj.bias,
+            self.proj.stride,
+            self.proj.padding,
+            self.proj.dilation,
+            self.proj.groups,
+            self.bn.weight,
+            self.bn.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.training,
+            self.pool.kernel_size,
+            self.pool.stride,
+            self.pool.padding,
+            self.pool.dilation,
+        )
+
+
 class Conv2dBNMaxPool2dLIF(BaseCheckpointingBlock):
 
     def __init__(
@@ -1896,42 +1974,6 @@ class Conv2dBNRepeatSlidingPSNMaxPool2d(BaseCheckpointingBlock):
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,
-            self.pool.kernel_size,
-            self.pool.stride,
-            self.pool.padding,
-            self.pool.dilation,
-        )
-
-
-class MaxPool2d(BaseCheckpointingBlock):
-
-    def __init__(
-        self,
-        pool: nn.MaxPool2d,
-        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor()
-    ):
-        super().__init__()
-        self.pool = pool
-        self.spike_compressor = spike_compressor
-
-    @staticmethod
-    def conventional_forward(
-        x_seq,
-        pool_kernel_size,
-        pool_stride,
-        pool_padding,
-        pool_dilation,
-        in_backward=False
-    ):
-        return maxpool2d_forward(
-            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
-        )
-
-    def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
-            self.conventional_forward,
-            self.spike_compressor,
-            x,
             self.pool.kernel_size,
             self.pool.stride,
             self.pool.padding,
