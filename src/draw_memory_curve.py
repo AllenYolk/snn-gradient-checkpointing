@@ -30,7 +30,7 @@ def get_curve(data_path):
         bp_curve.append(backward_start_memory[k] / MB)
         bp_curve.append(backward_peak_memory[k] / MB)
         bp_curve.append(backward_end_memory[k] / MB)
-    return fp_curve, bp_curve
+    return fp_curve, bp_curve, max(max(fp_curve), max(bp_curve))
 
 
 def plot_curve(ax, fp_curve, bp_curve, label, color):
@@ -60,17 +60,18 @@ parser.add_argument("--data_path_2", type=str, default=None)
 parser.add_argument("--data_path_3", type=str, default=None)
 args = parser.parse_args()
 
-fp_curve1, bp_curve1 = get_curve(args.data_path_1)
-fp_curve2, bp_curve2 = get_curve(args.data_path_2)
-fp_curve3, bp_curve3 = get_curve(args.data_path_3)
+fp_curve1, bp_curve1, p1 = get_curve(args.data_path_1)
+fp_curve2, bp_curve2, p2 = get_curve(args.data_path_2)
+fp_curve3, bp_curve3, p3 = get_curve(args.data_path_3)
 
 f, ax = plt.subplots(figsize=(W * 1.5, H))
 plot_curve(ax, fp_curve1, bp_curve1, "BPTT", current_palette[0])
 plot_curve(ax, fp_curve2, bp_curve2, "G.C.", current_palette[1])
 plot_curve(ax, fp_curve3, bp_curve3, "G.C.+1bit", current_palette[2])
+ax.axhline(p3, color="#FF6F61", linewidth=0.5, label="Peak Memory")
 ax.set_ylabel("Memory Usage (MB)")
 ax.set_xticklabels([])
-ax.grid(alpha=0.3)
+ax.grid(linewidth=0.25, alpha=0.2)
 ax.legend()
 plt.tight_layout()
 plt.savefig("./imgs/memory_curve.png", dpi=300)
