@@ -162,10 +162,11 @@ def main():
         warmup=args.warmup,
     )
 
-    for img, label in tqdm(val_data_loader):
-        img, label = img.float().to(args.device), label.to(args.device)
-        img = img.permute(3, 0, 1, 2)  # [W, N, C, H]; W acts as T
-        y = net(img)
+    with torch.no_grad():
+        for img, label in tqdm(val_data_loader):
+            img, label = img.float().to(args.device), label.to(args.device)
+            img = img.permute(3, 0, 1, 2)  # [W, N, C, H]; W acts as T
+            y = net(img)
 
     profiler.clear_hooks()
     profiler.profile()

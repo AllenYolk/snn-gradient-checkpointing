@@ -203,11 +203,10 @@ class PGCSequentialCIFARNet(nn.Module):
                                 "BitSpikeCompressor"
                             ),
                         ),
-                        get_block(
-                            f"BN{neuron_str}",
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                        )
+                        nn.Sequential(
+                            layer.BatchNorm1d(channels),
+                            get_neuron(neuron_type, **kwargs),
+                        ),
                     ]
                 elif i == 1 and j == 0:
                     conv_block = [
@@ -274,6 +273,8 @@ class PGCSequentialCIFARNet(nn.Module):
             get_neuron(neuron_type, **kwargs),
         )
         self.decode = nn.Linear(channels * 8 // 4, num_classes)
+
+        functional.set_step_mode(self, "m")
 
     def forward(self, x: torch.Tensor):
         # x.shape = [T, N, Cin, L]
