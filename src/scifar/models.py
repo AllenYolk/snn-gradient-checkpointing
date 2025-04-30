@@ -228,7 +228,7 @@ class PGCSequentialCIFARNet(nn.Module):
                             ),
                         )
                     ]
-                elif i == 1 and (j == 1 or j == 2):  # the last conv block
+                elif i == 1 and (j == 1 or j == 2):  # the last two conv blocks
                     conv_block = [
                         nn.Sequential(
                             layer.SeqToANNContainer(

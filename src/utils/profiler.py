@@ -1,7 +1,8 @@
 import abc
 import gc
 import inspect
-from typing import DefaultDict, Tuple
+from typing import Tuple
+from collections import defaultdict
 import time
 from pathlib import Path
 import os
@@ -39,7 +40,7 @@ def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
         current_frame = current_frame.f_back
         d += 1
 
-    addr_to_tensor = DefaultDict(list)
+    addr_to_tensor = defaultdict(list)
     for obj in gc.get_objects():
         if isinstance(obj, torch.Tensor):
             d = {"tensor": obj, "name": id_to_name.get(id(obj), None)}
@@ -63,7 +64,7 @@ def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
     return addr_to_tensor
 
 
-class BaseMemoryProfiler(abc.ABC):
+class BaseProfiler(abc.ABC):
 
     def __init__(self, models, filename):
         if isinstance(models, nn.Module):
@@ -100,7 +101,7 @@ class BaseMemoryProfiler(abc.ABC):
         pass
 
 
-class CategoryMemoryProfiler(BaseMemoryProfiler):
+class CategoryMemoryProfiler(BaseProfiler):
 
     def __init__(
         self,
@@ -117,7 +118,7 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
         self.device_count = torch.cuda.device_count()
 
     def _get_memory_stats(self):
-        memory_usage = DefaultDict(float)  # KB
+        memory_usage = defaultdict(float)  # KB
 
         # model weights
         weight_tensors = set()
@@ -204,7 +205,7 @@ class CategoryMemoryProfiler(BaseMemoryProfiler):
         pass
 
 
-class LayerWiseMemoryProfiler(BaseMemoryProfiler):
+class LayerWiseMemoryProfiler(BaseProfiler):
 
     field_idx = {
         "name": 0,
@@ -251,12 +252,12 @@ class LayerWiseMemoryProfiler(BaseMemoryProfiler):
                 "model_names should have the same length as models"
             )
 
-        self.forward_start_memory = DefaultDict(float)
-        self.forward_end_memory = DefaultDict(float)
-        self.forward_peak_memory = DefaultDict(float)
-        self.backward_start_memory = DefaultDict(float)
-        self.backward_end_memory = DefaultDict(float)
-        self.backward_peak_memory = DefaultDict(float)
+        self.forward_start_memory = defaultdict(float)
+        self.forward_end_memory = defaultdict(float)
+        self.forward_peak_memory = defaultdict(float)
+        self.backward_start_memory = defaultdict(float)
+        self.backward_end_memory = defaultdict(float)
+        self.backward_peak_memory = defaultdict(float)
         self.module_str = {}
 
         def pre_hook_generator(name):
@@ -412,3 +413,123 @@ class MemoryProfilerList(list):
             )
         for p, fn in zip(self, filenames):
             p.save_data(fn)
+
+
+class LayerWiseFPCUDATimeProfiler(BaseProfiler):
+
+    def __init__(
+        self,
+        models: Tuple[nn.Module],
+        model_names: Tuple[str] = None,
+        search_mode: Tuple[str] = ("direct_children",),
+        instances: Tuple[nn.Module] = (nn.Module,),
+        filename='layer_time.time-prof.txt',
+        warmup: int = 10,
+    ):
+        super().__init__(models, filename)
+        self.warmup = warmup
+        if isinstance(instances, nn.Module):
+            instances = (instances,)
+        elif not isinstance(instances, tuple):
+            instances = tuple(instances)
+        self.instances = instances
+
+        if isinstance(search_mode, str):
+            search_mode = (search_mode,)
+        elif not isinstance(search_mode, tuple):
+            search_mode = tuple(search_mode)
+        if len(search_mode) != len(self.models):
+            raise ValueError(
+                "search_mode should have the same length as models"
+            )
+
+        if model_names is None:
+            model_names = tuple([f"net{i}" for i in range(len(models))])
+        if not isinstance(model_names, (tuple, list)):
+            raise ValueError("model_names should be a tuple of strings")
+        if len(model_names) != len(models):
+            raise ValueError(
+                "model_names should have the same length as models"
+            )
+
+        self.result = defaultdict(list)
+        self.module_str = {}
+        self.start_events = {}
+        self.pre_hooks = []
+        self.post_hooks = []
+
+        def pre_hook_generator(name):
+
+            def pre_hook(module, input):
+                start_event = torch.cuda.Event(enable_timing=True)
+                # make sure that previous modules have been FPed
+                torch.cuda.synchronize()
+                start_event.record()
+                self.start_events[name] = start_event
+
+            return pre_hook
+
+        def post_hook_generator(name):
+
+            def post_hook(module, input, output):
+                end_event = torch.cuda.Event(enable_timing=True)
+                end_event.record()
+                # make sure that the current module have been FPed
+                torch.cuda.synchronize()
+                start_event = self.start_events.get(name, None)
+                if start_event is not None:
+                    elapsed_time = start_event.elapsed_time(end_event)
+                    self.result[name].append(elapsed_time)
+                    self.start_events[name] = None
+
+            return post_hook
+
+        for i, model in enumerate(self.models):
+            if search_mode[i] == "self":
+                it = (("self", model),)
+            elif search_mode[i] == "submodules":
+                it = model.named_modules()
+            elif search_mode[i] == "direct_children":
+                it = model.named_children()
+            for name, m in it:
+                if isinstance(m, instances):
+                    mname = f"{model_names[i]}'s {name}"
+                    self.module_str[mname] = str(m)
+                    pre_hook = pre_hook_generator(mname)
+                    post_hook = post_hook_generator(mname)
+                    pre_handle = m.register_forward_pre_hook(
+                        pre_hook_generator(mname)
+                    )
+                    post_handle = m.register_forward_hook(
+                        post_hook_generator(mname)
+                    )
+                    self.start_events[mname] = None
+                    self.pre_hooks.append(pre_handle)
+                    self.post_hooks.append(post_handle)
+
+    def profile(self, *args, **kwargs):
+        table = []
+        for name in self.result.keys():
+            forward_time = self.result[name][self.warmup:]
+            avg_forward_time = sum(forward_time) / len(forward_time)
+            table.append((name, avg_forward_time))
+
+        table = sorted(table, key=lambda x: x[1], reverse=True)
+
+        with open(self.filename, 'a') as f:
+            for name, avg_forward_time in table:
+                f.write(
+                    f"{name}:{self.module_str[name]} => {avg_forward_time}\n\n"
+                )
+            f.flush()
+
+    def save_data(self, filename):
+        pass
+
+    def clear_hooks(self):
+        for handle in self.pre_hooks:
+            handle.remove()
+        for handle in self.post_hooks:
+            handle.remove()
+        self.pre_hooks = []
+        self.post_hooks = []
