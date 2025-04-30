@@ -256,63 +256,39 @@ class FGCCIFAR10DVSVGG(nn.Module):
         return x
 
 
-def vgg_critical_block_partial_checkpointing(
+def vgg_block_partial_checkpointing(
     in_plane, out_plane, kernel_size, stride, padding, T, neuron_type,
-    spike_compressor: str, **kwargs
+    spike_compressor: str, preceding_avg_pool: bool, **kwargs
 ):
     kwargs["T"] = T
-    neuron_type_extracted = neuron_type_to_str(neuron_type)
-    if neuron_type_extracted == "SlidingPSN":
-        return [
-            get_block(
-                f"Conv2dTEBN",
-                proj=nn.Conv2d(
-                    in_plane, out_plane, kernel_size, stride, padding
-                ),
-                bn=nn.BatchNorm2d(out_plane),
-                tebn_proj=TEBNProjection(T),
-                spike_compressor=get_spike_compressor(spike_compressor)
-            ),
-            get_block(
-                f"SlidingPSNAvgPool2d",
-                neuron=get_neuron(neuron_type, **kwargs),
-                pool=nn.AvgPool2d(2),
-            )
-        ]
-    elif neuron_type_extracted == "PSN":
-        return [
-            get_block(
-                f"Conv2dBN",
-                proj=nn.Conv2d(
-                    in_plane, out_plane, kernel_size, stride, padding
-                ),
-                bn=nn.BatchNorm2d(out_plane),
-                spike_compressor=get_spike_compressor(spike_compressor)
-            ),
-            get_block(
-                f"PSNAvgPool2d",
-                neuron=get_neuron(neuron_type, **kwargs),
-                pool=nn.AvgPool2d(2)
-            )
-        ]
+    if preceding_avg_pool:
+        raise NotImplementedError
     else:
-        # In this case, peak allocated memory is achieved when backwarding on Conv2d!
-        return [
-            get_block(
-                f"Conv2d",
-                proj=nn.Conv2d(
-                    in_plane, out_plane, kernel_size, stride, padding
+        if neuron_type_to_str(neuron_type) != "PSN":
+            return nn.Sequential(
+                get_block(
+                    f"Conv2dTEBN",
+                    proj=nn.Conv2d(
+                        in_plane, out_plane, kernel_size, stride, padding
+                    ),
+                    bn=nn.BatchNorm2d(out_plane),
+                    tebn_proj=TEBNProjection(T),
+                    spike_compressor=get_spike_compressor(spike_compressor)
                 ),
-                spike_compressor=get_spike_compressor(spike_compressor)
-            ),
-            get_block(
-                f"TEBN{neuron_type_extracted}AvgPool2d",
-                bn=nn.BatchNorm2d(out_plane),
-                tebn_proj=TEBNProjection(T),
-                neuron=get_neuron(neuron_type, **kwargs),
-                pool=nn.AvgPool2d(2),
+                get_neuron(neuron_type, **kwargs),
             )
-        ]
+        else:
+            return nn.Sequential(
+                get_block(
+                    f"Conv2dBN",
+                    proj=nn.Conv2d(
+                        in_plane, out_plane, kernel_size, stride, padding
+                    ),
+                    bn=nn.BatchNorm2d(out_plane),
+                    spike_compressor=get_spike_compressor(spike_compressor)
+                ),
+                get_neuron(neuron_type, **kwargs),
+            )
 
 
 class PGCCIFAR10DVSVGG(nn.Module):
@@ -327,33 +303,21 @@ class PGCCIFAR10DVSVGG(nn.Module):
                 2, 64, 3, 1, 1, T, neuron_type, "NullSpikeCompressor", False,
                 **kwargs
             ),
-            *vgg_critical_block_partial_checkpointing(
+            *vgg_critical_block_checkpointing(
                 64, 128, 3, 1, 1, T, neuron_type, spike_compressor, **kwargs
             ),
             vgg_block_checkpointing(
                 128, 256, 3, 1, 1, T, neuron_type, "NullSpikeCompressor", False,
                 **kwargs
             ),
-            vgg_block_checkpointing(
+            vgg_block_partial_checkpointing(
                 256, 256, 3, 1, 1, T, neuron_type, spike_compressor, False,
                 **kwargs
             ),
-            vgg_block_checkpointing(
-                256, 512, 3, 1, 1, T, neuron_type, spike_compressor, True,
-                **kwargs
-            ),
-            vgg_block_checkpointing(
-                512, 512, 3, 1, 1, T, neuron_type, spike_compressor, False,
-                **kwargs
-            ),
-            vgg_block_checkpointing(
-                512, 512, 3, 1, 1, T, neuron_type, spike_compressor, True,
-                **kwargs
-            ),
-            vgg_block_checkpointing(
-                512, 512, 3, 1, 1, T, neuron_type, spike_compressor, False,
-                **kwargs
-            ),
+            vgg_block(256, 512, 3, 1, 1, T, neuron_type, True, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, T, neuron_type, True, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
             layer.AvgPool2d(2, step_mode="m"),
         )
         self.dropout = layer.Dropout(dropout)
