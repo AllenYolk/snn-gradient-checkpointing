@@ -13,26 +13,38 @@ from modules.tebn import TEBNProjection
 
 
 def vgg_block(
-    in_plane, out_plane, kernel_size, stride, padding, T, neuron_type, **kwargs
+    in_plane,
+    out_plane,
+    kernel_size,
+    stride,
+    padding,
+    T,
+    neuron_type,
+    preceding_avg_pool=False,
+    **kwargs
 ):
     kwargs["T"] = T
+    l = []
+    if preceding_avg_pool:
+        l.append(layer.AvgPool2d(2, step_mode="m"))
     if neuron_type_to_str(neuron_type) != "PSN":
-        return nn.Sequential(
+        l += [
             layer.SeqToANNContainer(
                 nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
                 nn.BatchNorm2d(out_plane),
             ),
             TEBNProjection(T),
             get_neuron(neuron_type, **kwargs),
-        )
+        ]
     else:
-        return nn.Sequential(
+        l += [
             layer.SeqToANNContainer(
                 nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
                 nn.BatchNorm2d(out_plane),
             ),
             get_neuron(neuron_type, **kwargs),
-        )
+        ]
+    return nn.Sequential(*l)
 
 
 class CIFAR10DVSVGG(nn.Module):
@@ -41,17 +53,14 @@ class CIFAR10DVSVGG(nn.Module):
         super().__init__()
 
         self.features = nn.Sequential(
-            vgg_block(2, 64, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(64, 128, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2, step_mode="m"),
-            vgg_block(128, 256, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(256, 256, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2, step_mode="m"),
-            vgg_block(256, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(512, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            layer.AvgPool2d(2, step_mode="m"),
-            vgg_block(512, 512, 3, 1, 1, T, neuron_type, **kwargs),
-            vgg_block(512, 512, 3, 1, 1, T, neuron_type, **kwargs),
+            vgg_block(2, 64, 3, 1, 1, T, neuron_type, False, **kwargs),
+            vgg_block(64, 128, 3, 1, 1, T, neuron_type, False, **kwargs),
+            vgg_block(128, 256, 3, 1, 1, T, neuron_type, True, **kwargs),
+            vgg_block(256, 256, 3, 1, 1, T, neuron_type, False, **kwargs),
+            vgg_block(256, 512, 3, 1, 1, T, neuron_type, True, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, T, neuron_type, True, **kwargs),
+            vgg_block(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
             layer.AvgPool2d(2, step_mode="m"),
         )
         self.dropout = layer.Dropout(dropout)
