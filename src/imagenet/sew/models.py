@@ -301,7 +301,6 @@ class SEWResNet(nn.Module):
         width_per_group=64,
         replace_stride_with_dilation=None,
         norm_layer=nn.BatchNorm2d,
-        checkpointing=False,
         spike_compressor="IdentitySpikeCompressor",
         **kwargs,  # neuronal parameters
     ):
@@ -311,18 +310,8 @@ class SEWResNet(nn.Module):
         self.T = T
         self.in_planes = 64
         self.dilation = 1
+        checkpointing = block.__name__.endswith("Checkpointing")
         self.checkpointing = checkpointing
-        block_end_with_checkpointing = block.__name__.endswith("Checkpointing")
-        if checkpointing and not block_end_with_checkpointing:
-            raise ValueError(
-                "If checkpointing=True, block type should also "
-                "enable checkpointing!"
-            )
-        if not checkpointing and block_end_with_checkpointing:
-            raise ValueError(
-                "If checkpointing=False, block type should not "
-                "enable checkpointing!"
-            )
         if replace_stride_with_dilation is None:
             replace_stride_with_dilation = [False, False, False]
         if len(replace_stride_with_dilation) != 3:
@@ -524,113 +513,331 @@ class SEWResNet(nn.Module):
 class SEWResNet18(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(
-            neuron_type,
-            BasicBlock, [2, 2, 2, 2],
-            checkpointing=False,
-            **kwargs
-        )
+        super().__init__(neuron_type, BasicBlock, [2, 2, 2, 2], **kwargs)
 
 
 class SEWResNet34(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(
-            neuron_type,
-            BasicBlock, [3, 4, 6, 3],
-            checkpointing=False,
-            **kwargs
-        )
+        super().__init__(neuron_type, BasicBlock, [3, 4, 6, 3], **kwargs)
 
 
 class SEWResNet50(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(
-            neuron_type,
-            Bottleneck, [3, 4, 6, 3],
-            checkpointing=False,
-            **kwargs
-        )
+        super().__init__(neuron_type, Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
 class SEWResNet101(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(
-            neuron_type,
-            Bottleneck, [3, 4, 23, 3],
-            checkpointing=False,
-            **kwargs
-        )
+        super().__init__(neuron_type, Bottleneck, [3, 4, 23, 3], **kwargs)
 
 
 class SEWResNet152(SEWResNet):
 
     def __init__(self, neuron_type, **kwargs):
-        super().__init__(
-            neuron_type,
-            Bottleneck, [3, 8, 36, 3],
-            checkpointing=False,
-            **kwargs
-        )
+        super().__init__(neuron_type, Bottleneck, [3, 8, 36, 3], **kwargs)
 
 
-class MESEWResNet18(SEWResNet):
+class FGCSEWResNet18(SEWResNet):
 
     def __init__(self, neuron_type, spike_compressor, **kwargs):
         super().__init__(
             neuron_type,
             BasicBlockCheckpointing, [2, 2, 2, 2],
-            checkpointing=True,
             spike_compressor=spike_compressor,
             **kwargs
         )
 
 
-class MESEWResNet34(SEWResNet):
+class FGCSEWResNet34(SEWResNet):
 
     def __init__(self, neuron_type, spike_compressor, **kwargs):
         super().__init__(
             neuron_type,
             BasicBlockCheckpointing, [3, 4, 6, 3],
-            checkpointing=True,
             spike_compressor=spike_compressor,
             **kwargs
         )
 
 
-class MESEWResNet50(SEWResNet):
+class FGCSEWResNet50(SEWResNet):
 
     def __init__(self, neuron_type, spike_compressor, **kwargs):
         super().__init__(
             neuron_type,
             BottleneckCheckpointing, [3, 4, 6, 3],
-            checkpointing=True,
             spike_compressor=spike_compressor,
             **kwargs
         )
 
 
-class MESEWResNet101(SEWResNet):
+class FGCSEWResNet101(SEWResNet):
 
     def __init__(self, neuron_type, spike_compressor, **kwargs):
         super().__init__(
             neuron_type,
             BottleneckCheckpointing, [3, 4, 23, 3],
-            checkpointing=True,
             spike_compressor=spike_compressor,
             **kwargs
         )
 
 
-class MESEWResNet152(SEWResNet):
+class FGCSEWResNet152(SEWResNet):
 
     def __init__(self, neuron_type, spike_compressor, **kwargs):
         super().__init__(
             neuron_type,
             BottleneckCheckpointing, [3, 8, 36, 3],
-            checkpointing=True,
+            spike_compressor=spike_compressor,
+            **kwargs
+        )
+
+
+class PGCSEWResNet(nn.Module):
+
+    def __init__(
+        self,
+        neuron_type,
+        block_types,
+        layers,
+        T=4,
+        num_classes=1000,
+        zero_init_residual=False,
+        groups=1,
+        width_per_group=64,
+        replace_stride_with_dilation=None,
+        norm_layer=nn.BatchNorm2d,
+        spike_compressor="IdentitySpikeCompressor",
+        **kwargs,  # neuronal parameters
+    ):
+        super().__init__()
+        kwargs["T"] = T  # for PSN
+        self._norm_layer = norm_layer
+        self.T = T
+        self.in_planes = 64
+        self.dilation = 1
+        checkpointing = self._get_checkpointing(block_types)
+        self.checkpointing = checkpointing
+
+        if replace_stride_with_dilation is None:
+            replace_stride_with_dilation = [False, False, False]
+        if len(replace_stride_with_dilation) != 3:
+            raise ValueError(
+                "replace_stride_with_dilation should be None "
+                "or a 3-element tuple, got {}".
+                format(replace_stride_with_dilation)
+            )
+        self.groups = groups
+        self.base_width = width_per_group
+
+        self.pre_conv = get_block(
+            f"Conv2dBNRepeat{neuron_type_to_str(neuron_type)}MaxPool2d",
+            proj=nn.Conv2d(
+                3,
+                self.in_planes,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False,
+            ),
+            bn=norm_layer(self.in_planes),
+            T=T,
+            neuron=get_neuron(neuron_type, **kwargs),
+            pool=nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            spike_compressor=get_spike_compressor("NullSpikeCompressor"),
+        )
+
+        self.layer1 = self._make_layer(
+            neuron_type,
+            block_types[0],
+            64,
+            layers[0],
+            checkpointing=checkpointing[0],
+            spike_compressor=spike_compressor,
+            input_non_binary_int=False,  # input to its first res block is binary!
+            **kwargs
+        )
+        self.layer2 = self._make_layer(
+            neuron_type,
+            block_types[1],
+            128,
+            layers[1],
+            stride=2,
+            dilate=replace_stride_with_dilation[0],
+            checkpointing=checkpointing[1],
+            spike_compressor=spike_compressor,
+            input_non_binary_int=True,
+            **kwargs,
+        )
+        self.layer3 = self._make_layer(
+            neuron_type,
+            block_types[2],
+            256,
+            layers[2],
+            stride=2,
+            dilate=replace_stride_with_dilation[1],
+            checkpointing=checkpointing[2],
+            spike_compressor=spike_compressor,
+            input_non_binary_int=True,
+            **kwargs,
+        )
+        self.layer4 = self._make_layer(
+            neuron_type,
+            block_types[3],
+            512,
+            layers[3],
+            stride=2,
+            dilate=replace_stride_with_dilation[2],
+            checkpointing=checkpointing[3],
+            spike_compressor=spike_compressor,
+            input_non_binary_int=True,
+            **kwargs,
+        )
+        self.avgpool = layer.AdaptiveAvgPool2d((1, 1), step_mode="m")
+        self.fc = nn.Linear(512 * block_types[3][-1].expansion, num_classes)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode='fan_out', nonlinearity='relu'
+                )
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+        if zero_init_residual:
+            _zero_init_blocks(self)
+
+    @staticmethod
+    def _get_checkpointing(block_types):
+        c = []
+        for bt in block_types:
+            cc = []
+            for b in bt:
+                cc.append(b.__name__.endswith("Checkpointing"))
+            c.append(cc)
+        return c
+
+    def _make_layer(
+        self,
+        neuron_type,
+        block_types,
+        planes,
+        blocks,
+        stride=1,
+        dilate=False,
+        checkpointing=[False],
+        spike_compressor="IdentitySpikeCompressor",
+        input_non_binary_int: bool = True,
+        **kwargs,
+    ):
+        norm_layer = self._norm_layer
+        downsample = None
+        previous_dilation = self.dilation
+        spike_compressor_class = get_spike_compressor(spike_compressor)
+        downsample_forced_uint8 = (
+            spike_compressor_class.requires_strictly_binary and
+            input_non_binary_int
+        )
+        if dilate:
+            self.dilation *= stride
+            stride = 1
+        if stride != 1 or self.in_planes != planes * block_types[0].expansion:
+            downsample = get_block(
+                f"Conv2dBN{neuron_type_to_str(neuron_type)}",
+                proj=_conv1x1(
+                    self.in_planes, planes * block_types[0].expansion, stride
+                ),
+                bn=norm_layer(planes * block_types[0].expansion),
+                neuron=get_neuron(neuron_type, **kwargs),
+                spike_compressor=get_spike_compressor(
+                    "Uint8SpikeCompressor"
+                    if downsample_forced_uint8 else spike_compressor
+                ),
+            ) if checkpointing[0] else nn.Sequential(
+                layer.SeqToANNContainer(
+                    _conv1x1(
+                        self.in_planes, planes *
+                        block_types[0].expansion, stride
+                    ),
+                    norm_layer(planes * block_types[0].expansion),
+                ),
+                get_neuron(neuron_type, **kwargs),
+            )
+
+        layers = []
+        ntsc = [neuron_type]
+        if checkpointing[0]:
+            ntsc.append(spike_compressor)
+        layers.append(
+            block_types[0](
+                *ntsc,
+                self.in_planes,
+                planes,
+                stride,
+                downsample,
+                self.groups,
+                self.base_width,
+                previous_dilation,
+                norm_layer,
+                input_non_binary_int=input_non_binary_int,
+                **kwargs,
+            )
+        )
+        self.in_planes = planes * block_types[0].expansion
+        for i in range(1, blocks):
+            ntsc = [neuron_type]
+            if checkpointing[i]:
+                ntsc.append(spike_compressor)
+            layers.append(
+                block_types[i](
+                    *ntsc,
+                    self.in_planes,
+                    planes,
+                    groups=self.groups,
+                    base_width=self.base_width,
+                    dilation=self.dilation,
+                    norm_layer=norm_layer,
+                    forced_uint8=True,  # input cannot be binary
+                    **kwargs
+                )
+            )
+
+        return nn.Sequential(*layers)
+
+    def _forward_impl(self, x):
+        # x.shape = [B, C, H, W]
+        x = self.pre_conv(x)  # [T, B, C, H, W]
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 2)  # [T, B, D]
+        return self.fc(x)  # [T, B, num_classes]
+
+    def forward(self, x):
+        return self._forward_impl(x)
+
+
+class PGCSEWResNet34(PGCSEWResNet):
+
+    layers = [3, 4, 6, 3]
+
+    def __init__(self, neuron_type, spike_compressor, **kwargs):
+        super().__init__(
+            neuron_type,
+            block_types=[
+                [BasicBlockCheckpointing] * self.layers[0],
+                [BasicBlockCheckpointing] * self.layers[1],
+                [BasicBlockCheckpointing] * self.layers[2],
+                [BasicBlockCheckpointing] * self.layers[3],
+            ],
+            layers=self.layers,
             spike_compressor=spike_compressor,
             **kwargs
         )

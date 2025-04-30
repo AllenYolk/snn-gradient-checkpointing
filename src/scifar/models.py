@@ -139,6 +139,7 @@ class FGCSequentialCIFARNet(nn.Module):
         return y
 
 
+# TODO: what about PSN and Sliding PSN?
 class PGCSequentialCIFARNet(nn.Module):
 
     def __init__(

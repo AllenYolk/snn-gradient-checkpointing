@@ -152,7 +152,7 @@ def parse_args():
         help="Cache the datasets and serialize the transforms",
         action="store_true",
     )
-    parser.add_argument('-net', "--network", default="SEWResNet18", type=str)
+    parser.add_argument('-net', "--network", default="SEWResNet34", type=str)
     parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
         "-sc",

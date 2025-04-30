@@ -23,7 +23,7 @@ from utils import set_seed, ModelNameGenerator, AverageMeter
 from utils import accuracy, save_on_master, mkdir, count_learnable_parameters
 from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
 from utils.profiler import *
-from modules import get_autocast_context, GradScaler, BaseCheckpointingBlock
+from modules import get_autocast_context, GradScaler
 import models
 
 
@@ -144,7 +144,7 @@ def parse_args():
         default="/export/home/data_allenyolk/ImageNet0_03125"
     )
     parser.add_argument("--log_dir", type=str, default="./logs")
-    parser.add_argument('-net', "--network", default="SEWResNet18", type=str)
+    parser.add_argument('-net', "--network", default="SEWResNet34", type=str)
     parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
     parser.add_argument(
         "-sc",
@@ -373,18 +373,14 @@ def main():
                 net.avgpool, net.fc
             ),
             search_mode=(
-                "self", "submodules", "submodules", "submodules", "submodules",
-                "self", "self"
+                "self", "direct_children", "direct_children", "direct_children",
+                "direct_children", "self", "self"
             ),
             model_names=(
                 "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool",
                 "fc"
             ),
-            instances=(
-                BaseCheckpointingBlock,
-                torch.nn.Linear,
-                torch.nn.AdaptiveAvgPool2d,
-            ),
+            instances=(torch.nn.Module,),
             filename=log_path,
         ),
     )
