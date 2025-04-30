@@ -829,16 +829,14 @@ class PGCSEWResNet34(PGCSEWResNet):
     layers = [3, 4, 6, 3]
 
     def __init__(self, neuron_type, spike_compressor, **kwargs):
+        l = self.layers
         super().__init__(
             neuron_type,
             block_types=[
-                [BasicBlock, BasicBlockCheckpointing, BasicBlockCheckpointing],
-                [
-                    BasicBlock, BasicBlockCheckpointing,
-                    BasicBlockCheckpointing, BasicBlock
-                ],
-                [BasicBlockCheckpointing] * self.layers[2],
-                [BasicBlockCheckpointing] * self.layers[3],
+                [BasicBlock] + [BasicBlockCheckpointing] * (l[0] - 1),
+                [BasicBlock] + [BasicBlockCheckpointing] * (l[1] - 1),
+                [BasicBlock] + [BasicBlockCheckpointing] * (l[2] - 1),
+                [BasicBlock] * l[3],
             ],
             layers=self.layers,
             spike_compressor=spike_compressor,
