@@ -158,7 +158,6 @@ def parse_args():
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
     parser.add_argument("-lomo", "--lomo", action='store_true')
-    parser.add_argument("-tebn", "--allow_tebn", action='store_true')
 
     args = parser.parse_args()
     args.decay_lambda = 0.25
@@ -286,9 +285,8 @@ def main():
         T=args.T,  # for tebn and PSN
         neuron_type=args.neuron_type,
         spike_compressor=args.spike_compressor,
-        allow_tebn=args.allow_tebn,
         decay_lambda=args.decay_lambda,
-        k=8,  # for SlidingPSN
+        k=4,  # for SlidingPSN
     )
     print(net)
     print("Number of learnable parameters: ", count_learnable_parameters(net))
