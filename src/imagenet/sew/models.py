@@ -832,8 +832,11 @@ class PGCSEWResNet34(PGCSEWResNet):
         super().__init__(
             neuron_type,
             block_types=[
-                [BasicBlockCheckpointing] * self.layers[0],
-                [BasicBlockCheckpointing] * self.layers[1],
+                [BasicBlock, BasicBlockCheckpointing, BasicBlockCheckpointing],
+                [
+                    BasicBlock, BasicBlockCheckpointing,
+                    BasicBlockCheckpointing, BasicBlock
+                ],
                 [BasicBlockCheckpointing] * self.layers[2],
                 [BasicBlockCheckpointing] * self.layers[3],
             ],
