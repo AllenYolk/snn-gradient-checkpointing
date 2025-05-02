@@ -230,7 +230,7 @@ def train_step(
                 "top5_acc": top5.avg,
             })
 
-            if early_exit and i > 5:
+            if early_exit and i > 10:
                 break
 
     if lr_scheduler is not None:
@@ -340,6 +340,7 @@ def main():
             profiler,
             epoch,
             real_epochs,
+            early_exit=True,
         )
         val_results = val_step(
             net,

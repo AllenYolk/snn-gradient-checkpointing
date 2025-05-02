@@ -145,45 +145,10 @@ def prepare_dataloaders(args):
     return train_loader, test_loader, mixup_fn
 
 
-def prepare_optimizers_and_schedulers(
-    args, net, scaler, train_loader_length=None
-):
-    optimizer = create_optimizer_v2(
-        net,
-        opt="adamw",
-        lr=args.learning_rate,
-        weight_decay=args.l2_factor,
-    )
-
-    lr_scheduler, total_epochs = create_scheduler_v2(
-        optimizer,
-        sched="cosine",
-        num_epochs=args.epochs,
-        min_lr=1e-5,
-        warmup_epochs=20,
-        warmup_lr=1e-6,
-        cooldown_epochs=10,
-        step_on_epochs=False,
-        updates_per_epoch=train_loader_length,
-    )
-    if args.epochs != total_epochs:
-        print(
-            f"Number of epochs changed from {args.epochs} to {total_epochs}"
-            f" due to the scheduler."
-        )
-        args.epochs = total_epochs
-
-    if args.lomo:
-        optimizer = Lomo(optimizer, scaler=scaler)
-
-    return optimizer, lr_scheduler
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Classify ImageNet (or its subset)'
     )
-    parser.add_argument("-T", "--T", default=4, type=int)
     parser.add_argument(
         '--data_dir',
         type=str,
@@ -198,17 +163,13 @@ def parse_args():
         default="IdentitySpikeCompressor",
         type=str
     )
-    parser.add_argument(
-        '-amp',
-        "--amp",
-        action='store_true',
-        help='automatic mixed precision training'
-    )
     parser.add_argument('-d', '--device', default='cuda:0', type=str)
     parser.add_argument("-ss", "--set_seed", type=int, default=2024)
-    parser.add_argument("-lomo", "--lomo", action='store_true')
 
     args = parser.parse_args()
+    args.lomo = False
+    args.amp = False
+    args.T = 4
     args.mixup = False
     args.batch_size = 32
     args.epochs = 200
@@ -218,88 +179,6 @@ def parse_args():
     args.smoothing = 0.1
     args.cache_dataset = True
     return args
-
-
-def train_step(
-    net,
-    train_data_loader,
-    criterion,
-    optimizer,
-    lr_scheduler,
-    device,
-    scaler,
-    mixup_fn,
-    profiler,
-    current_epoch,
-    total_epoch,
-    early_exit=False,
-):
-    net.train()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-    use_amp = scaler is not None
-
-    with tqdm(
-        train_data_loader,
-        desc=f"Epoch {current_epoch + 1}/{total_epoch}",
-        leave=False,
-        unit="batch"
-    ) as pbar:
-        for i, (img, label) in enumerate(pbar):
-            img = img.float().to(device, non_blocking=True)
-            label = label.to(device, non_blocking=True)
-
-            if mixup_fn is not None:
-                img, label = mixup_fn(img, label)
-
-            with get_autocast_context(use_amp):
-                y = net(img)
-                batch_loss = criterion(y, label)
-
-            if use_amp:
-                scaler.scale(batch_loss).backward()
-                profiler.profile(sort_by="backward_peak_memory")
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                batch_loss.backward()
-                profiler.profile(sort_by="backward_peak_memory")
-                optimizer.step()
-            optimizer.zero_grad()
-
-            functional.reset_net(net)
-            label_idx = label.argmax(dim=1) if mixup_fn is not None else label
-            prec1, prec5 = accuracy(y.data, label_idx.data, topk=(1, 5))
-            losses.update(batch_loss.item(), label.size(0))
-            top1.update(prec1.item(), label.size(0))
-            top5.update(prec5.item(), label.size(0))
-
-            pbar.set_postfix({
-                "loss": losses.avg,
-                "top1_acc": top1.avg,
-                "top5_acc": top5.avg,
-            })
-
-            if lr_scheduler is not None:
-                # will prevent scheduler update that should happen
-                # at the end of the epoch
-                lr_scheduler.step_update(
-                    i + current_epoch * len(train_data_loader)
-                )
-
-            if early_exit and i > 10:
-                break
-
-    if lr_scheduler is not None:
-        # will prevent scheduler update that should happen at each iteration
-        lr_scheduler.step(current_epoch + 1)
-
-    return {
-        "loss": losses.avg,
-        "top1_acc": top1.avg,
-        "top5_acc": top5.avg,
-    }
 
 
 def val_step(net, test_data_loader, device):
@@ -342,8 +221,7 @@ def main():
     log_path = Path(args.log_dir) / "ImageNet-transformer"
     if not log_path.exists():
         log_path.mkdir(parents=True)
-    mem_data_path = log_path / (run_name+".prof.pt")
-    log_path = log_path / (run_name+".prof.txt")
+    log_path = log_path / (run_name+".prof-time.txt")
 
     train_data_loader, val_data_loader, mixup_fn = prepare_dataloaders(args)
 
@@ -359,79 +237,10 @@ def main():
     print(f"Number of learnable parameters: {count_learnable_parameters(net)}")
     net = net.to(args.device)
 
-    if mixup_fn is not None:
-        print(f"Mixup enabled!")
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing > 0.:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
-    print(f"Criterion: {criterion}")
-
-    scaler = None
-    if args.amp:
-        scaler = GradScaler()
-    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(
-        args, net, scaler, len(train_data_loader)
-    )
-
-    print("Stage 1: Peak Memory Checking")
-    profiler = MemoryProfilerList()
-
-    torch.cuda.reset_peak_memory_stats(args.device)
-    mem_stats = torch.cuda.memory_stats(args.device)
-    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
-    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
-    print(
-        "Before training: "
-        f"peak_allocated={peak_allocated:.2f} MB, "
-        f"peak_reserved={peak_reserved:.2f} MB"
-    )
-
-    real_epochs = 1
-    max_val_accuracy = 0.
-    for epoch in range(real_epochs):
-        train_results = train_step(
-            net,
-            train_data_loader,
-            criterion,
-            optimizer,
-            lr_scheduler,
-            args.device,
-            scaler,
-            mixup_fn,
-            profiler,
-            epoch,
-            real_epochs,
-            early_exit=True,
-        )
-        val_results = val_step(
-            net,
-            val_data_loader,
-            args.device,
-        )
-        mem_stats = torch.cuda.memory_stats(args.device)
-        peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
-        peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
-        print(
-            f"Epoch {epoch + 1}/{real_epochs}: "
-            f"train_loss={train_results['loss']}, "
-            f"train_top1_acc={train_results['top1_acc']}, "
-            f"train_top5_acc={train_results['top5_acc']}, "
-            f"val_loss={val_results['loss']}, "
-            f"val_top1_acc={val_results['top1_acc']}, "
-            f"val_top5_acc={val_results['top5_acc']}, "
-            f"peak_allocated={peak_allocated:.2f} MB, "
-            f"peak_reserved={peak_reserved:.2f} MB"
-        )
-        if val_results["top1_acc"] > max_val_accuracy:
-            max_val_accuracy = val_results["top1_acc"]
-
-    print("Stage 2: Memory Profiling")
     if args.network.endswith("Spikformer"):
         model_list = (net.patch_embed, *[b for b in net.block], net.head)
         search_mode_list = (
-            "submodules", *["submodules" for _ in net.block], "self"
+            "direct_children", *["direct_children" for _ in net.block], "self"
         )
         model_name_list = (
             "patch_embed", *[f"block{i}" for i in range(net.depths)], "head"
@@ -443,7 +252,7 @@ def main():
             *[b for b in net.block3], net.head
         )
         search_mode_list = (
-            *["submodules" for _ in range(3 + net.depths)], "self"
+            *["direct_children" for _ in range(3 + net.depths)], "self"
         )
         model_name_list = (
             "patch_embed1",
@@ -454,15 +263,12 @@ def main():
             *[f"block3_{i}" for i in range(net.depths - 3)],
             "head",
         )
-    profiler = MemoryProfilerList(
-        CategoryMemoryProfiler(net, optimizer, filename=log_path),
-        LayerWiseMemoryProfiler(
-            model_list,
-            search_mode=search_mode_list,
-            model_names=model_name_list,
-            instances=(BaseCheckpointingBlock, torch.nn.Linear),
-            filename=log_path,
-        ),
+    profiler = LayerWiseFPCUDATimeProfiler(
+        model_list,
+        search_mode=search_mode_list,
+        model_names=model_name_list,
+        instances=(torch.nn.Module,),
+        filename=log_path,
     )
 
     torch.cuda.reset_peak_memory_stats(args.device)
@@ -475,28 +281,15 @@ def main():
         f"peak_reserved={peak_reserved:.2f} MB"
     )
 
-    for epoch in range(real_epochs, real_epochs + 1):
-        train_results = train_step(
-            net,
-            train_data_loader,
-            criterion,
-            optimizer,
-            lr_scheduler,
-            args.device,
-            scaler,
-            mixup_fn,
-            profiler,
-            epoch,
-            real_epochs + 1,
-            early_exit=True,
-        )
-        profiler.save_data((None, mem_data_path))
-        print(
-            f"Profiling Epoch: "
-            f"train_loss={train_results['loss']}, "
-            f"train_top1_acc={train_results['top1_acc']}, "
-            f"train_top5_acc={train_results['top5_acc']}, "
-        )
+    with torch.no_grad():
+        for img, label in tqdm(val_data_loader):
+            img = img.float().to(args.device, non_blocking=True)
+            label = label.to(args.device, non_blocking=True)
+            y = net(img)
+            functional.reset_net(net)
+
+    profiler.clear_hooks()
+    profiler.profile()
 
 
 if __name__ == '__main__':
