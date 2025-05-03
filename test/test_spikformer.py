@@ -61,7 +61,7 @@ def test_spikformer_imagenet():
 
 
 def test_mespikformer_imagenet():
-    net = models.MESpikformer(
+    net = models.FGCSpikformer(
         "SJLIF",
         "NullSpikeCompressor",
         T=4,
@@ -87,7 +87,7 @@ def test_spikformer_equality_imagenet():
     )
     net1 = net1.to(DEVICE)
 
-    net2 = models.MESpikformer(
+    net2 = models.FGCSpikformer(
         "HandWrittenLIF",
         "BitSpikeCompressor",
         T=4,

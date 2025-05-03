@@ -54,7 +54,7 @@ def test_sew18_imagenet():
 
 
 def test_sew18_imagenet_checkpointing():
-    net = models.MESEWResNet18(
+    net = models.FGCSEWResNet18(
         "HandWrittenLIF", "BitSpikeCompressor", T=4, detach_reset=True
     )
     net = net.to(DEVICE)
@@ -69,7 +69,7 @@ def test_sew18_equality_imagenet():
     )
     net1 = net1.to(DEVICE)
 
-    net2 = models.MESEWResNet18(
+    net2 = models.FGCSEWResNet18(
         "HandWrittenLIF",
         "BitSpikeCompressor",
         T=4,

@@ -467,7 +467,7 @@ class PatchEmbedInit(nn.Module):
     def __init__(
         self,
         neuron_type,
-        spike_compressor: str,
+        spike_compressor: str = "NullSpikeCompressor",
         img_size_h=128,
         img_size_w=128,
         patch_size=4,
@@ -694,7 +694,7 @@ class PatchEmbedStage(nn.Module):
     def __init__(
         self,
         neuron_type,
-        spike_compressor: str,
+        spike_compressor: str = "NullSpikeCompressor",
         img_size_h=128,
         img_size_w=128,
         patch_size=4,

@@ -61,7 +61,7 @@ def test_qkformer_imagenet():
 
 
 def test_meqkformer_imagenet():
-    net = models.MEQKFormer(
+    net = models.FGCQKFormer(
         "HandWrittenLIF",
         "NullSpikeCompressor",
         T=4,
@@ -87,7 +87,7 @@ def test_qkformer_equality_imagenet():
     )
     net1 = net1.to(DEVICE)
 
-    net2 = models.MEQKFormer(
+    net2 = models.FGCQKFormer(
         "HandWrittenLIF",
         "BitSpikeCompressor",
         T=4,

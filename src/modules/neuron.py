@@ -138,7 +138,7 @@ class _HandWrittenLIFAutogradFunctionNotDetached(
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
         grad_x_seq = handwritten_lif_backward_not_detached(
-            grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
+            grad_s_seq.contiguous(), h_seq, ctx.decay_lambda, ctx.T
         )
         return grad_x_seq, None
 
@@ -151,7 +151,7 @@ class _HandWrittenLIFAutogradFunctionDetached(
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
         grad_x_seq = handwritten_lif_backward_detached(
-            grad_s_seq, h_seq, ctx.decay_lambda, ctx.T
+            grad_s_seq.contiguous(), h_seq, ctx.decay_lambda, ctx.T
         )
         return grad_x_seq, None
 
@@ -222,7 +222,8 @@ class _HandWrittenHQLIFAutogradFunctionNotDetached(
     def backward(ctx, grad_s_seq):
         ot_seq = ctx.saved_tensors[0]
         grad_x_seq = handwritten_hqlif_backward_not_detached(
-            grad_s_seq, ot_seq, ctx.decay_lambda, ctx.T, ctx.h_quantizer
+            grad_s_seq.contiguous(), ot_seq, ctx.decay_lambda, ctx.T,
+            ctx.h_quantizer
         )
         return grad_x_seq, None, None
 
@@ -235,7 +236,8 @@ class _HandWrittenHQLIFAutogradFunctionDetached(
     def backward(ctx, grad_s_seq):
         ot_seq = ctx.saved_tensors[0]
         grad_x_seq = handwritten_hqlif_backward_detached(
-            grad_s_seq, ot_seq, ctx.decay_lambda, ctx.T, ctx.h_quantizer
+            grad_s_seq.contiguous(), ot_seq, ctx.decay_lambda, ctx.T,
+            ctx.h_quantizer
         )
         return grad_x_seq, None, None
 
