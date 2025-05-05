@@ -208,7 +208,27 @@ class PGCSequentialCIFARNet(nn.Module):
                             layer.BatchNorm1d(channels),
                             get_neuron(neuron_type, **kwargs),
                         ),
+                    ] if neuron_str == "LIF" else [
+                        get_block(
+                            f"Conv1d",
+                            proj=nn.Conv1d(
+                                in_channels,
+                                channels,
+                                kernel_size=3,
+                                padding=1,
+                                bias=True
+                            ),
+                            spike_compressor=get_spike_compressor(
+                                "BitSpikeCompressor"
+                            ),
+                        ),
+                        get_block(
+                            f"BN{neuron_str}",
+                            bn=nn.BatchNorm1d(channels),
+                            neuron=get_neuron(neuron_type, **kwargs),
+                        )
                     ]
+
                 elif i == 1 and j == 0:
                     conv_block = [
                         get_block(
@@ -244,7 +264,7 @@ class PGCSequentialCIFARNet(nn.Module):
                             get_neuron(neuron_type, **kwargs),
                         )
                     ]
-                else:
+                else:  # i == 0 and j == 1
                     conv_block = [
                         get_block(
                             block_type=f"Conv1dBN{neuron_str}",
