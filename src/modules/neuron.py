@@ -68,6 +68,45 @@ class SJLIF(neuron.LIFNode):
         return self.multi_step_forward(x_seq)
 
 
+# =========================== Simplified SJLIF ===========================
+class AutogradLIF(nn.Module):
+    """Multi-step LIF neuron with:
+    * decay_input=False
+    * v_threshold = 1.
+    * hard_reset, v_reset = 0.
+    * ATan surrogate function
+    whose BP is implemented by pytorch autograd.
+    """
+
+    def __init__(
+        self,
+        decay_lambda: float = 0.5,
+        detach_reset: bool = True,
+        *args,
+        **kwargs
+    ):
+        super().__init__()
+        if decay_lambda < 0. or decay_lambda > 1.:
+            raise ValueError('`decay_lambda` should be in the range [0, 1).')
+        self.tau = 1. / (1.-decay_lambda)
+        self.decay_lambda = decay_lambda
+        self.detach_reset = detach_reset
+        self.sg = surrogate.ATan()
+
+    def forward(self, x_seq):
+        T = x_seq.shape[0]
+        v = torch.zeros_like(x_seq[0])  # hidden state
+        s_seq = torch.empty_like(x_seq)
+        for t in range(T):
+            v = self.decay_lambda * v + x_seq[t]
+            s = self.sg(v - 1.)
+            s_seq[t] = s
+            if self.detach_reset:
+                s = s.detach()
+            v = v * (1.-s)
+        return s_seq
+
+
 # =========================== Multi-step PSN Family ===========================
 class PSN(neuron.PSN):
     """Multi-step spikingjelly PSN with:
