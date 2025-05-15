@@ -195,6 +195,68 @@ def vgg_critical_block_checkpointing(
         ]
 
 
+class GCCIFAR10DVSVGG(nn.Module):
+
+    def __init__(
+        self, T, neuron_type, spike_compressor: str, dropout=0.25, **kwargs
+    ):
+        super().__init__()
+
+        self.features = nn.Sequential(
+            vgg_block_checkpointing(
+                2, 64, 3, 1, 1, T, neuron_type, "NullSpikeCompressor", False,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                64, 128, 3, 1, 1, T, neuron_type, spike_compressor, False,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                128, 256, 3, 1, 1, T, neuron_type, spike_compressor, True,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                256, 256, 3, 1, 1, T, neuron_type, spike_compressor, False,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                256, 512, 3, 1, 1, T, neuron_type, spike_compressor, True,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                512, 512, 3, 1, 1, T, neuron_type, spike_compressor, False,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                512, 512, 3, 1, 1, T, neuron_type, spike_compressor, True,
+                **kwargs
+            ),
+            vgg_block_checkpointing(
+                512, 512, 3, 1, 1, T, neuron_type, spike_compressor, False,
+                **kwargs
+            ),
+            layer.AvgPool2d(2, step_mode="m"),
+        )
+        self.dropout = layer.Dropout(dropout)
+        d = int(48 / 2 / 2 / 2 / 2)
+        self.classifier = nn.Linear(512 * d * d, 10)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode='fan_out', nonlinearity='relu'
+                )
+
+    def forward(self, input):
+        # input.shape = [N, T, C, H, W]
+        input = input.transpose(0, 1).contiguous()  # [T, N, C, H, W]
+        x = self.features(input)
+        x = torch.flatten(x, 2)  # [T, N, D]
+        x = self.dropout(x)
+        x = self.classifier(x)
+        return x
+
+
 class FGCCIFAR10DVSVGG(nn.Module):
 
     def __init__(

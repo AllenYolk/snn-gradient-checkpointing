@@ -4,6 +4,7 @@ sys.path.append("./src")
 
 import torch
 import torch.nn as nn
+import torchvision
 from spikingjelly.activation_based import layer
 
 from modules.blocks import get_block, neuron_type_to_str
@@ -842,3 +843,7 @@ class PGCSEWResNet34(PGCSEWResNet):
             spike_compressor=spike_compressor,
             **kwargs
         )
+
+
+def ResNet34(**kwargs):
+    return torchvision.models.resnet34()

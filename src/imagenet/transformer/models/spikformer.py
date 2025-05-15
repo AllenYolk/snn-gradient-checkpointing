@@ -3,6 +3,7 @@ import sys
 sys.path.append("./src")
 
 import torch.nn as nn
+import torchvision
 from spikingjelly.activation_based import layer
 
 from modules.blocks import get_block, neuron_type_to_str
@@ -817,3 +818,15 @@ class PGCSpikformer(nn.Module):
         x = self.forward_features(x)
         x = self.head(x.mean(0))
         return x  # [B, num_classes]
+
+
+def VIT(**kwargs):
+    return torchvision.models.vision_transformer.VisionTransformer(
+        image_size=224,
+        patch_size=16,
+        num_layers=8,
+        num_heads=8,
+        hidden_dim=512,
+        mlp_dim=512 * 4,
+        num_classes=1000
+    )
