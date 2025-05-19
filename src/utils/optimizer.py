@@ -137,10 +137,15 @@ class Lomo(Optimizer):
         else:
             return hook_no_clip
 
-    def step(self):
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
         # The last parameter is not ready when calling the hook function.
         # Manually call the update function!
         self.grad_func(0)
         # The update of all parameters is done.
         # Set _found_inf_or_nan to False.
         self._found_inf_or_nan = False
+        return loss

@@ -1,0 +1,22 @@
+trainer:
+  max_epochs: 300
+  precision: 32
+
+model:
+  num_classes: 10
+  network: SequentialCIFARNet
+  neuron_type: HandWrittenLIF
+  spike_compressor: NullSpikeCompressor
+  decay_lambda: 0.5
+  channels: 128
+  learning_rate: 0.1
+  momentum: 0.9
+  lomo: False
+
+
+data:
+  data_dir: /export/home/data_allenyolk/CIFAR-10
+  batch_size: 128
+  num_workers: 4
+
+

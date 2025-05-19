@@ -131,6 +131,7 @@ class FGCSequentialCIFARNet(nn.Module):
         self.decode = nn.Linear(channels * 8 // 4, num_classes)
 
     def forward(self, x: torch.Tensor):
+        x = x.permute(3, 0, 1, 2)
         # x.shape = [T, N, Cin, L]
         y = self.conv(x)
         y = self.fc(y)
@@ -139,7 +140,6 @@ class FGCSequentialCIFARNet(nn.Module):
         return y
 
 
-# TODO: what about PSN and Sliding PSN?
 class PGCSequentialCIFARNet(nn.Module):
 
     def __init__(
@@ -298,6 +298,7 @@ class PGCSequentialCIFARNet(nn.Module):
         functional.set_step_mode(self, "m")
 
     def forward(self, x: torch.Tensor):
+        x = x.permute(3, 0, 1, 2)
         # x.shape = [T, N, Cin, L]
         y = self.conv(x)
         y = self.fc(y)
@@ -356,6 +357,7 @@ class SequentialCIFARNet(nn.Module):
         functional.set_step_mode(self, "m")
 
     def forward(self, x: torch.Tensor):
+        x = x.permute(3, 0, 1, 2)
         # x.shape = [T, N, Cin, L]
         y = self.conv(x)
         y = y.flatten(start_dim=-2)  # [T, N, C*L]

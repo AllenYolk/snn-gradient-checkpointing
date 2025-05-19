@@ -6,8 +6,6 @@ from tqdm import tqdm
 sys.path.append("./src")
 
 import torch
-import torch.utils.data as data
-from torch.utils.data.dataloader import default_collate
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
@@ -16,81 +14,11 @@ if npu_available:
 else:
     print("NPU is not available.")
 
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from torchvision.transforms.functional import InterpolationMode
-
 from utils import set_seed, ModelNameGenerator
 from utils import count_learnable_parameters
 from utils import LayerWiseFPCUDATimeProfiler
-from augmentation import SequentialCIFARClassificationPresetTrain
-from augmentation import CIFAR100_MEAN, CIFAR100_STD
-from augmentation import CIFAR10_MEAN, CIFAR10_STD
-from utils.transforms import RandomMixup, RandomCutmix
 import models as models
-
-
-def prepare_dataloaders(args):
-    mixup_transforms = []
-    mixup_transforms.append(RandomMixup(args.num_classes, p=1.0, alpha=0.2))
-    mixup_transforms.append(RandomCutmix(args.num_classes, p=1.0, alpha=1.))
-    mixupcutmix = transforms.RandomChoice(mixup_transforms)
-    collate_fn = lambda batch: mixupcutmix(*default_collate(batch))
-
-    if args.num_classes == 10:
-        ds_class = datasets.CIFAR10
-        mu = CIFAR10_MEAN
-        sigma = CIFAR10_STD
-    else:
-        ds_class = datasets.CIFAR100
-        mu = CIFAR100_MEAN
-        sigma = CIFAR100_STD
-
-    transform_train = SequentialCIFARClassificationPresetTrain(
-        mean=mu,
-        std=sigma,
-        interpolation=InterpolationMode('bilinear'),
-        auto_augment_policy='ta_wide',
-        random_erase_prob=0.1
-    )
-
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mu, sigma),
-    ])
-
-    train_set = ds_class(
-        root=args.data_dir,
-        train=True,
-        download=True,
-        transform=transform_train
-    )
-    test_set = ds_class(
-        root=args.data_dir,
-        train=False,
-        download=True,
-        transform=transform_test
-    )
-
-    train_data_loader = data.DataLoader(
-        dataset=train_set,
-        batch_size=args.batch_size,
-        collate_fn=collate_fn,
-        shuffle=True,
-        drop_last=True,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-    test_data_loader = data.DataLoader(
-        dataset=test_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-
-    return train_data_loader, test_data_loader
+from data_module import SCIFARDataModule
 
 
 def parse_args():
@@ -138,7 +66,11 @@ def main():
         log_path.mkdir(parents=True)
     log_path = log_path / (run_name+".time-prof.txt")
 
-    _, val_data_loader = prepare_dataloaders(args)
+    data_module = SCIFARDataModule(
+        args.data_dir, args.num_classes, args.batch_size, args.num_workers
+    )
+    data_module.setup(stage="fit")
+    val_data_loader = data_module.val_dataloader()
 
     net = getattr(models, args.network)(
         channels=args.channels,

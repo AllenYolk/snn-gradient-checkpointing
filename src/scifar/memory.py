@@ -7,8 +7,6 @@ sys.path.append("./src")
 
 import torch
 import torch.nn.functional as F
-import torch.utils.data as data
-from torch.utils.data.dataloader import default_collate
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
@@ -17,83 +15,14 @@ if npu_available:
 else:
     print("NPU is not available.")
 
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from torchvision.transforms.functional import InterpolationMode
 from spikingjelly.activation_based import functional
 
 from utils import set_seed, AverageMeter, ModelNameGenerator
 from utils import accuracy, CategoryMemoryProfiler, count_learnable_parameters
 from utils import LayerWiseMemoryProfiler, MemoryProfilerList, Lomo
-from augmentation import SequentialCIFARClassificationPresetTrain
-from augmentation import CIFAR100_MEAN, CIFAR100_STD
-from augmentation import CIFAR10_MEAN, CIFAR10_STD
-from utils.transforms import RandomMixup, RandomCutmix
 from modules import get_autocast_context, GradScaler
 import models as models
-
-
-def prepare_dataloaders(args):
-    mixup_transforms = []
-    mixup_transforms.append(RandomMixup(args.num_classes, p=1.0, alpha=0.2))
-    mixup_transforms.append(RandomCutmix(args.num_classes, p=1.0, alpha=1.))
-    mixupcutmix = transforms.RandomChoice(mixup_transforms)
-    collate_fn = lambda batch: mixupcutmix(*default_collate(batch))
-
-    if args.num_classes == 10:
-        ds_class = datasets.CIFAR10
-        mu = CIFAR10_MEAN
-        sigma = CIFAR10_STD
-    else:
-        ds_class = datasets.CIFAR100
-        mu = CIFAR100_MEAN
-        sigma = CIFAR100_STD
-
-    transform_train = SequentialCIFARClassificationPresetTrain(
-        mean=mu,
-        std=sigma,
-        interpolation=InterpolationMode('bilinear'),
-        auto_augment_policy='ta_wide',
-        random_erase_prob=0.1
-    )
-
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mu, sigma),
-    ])
-
-    train_set = ds_class(
-        root=args.data_dir,
-        train=True,
-        download=True,
-        transform=transform_train
-    )
-    test_set = ds_class(
-        root=args.data_dir,
-        train=False,
-        download=True,
-        transform=transform_test
-    )
-
-    train_data_loader = data.DataLoader(
-        dataset=train_set,
-        batch_size=args.batch_size,
-        collate_fn=collate_fn,
-        shuffle=True,
-        drop_last=True,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-    test_data_loader = data.DataLoader(
-        dataset=test_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-
-    return train_data_loader, test_data_loader
+from data_module import SCIFARDataModule
 
 
 def prepare_optimizers_and_schedulers(args, net, scaler):
@@ -177,7 +106,6 @@ def train_step(
     ) as pbar:
         for i, (img, label) in enumerate(pbar):
             img, label = img.float().to(device), label.to(device)
-            img = img.permute(3, 0, 1, 2)  # [W, N, C, H]; W acts as T
 
             with get_autocast_context(use_amp):
                 y = net(img)
@@ -228,7 +156,6 @@ def val_step(net, test_data_loader, device):
     with torch.no_grad():
         for img, label in test_data_loader:
             img, label = img.float().to(device), label.to(device)
-            img = img.permute(3, 0, 1, 2)  # [W, N, C, H]; W acts as T
 
             y = net(img)
             batch_loss = F.cross_entropy(y, label)
@@ -261,7 +188,12 @@ def main():
     mem_data_path = log_path / (run_name+".prof.pt")
     log_path = log_path / (run_name+".prof.txt")
 
-    train_data_loader, val_data_loader = prepare_dataloaders(args)
+    data_module = SCIFARDataModule(
+        args.data_dir, args.num_classes, args.batch_size, args.num_workers
+    )
+    data_module.setup(stage="fit")
+    train_data_loader = data_module.train_dataloader()
+    val_data_loader = data_module.val_dataloader()
 
     net = getattr(models, args.network)(
         channels=args.channels,
