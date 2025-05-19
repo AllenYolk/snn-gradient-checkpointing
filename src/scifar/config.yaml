@@ -1,6 +1,10 @@
+seed_everything: 2024
+
 trainer:
   max_epochs: 300
   precision: 32
+  num_sanity_val_steps: 0
+  default_root_dir: ./
 
 model:
   num_classes: 10
@@ -18,5 +22,4 @@ data:
   data_dir: /export/home/data_allenyolk/CIFAR-10
   batch_size: 128
   num_workers: 4
-
-
+  num_classes: 10
