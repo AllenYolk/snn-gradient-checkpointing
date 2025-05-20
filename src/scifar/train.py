@@ -96,7 +96,8 @@ def main():
         BatchDurationCallback(avg_per_epoch=False),
         PeakMemoryTillNowCallback()
     ]
-    print(cli.model)
+    if cli.trainer.is_global_zero:
+        print(cli.model)
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 

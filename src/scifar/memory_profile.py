@@ -90,7 +90,8 @@ def main():
             "enable_progress_bar": False
         }
     )
-    print(cli.model)
+    if cli.trainer.is_global_zero:
+        print(cli.model)
 
     args = cli.config.model
     run_name = (
