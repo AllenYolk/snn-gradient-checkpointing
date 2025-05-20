@@ -67,8 +67,8 @@ class ClassificationLightningModule(LightningModule):
         if self.global_rank == 0:
             print(
                 f"Epoch {self.current_epoch}/{self.trainer.max_epochs}: "
-                f"train_loss={train_loss:.3f}, "
-                f"train_acc={train_acc*100:.3f}%"
+                f"train_loss={train_loss:.2f}, "
+                f"train_acc={train_acc*100:.2f}%"
             )
 
     def validation_step(self, batch, batch_idx):
@@ -92,5 +92,5 @@ class ClassificationLightningModule(LightningModule):
         if self.global_rank == 0:
             print(
                 f"Epoch {self.current_epoch}/{self.trainer.max_epochs}: "
-                f"val_loss={val_loss:.3f}, val_acc={val_acc*100:.3f}%"
+                f"val_loss={val_loss:.2f}, val_acc={val_acc*100:.2f}%"
             )

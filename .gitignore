@@ -152,3 +152,4 @@ spikformer*/
 QKFormer*/
 pytorch_lightning_minimal_template*/
 lightning_logs/
+profile_logs/

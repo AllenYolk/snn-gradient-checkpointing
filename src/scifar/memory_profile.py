@@ -12,13 +12,15 @@ else:
     print("NPU is not available.")
 
 from lightning.pytorch.cli import LightningCLI
-from lightning.pytorch import callbacks
 
 from utils import Lomo
 import models as models
 from modules import ClassificationLightningModule
 from modules.lightning_callbacks import *
+from utils.profiler import *
 from data_module import SCIFARDataModule
+
+PROFILE_LOG_DIR = "./profile_logs"
 
 
 class SCIFARLightningModule(ClassificationLightningModule):
@@ -47,6 +49,15 @@ class SCIFARLightningModule(ClassificationLightningModule):
             lomo=lomo
         )
 
+        optimizer = torch.optim.SGD(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            momentum=self.hparams.momentum,
+        )
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
+        self.profiled_optimizer = optimizer
+
     def configure_network(self):
         return getattr(models, self.hparams.network)(
             channels=self.hparams.channels,
@@ -62,42 +73,52 @@ class SCIFARLightningModule(ClassificationLightningModule):
         return torch.nn.CrossEntropyLoss()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            momentum=self.hparams.momentum,
-        )
-        if self.hparams.lomo:
-            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
-
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.trainer.max_epochs
+            self.profiled_optimizer, T_max=self.trainer.max_epochs
         )
 
-        return ([optimizer], [lr_scheduler])
+        return ([self.profiled_optimizer], [lr_scheduler])
 
 
 def main():
-    cli = LightningCLI(SCIFARLightningModule, SCIFARDataModule, run=False)
-    cli.trainer.callbacks += [
-        callbacks.ModelSummary(max_depth=-1),
-        callbacks.ModelCheckpoint(
-            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
-            save_top_k=1,
-            monitor="val_acc",
-            mode="max"
-        ),
-        callbacks.ModelCheckpoint(
-            filename="lastest-{epoch}",
-            save_top_k=1,
-            monitor="epoch",
-            mode="max"
-        ),
-        BatchDurationCallback(avg_per_epoch=False),
-        PeakMemoryTillNowCallback()
-    ]
+    cli = LightningCLI(
+        SCIFARLightningModule,
+        SCIFARDataModule,
+        run=False,
+        trainer_defaults={
+            "max_steps": 5,
+            "enable_progress_bar": False
+        }
+    )
     print(cli.model)
+
+    args = cli.config.model
+    run_name = (
+        f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
+        f"lomo{args.lomo}_amp{cli.trainer.precision}"
+    )
+    log_path = Path(PROFILE_LOG_DIR) / f"SCIFAR{cli.config.data.num_classes}"
+    if not log_path.exists():
+        log_path.mkdir(parents=True)
+    mem_data_path = log_path / (run_name+".prof.pt")
+    profile_log_path = log_path / (run_name+".prof.txt")
+
+    net = cli.model.net
+    optimizer = cli.model.profiled_optimizer
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename=profile_log_path),
+        LayerWiseMemoryProfiler(
+            (net.conv, net.fc, net.decode),
+            search_mode=("direct_children", "self", "self"),
+            model_names=("conv", "fc", "decode"),
+            instances=(torch.nn.Module,),
+            filename=profile_log_path,
+        ),
+    )
+
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
+    profiler.profile(sort_by="backward_peak_memory")
+    profiler.save_data((None, mem_data_path))
 
 
 if __name__ == '__main__':
