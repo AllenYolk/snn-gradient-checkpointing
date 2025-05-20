@@ -12,10 +12,12 @@ else:
     print("NPU is not available.")
 
 from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch import callbacks
 
 from utils import Lomo
 import models as models
 from modules import ClassificationLightningModule
+from modules.lightning_callbacks import *
 from data_module import SCIFARDataModule
 
 
@@ -77,6 +79,23 @@ class SCIFARLightningModule(ClassificationLightningModule):
 
 def main():
     cli = LightningCLI(SCIFARLightningModule, SCIFARDataModule, run=False)
+    cli.trainer.callbacks += [
+        callbacks.ModelSummary(max_depth=-1),
+        callbacks.ModelCheckpoint(
+            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
+            save_top_k=1,
+            monitor="val_acc",
+            mode="max"
+        ),
+        callbacks.ModelCheckpoint(
+            filename="lastest-{epoch}",
+            save_top_k=1,
+            monitor="epoch",
+            mode="max"
+        ),
+        BatchDurationCallback(),
+        PeakMemoryTillNowCallback()
+    ]
     print(cli.model)
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 

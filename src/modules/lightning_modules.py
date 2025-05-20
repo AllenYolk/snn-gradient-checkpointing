@@ -1,5 +1,3 @@
-import time
-
 from lightning import LightningModule
 from torchmetrics import MeanMetric
 from torchmetrics.classification import Accuracy
@@ -46,9 +44,6 @@ class ClassificationLightningModule(LightningModule):
     def forward(self, x):
         return self.net(x)
 
-    def on_train_epoch_start(self):
-        self.train_start_time = time.time()
-
     def training_step(self, batch, batch_idx):
         x, label = batch[0].float(), batch[1]
         y = self(x)
@@ -69,18 +64,12 @@ class ClassificationLightningModule(LightningModule):
         self.train_acc.reset()
         self.train_loss.reset()
 
-        self.train_end_time = time.time()
-        self.train_duration = self.train_end_time - self.train_start_time
         if self.global_rank == 0:
             print(
                 f"Epoch {self.current_epoch}/{self.trainer.max_epochs}: "
                 f"train_loss={train_loss:.3f}, "
-                f"train_acc={train_acc*100:.3f}%, "
-                f"train_duration={self.train_duration:.3f}s"
+                f"train_acc={train_acc*100:.3f}%"
             )
-
-    def on_validation_epoch_start(self):
-        self.val_start_time = time.time()
 
     def validation_step(self, batch, batch_idx):
         x, label = batch
@@ -100,11 +89,8 @@ class ClassificationLightningModule(LightningModule):
         self.val_acc.reset()
         self.val_loss.reset()
 
-        self.val_end_time = time.time()
-        self.val_duration = self.val_end_time - self.val_start_time
         if self.global_rank == 0:
             print(
-                f"val_loss={val_loss:.3f}, "
-                f"val_acc={val_acc*100:.3f}%, "
-                f"val_duration={self.val_duration:.3f}s"
+                f"Epoch {self.current_epoch}/{self.trainer.max_epochs}: "
+                f"val_loss={val_loss:.3f}, val_acc={val_acc*100:.3f}%"
             )
