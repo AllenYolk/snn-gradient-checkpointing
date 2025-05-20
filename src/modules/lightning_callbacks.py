@@ -33,7 +33,7 @@ class BatchDurationCallback(callbacks.Callback):
             total_duration_tensor = torch.tensor(
                 [self.total_train_batch_duration, self.n_train_batch],
                 dtype=torch.float,
-                device=trainer.device,
+                device=pl_module.device,
             )
             dist.all_reduce(total_duration_tensor, op=dist.ReduceOp.SUM)
             total_duration, n_batch = total_duration_tensor.tolist()
@@ -69,7 +69,7 @@ class BatchDurationCallback(callbacks.Callback):
             total_duration_tensor = torch.tensor(
                 [self.total_val_batch_duration, self.n_val_batch],
                 dtype=torch.float32,
-                device=trainer.device,
+                device=pl_module.device,
             )
             dist.all_reduce(total_duration_tensor, op=dist.ReduceOp.SUM)
             total_duration, n_batch = total_duration_tensor.tolist()
@@ -132,7 +132,7 @@ class PeakMemoryTillNowCallback(callbacks.Callback):
                 peak_tensor = torch.tensor(
                     [peak_allocated, peak_reserved],
                     dtype=torch.float32,
-                    device=trainer.device,
+                    device=pl_module.device,
                 )
                 dist.all_reduce(peak_tensor, op=dist.ReduceOp.MAX)
                 peak_allocated, peak_reserved = peak_tensor.tolist()
