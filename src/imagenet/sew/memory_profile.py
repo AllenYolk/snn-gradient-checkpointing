@@ -1,7 +1,10 @@
+"""Modified from SEW ResNet source code.
+"""
+from pathlib import Path
 import sys
 
 sys.path.append("./src")
-sys.path.append("./src/scifar")
+sys.path.append("./src/imagenet")
 
 import torch
 from utils import use_torch_npu
@@ -14,40 +17,41 @@ else:
 
 from lightning.pytorch.cli import LightningCLI
 
-from utils import Lomo
-import models as models
+import models
+from data_module import ImageNetDataModule
 from modules import ClassificationLightningModule
 from modules.lightning_callbacks import *
+from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
 from utils.profiler import *
-from data_module import SCIFARDataModule
 
 PROFILE_LOG_DIR = "./profile_logs"
 
 
-class SCIFARLightningModule(ClassificationLightningModule):
+class SEWImageNetLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
         num_classes: int,
         network: str,
-        channels: int,
         neuron_type: str,
+        T: int,
         spike_compressor: str,
-        decay_lambda: float,
         learning_rate: float,
         momentum: float,
+        loss: str,
         lomo: bool = False,
     ):
         super().__init__(
             num_classes=num_classes,
             network=network,
-            channels=channels,
             neuron_type=neuron_type,
+            T=T,
             spike_compressor=spike_compressor,
-            decay_lambda=decay_lambda,
             learning_rate=learning_rate,
             momentum=momentum,
-            lomo=lomo
+            loss=loss,
+            lomo=lomo,
+            y_with_T=True,
         )
 
         optimizer = torch.optim.SGD(
@@ -61,17 +65,23 @@ class SCIFARLightningModule(ClassificationLightningModule):
 
     def configure_network(self):
         return getattr(models, self.hparams.network)(
-            channels=self.hparams.channels,
             neuron_type=self.hparams.neuron_type,
+            T=self.hparams.T,
             spike_compressor=self.hparams.spike_compressor,
-            num_classes=self.hparams.num_classes,
-            decay_lambda=self.hparams.decay_lambda,
-            T=32,  # for PSN
-            k=8,  # for SlidingPSN
+            decay_lambda=0.5,
+            detach_reset=True,
+            k=4,  # for SlidingPSN
         )
 
     def configure_criterion(self):
-        return torch.nn.CrossEntropyLoss()
+        if self.hparams.loss == "ce":
+            return TMeanCrossEntropyLoss()
+        elif self.hparams.loss == "tet":
+            return TETLoss(
+                base_criterion=torch.nn.CrossEntropyLoss(), tet_lambda=0.
+            )
+        else:
+            raise ValueError(f"`loss` should be either 'ce' or 'tet'")
 
     def configure_optimizers(self):
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -83,8 +93,8 @@ class SCIFARLightningModule(ClassificationLightningModule):
 
 def main():
     cli = LightningCLI(
-        SCIFARLightningModule,
-        SCIFARDataModule,
+        SEWImageNetLightningModule,
+        ImageNetDataModule,
         run=False,
         trainer_defaults={
             "max_steps": 5,
@@ -97,9 +107,9 @@ def main():
     args = cli.config.model
     run_name = (
         f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
-        f"lomo{args.lomo}_amp{cli.trainer.precision}"
+        f"lomo{args.lomo}_amp{cli.trainer.precision}_loss{args.loss}"
     )
-    log_path = Path(PROFILE_LOG_DIR) / f"SCIFAR{cli.config.data.num_classes}"
+    log_path = Path(PROFILE_LOG_DIR) / f"ImageNet-sew"
     if not log_path.exists():
         log_path.mkdir(parents=True)
     mem_data_path = log_path / (run_name+".prof.pt")
@@ -110,9 +120,18 @@ def main():
     profiler = MemoryProfilerList(
         CategoryMemoryProfiler(net, optimizer, filename=profile_log_path),
         LayerWiseMemoryProfiler(
-            (net.conv, net.fc, net.decode),
-            search_mode=("direct_children", "self", "self"),
-            model_names=("conv", "fc", "decode"),
+            (
+                net.pre_conv, net.layer1, net.layer2, net.layer3, net.layer4,
+                net.avgpool, net.fc
+            ),
+            search_mode=(
+                "self", "direct_children", "direct_children", "direct_children",
+                "direct_children", "self", "self"
+            ),
+            model_names=(
+                "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool",
+                "fc"
+            ),
             instances=(torch.nn.Module,),
             filename=profile_log_path,
         ),

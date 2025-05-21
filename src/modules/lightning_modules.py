@@ -6,12 +6,20 @@ import torch.nn as nn
 
 class ClassificationLightningModule(LightningModule):
 
-    def __init__(self, num_classes: int, **kwargs):
+    def __init__(
+        self,
+        num_classes: int,
+        y_with_T: bool = False,
+        label_as_prob: bool = False,
+        **kwargs
+    ):
         super().__init__()
         kwargs.update({
             "num_classes": num_classes,
         })
         self.save_hyperparameters(kwargs)
+        self.y_with_T = y_with_T
+        self.label_as_prob = label_as_prob
 
         self.train_acc = Accuracy(
             task="multiclass", num_classes=self.hparams.num_classes
@@ -48,7 +56,9 @@ class ClassificationLightningModule(LightningModule):
         x, label = batch[0].float(), batch[1]
         y = self(x)
         batch_loss = self.criterion(y, label)
-        if y.numel() == label.numel():  # mixup!
+        if self.y_with_T:
+            y = y.mean(dim=0)
+        if self.label_as_prob:
             label = label.argmax(dim=1)
         self.train_acc.update(y, label)
         self.train_loss.update(batch_loss.data)
@@ -75,7 +85,9 @@ class ClassificationLightningModule(LightningModule):
         x, label = batch
         y = self(x)
         batch_loss = self.criterion(y, label)
-        if y.numel() == label.numel():  # mixup!
+        if self.y_with_T:
+            y = y.mean(dim=0)
+        if self.label_as_prob:
             label = label.argmax(dim=1)
         self.val_acc.update(y, label)
         self.val_loss.update(batch_loss.data)

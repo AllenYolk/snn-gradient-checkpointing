@@ -1,6 +1,7 @@
 import sys
 
 sys.path.append("./src")
+sys.path.append("./src/scifar")
 
 import torch
 from utils import use_torch_npu

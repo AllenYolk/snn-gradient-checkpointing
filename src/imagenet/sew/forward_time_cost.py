@@ -1,12 +1,12 @@
-import argparse
-import sys
+"""Modified from SEW ResNet source code.
+"""
 from pathlib import Path
-from tqdm import tqdm
+import sys
 
 sys.path.append("./src")
+sys.path.append("./src/imagenet")
 
 import torch
-import torch.utils.data as data
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
@@ -15,167 +15,103 @@ if npu_available:
 else:
     print("NPU is not available.")
 
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from spikingjelly.activation_based import functional
+from lightning.pytorch.cli import LightningCLI
 
-from utils import set_seed, ModelNameGenerator
-from utils import save_on_master, mkdir, count_learnable_parameters
-from utils.profiler import *
 import models
+from data_module import ImageNetDataModule
+from modules import ClassificationLightningModule
+from modules.lightning_callbacks import *
+from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
+from utils.profiler import *
+
+PROFILE_LOG_DIR = "./profile_logs"
+WARMUP_ITERATIONS = 10
 
 
-def prepare_dataloaders(args):
+class SEWImageNetLightningModule(ClassificationLightningModule):
 
-    def _get_cache_path(filepath):
-        import hashlib
-        h = hashlib.sha1(str(filepath).encode()).hexdigest()
-        cache_path = Path("~/.torch/vision/datasets/imagefolder")
-        cache_path = cache_path / (h[:10] + ".pt")
-        cache_path = cache_path.expanduser()
-        return cache_path
-
-    data_dir = Path(args.data_dir)
-    train_dir = data_dir / "train"
-    val_dir = data_dir / "val"
-
-    print("Loading data")
-    normalize = transforms.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-    )
-
-    print("Loading training data")
-    st = time.time()
-    cache_path = _get_cache_path(train_dir)
-    if args.cache_dataset and cache_path.exists():
-        # Attention, as the transforms are also cached!
-        print(f"Loading dataset_train from {cache_path}")
-        dataset_train, _ = torch.load(cache_path)
-    else:
-        dataset_train = datasets.ImageFolder(
-            train_dir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ])
+    def __init__(
+        self,
+        num_classes: int,
+        network: str,
+        neuron_type: str,
+        T: int,
+        spike_compressor: str,
+        learning_rate: float,
+        momentum: float,
+        loss: str,
+        lomo: bool = False,
+    ):
+        super().__init__(
+            num_classes=num_classes,
+            network=network,
+            neuron_type=neuron_type,
+            T=T,
+            spike_compressor=spike_compressor,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            loss=loss,
+            lomo=lomo,
+            y_with_T=True,
         )
-        if args.cache_dataset:
-            print(f"Saving dataset_train to {cache_path}")
-            mkdir(cache_path.parent)
-            save_on_master((dataset_train, train_dir), cache_path)
-    print("Took", time.time() - st)
 
-    print("Loading validation data")
-    cache_path = _get_cache_path(val_dir)
-    if args.cache_dataset and cache_path.exists():
-        # Attention, as the transforms are also cached!
-        print("Loading dataset_test from {}".format(cache_path))
-        dataset_test, _ = torch.load(cache_path)
-    else:
-        dataset_test = datasets.ImageFolder(
-            val_dir,
-            transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ])
+    def configure_network(self):
+        return getattr(models, self.hparams.network)(
+            neuron_type=self.hparams.neuron_type,
+            T=self.hparams.T,
+            spike_compressor=self.hparams.spike_compressor,
+            decay_lambda=0.5,
+            detach_reset=True,
+            k=4,  # for SlidingPSN
         )
-        if args.cache_dataset:
-            print("Saving dataset_test to {}".format(cache_path))
-            mkdir(cache_path.parent)
-            save_on_master((dataset_test, val_dir), cache_path)
 
-    print("Creating data loaders")
-    train_sampler = torch.utils.data.RandomSampler(dataset_train)
-    test_sampler = torch.utils.data.SequentialSampler(dataset_test)
+    def configure_criterion(self):
+        if self.hparams.loss == "ce":
+            return TMeanCrossEntropyLoss()
+        elif self.hparams.loss == "tet":
+            return TETLoss(
+                base_criterion=torch.nn.CrossEntropyLoss(), tet_lambda=0.
+            )
+        else:
+            raise ValueError(f"`loss` should be either 'ce' or 'tet'")
 
-    print(
-        f'dataset_train:{len(dataset_train)}, dataset_test:{len(dataset_test)}'
-    )
-    train_loader = data.DataLoader(
-        dataset_train,
-        batch_size=args.batch_size,
-        sampler=train_sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            momentum=self.hparams.momentum,
+        )
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
 
-    test_loader = data.DataLoader(
-        dataset_test,
-        batch_size=args.batch_size,
-        sampler=test_sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs
+        )
 
-    return train_loader, test_loader
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Classify ImageNet (or its subset)'
-    )
-    parser.add_argument(
-        '--data_dir',
-        type=str,
-        default="/export/home/data_allenyolk/ImageNet0_03125"
-    )
-    parser.add_argument("--log_dir", type=str, default="./logs")
-    parser.add_argument('-net', "--network", default="FGCSEWResNet34", type=str)
-    parser.add_argument('-neuron', "--neuron_type", default='SJLIF', type=str)
-    parser.add_argument(
-        "-sc",
-        "--spike_compressor",
-        default="IdentitySpikeCompressor",
-        type=str
-    )
-    parser.add_argument('-d', '--device', default='cuda:0', type=str)
-    parser.add_argument("-ss", "--set_seed", type=int, default=2024)
-
-    args = parser.parse_args()
-    args.T = 4
-    args.amp = False
-    args.loss = "tet"
-    args.lomo = False
-    args.batch_size = 32
-    args.epochs = 320
-    args.num_workers = 4
-    args.learning_rate = 0.1
-    args.momentum = 0.9
-    args.cache_dataset = True
-    return args
+        return ([optimizer], [lr_scheduler])
 
 
 def main():
-    args = parse_args()
-    print(args)
+    cli = LightningCLI(
+        SEWImageNetLightningModule,
+        ImageNetDataModule,
+        run=False,
+        trainer_defaults={"enable_progress_bar": False}
+    )
+    if cli.trainer.is_global_zero:
+        print(cli.model)
 
-    set_seed(args.set_seed)
-
-    run_name_generator = ModelNameGenerator(proj=f"imagenet-sew-me")
-    run_name = run_name_generator.generate(args)
-    log_path = Path(args.log_dir) / "ImageNet-sew"
+    args = cli.config.model
+    run_name = (
+        f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
+        f"lomo{args.lomo}_amp{cli.trainer.precision}_loss{args.loss}"
+    )
+    log_path = Path(PROFILE_LOG_DIR) / f"ImageNet-sew"
     if not log_path.exists():
         log_path.mkdir(parents=True)
-    log_path = log_path / (run_name+".time-prof.txt")
+    profile_log_path = log_path / (run_name+".time-prof.txt")
 
-    train_data_loader, val_data_loader = prepare_dataloaders(args)
-
-    net = getattr(models, args.network)(
-        neuron_type=args.neuron_type,
-        T=args.T,
-        spike_compressor=args.spike_compressor,
-        decay_lambda=0.5,
-        detach_reset=True,
-        k=4,  # for SlidingPSN
-    )
-    print(net)
-    print("Number of learnable parameters: ", count_learnable_parameters(net))
-    net = net.to(args.device)
-
+    net = cli.model.net
     profiler = LayerWiseFPCUDATimeProfiler(
         (
             net.pre_conv, net.layer1, net.layer2, net.layer3, net.layer4,
@@ -189,26 +125,11 @@ def main():
             "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool", "fc"
         ),
         instances=(torch.nn.Module,),
-        filename=log_path,
+        filename=profile_log_path,
+        warmup=WARMUP_ITERATIONS,
     )
 
-    torch.cuda.reset_peak_memory_stats(args.device)
-    mem_stats = torch.cuda.memory_stats(args.device)
-    peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
-    peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)
-    print(
-        "Before training: "
-        f"peak_allocated={peak_allocated:.2f} MB, "
-        f"peak_reserved={peak_reserved:.2f} MB"
-    )
-
-    with torch.no_grad():
-        for img, label in tqdm(val_data_loader):
-            img = img.float().to(args.device, non_blocking=True)
-            label = label.to(args.device, non_blocking=True)
-            y = net(img)
-            functional.reset_net(net)
-
+    cli.trainer.validate(cli.model, datamodule=cli.datamodule)
     profiler.clear_hooks()
     profiler.profile()
 
