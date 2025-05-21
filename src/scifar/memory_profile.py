@@ -56,7 +56,7 @@ class SCIFARLightningModule(ClassificationLightningModule):
         )
         if self.hparams.lomo:
             optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
-        self.profiled_optimizer = optimizer
+        self.profiled_optimizer = optimizer  # to access optimizer for profiling easily
 
     def configure_network(self):
         return getattr(models, self.hparams.network)(

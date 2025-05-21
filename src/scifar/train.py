@@ -1,6 +1,7 @@
 import sys
 
 sys.path.append("./src")
+sys.path.append("./src/scifar")
 
 import torch
 from utils import use_torch_npu
@@ -15,7 +16,7 @@ from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch import callbacks
 
 from utils import Lomo
-import models as models
+import models
 from modules import ClassificationLightningModule
 from modules.lightning_callbacks import *
 from data_module import SCIFARDataModule
@@ -93,8 +94,9 @@ def main():
             monitor="epoch",
             mode="max"
         ),
-        BatchDurationCallback(avg_per_epoch=False),
-        PeakMemoryTillNowCallback()
+        GlobalMeanBatchTimeCallback(reset_per_epoch=True),
+        SamplePerSecondCallback(),
+        PeakMemoryTillNowCallback(),
     ]
     if cli.trainer.is_global_zero:
         print(cli.model)

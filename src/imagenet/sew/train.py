@@ -3,14 +3,12 @@
 import argparse
 import time
 import sys
-from pathlib import Path
 from tqdm import tqdm
 
 sys.path.append("./src")
+sys.path.append("./src/imagenet")
 
-import wandb
 import torch
-import torch.utils.data as data
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
@@ -19,104 +17,72 @@ if npu_available:
 else:
     print("NPU is not available.")
 
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 from spikingjelly.activation_based import functional
+from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch import callbacks
 
-from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy, save_on_master, mkdir
-from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
-from modules import get_autocast_context, GradScaler
 import models
+from data_module import ImageNetDataModule
+from modules import ClassificationLightningModule
+from modules.lightning_callbacks import *
+from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
 
 
-def prepare_dataloaders(args):
+# TODO:
+class SEWImageNetLightningModule(ClassificationLightningModule):
 
-    def _get_cache_path(filepath):
-        import hashlib
-        h = hashlib.sha1(str(filepath).encode()).hexdigest()
-        cache_path = Path("~/.torch/vision/datasets/imagefolder")
-        cache_path = cache_path / (h[:10] + ".pt")
-        cache_path = cache_path.expanduser()
-        return cache_path
-
-    data_dir = Path(args.data_dir)
-    train_dir = data_dir / "train"
-    val_dir = data_dir / "val"
-
-    print("Loading data")
-    normalize = transforms.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-    )
-
-    print("Loading training data")
-    st = time.time()
-    cache_path = _get_cache_path(train_dir)
-    if args.cache_dataset and cache_path.exists():
-        # Attention, as the transforms are also cached!
-        print(f"Loading dataset_train from {cache_path}")
-        dataset_train, _ = torch.load(cache_path)
-    else:
-        dataset_train = datasets.ImageFolder(
-            train_dir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ])
+    def __init__(
+        self,
+        num_classes: int,
+        network: str,
+        channels: int,
+        neuron_type: str,
+        spike_compressor: str,
+        decay_lambda: float,
+        learning_rate: float,
+        momentum: float,
+        lomo: bool = False,
+    ):
+        super().__init__(
+            num_classes=num_classes,
+            network=network,
+            channels=channels,
+            neuron_type=neuron_type,
+            spike_compressor=spike_compressor,
+            decay_lambda=decay_lambda,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            lomo=lomo
         )
-        if args.cache_dataset:
-            print(f"Saving dataset_train to {cache_path}")
-            mkdir(cache_path.parent)
-            save_on_master((dataset_train, train_dir), cache_path)
-    print("Took", time.time() - st)
 
-    print("Loading validation data")
-    cache_path = _get_cache_path(val_dir)
-    if args.cache_dataset and cache_path.exists():
-        # Attention, as the transforms are also cached!
-        print("Loading dataset_test from {}".format(cache_path))
-        dataset_test, _ = torch.load(cache_path)
-    else:
-        dataset_test = datasets.ImageFolder(
-            val_dir,
-            transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ])
+    def configure_network(self):
+        return getattr(models, self.hparams.network)(
+            channels=self.hparams.channels,
+            neuron_type=self.hparams.neuron_type,
+            spike_compressor=self.hparams.spike_compressor,
+            num_classes=self.hparams.num_classes,
+            decay_lambda=self.hparams.decay_lambda,
+            T=32,  # for PSN
+            k=8,  # for SlidingPSN
         )
-        if args.cache_dataset:
-            print("Saving dataset_test to {}".format(cache_path))
-            mkdir(cache_path.parent)
-            save_on_master((dataset_test, val_dir), cache_path)
 
-    print("Creating data loaders")
-    train_sampler = torch.utils.data.RandomSampler(dataset_train)
-    test_sampler = torch.utils.data.SequentialSampler(dataset_test)
+    def configure_criterion(self):
+        return torch.nn.CrossEntropyLoss()
 
-    print(
-        f'dataset_train:{len(dataset_train)}, dataset_test:{len(dataset_test)}'
-    )
-    train_loader = data.DataLoader(
-        dataset_train,
-        batch_size=args.batch_size,
-        sampler=train_sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            momentum=self.hparams.momentum,
+        )
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
 
-    test_loader = data.DataLoader(
-        dataset_test,
-        batch_size=args.batch_size,
-        sampler=test_sampler,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs
+        )
 
-    return train_loader, test_loader
+        return ([optimizer], [lr_scheduler])
 
 
 def prepare_optimizers_and_schedulers(args, net, scaler):
@@ -269,92 +235,31 @@ def val_step(net, test_data_loader, device, criterion):
 
 
 def main():
-    args = parse_args()
-    print(args)
-
-    set_seed(args.set_seed)
-
-    run_name_generator = ModelNameGenerator(proj=f"imagenet-sew-me")
-    run_name = run_name_generator.generate(args)
-    wandb.require("core")
-    wandb.init(
-        project=f"imagenet-sew-me",
-        entity="pkuml-spiking",
-        config=args,
-        name=run_name,
+    cli = LightningCLI(
+        SEWImageNetLightningModule, ImageNetDataModule, run=False
     )
-
-    train_data_loader, val_data_loader = prepare_dataloaders(args)
-
-    net = getattr(models, args.network)(
-        neuron_type=args.neuron_type,
-        T=args.T,
-        spike_compressor=args.spike_compressor,
-        decay_lambda=0.5,
-        detach_reset=True,
-        k=4,  # for SlidingPSN
-    )
-    print(net)
-    net = net.to(args.device)
-
-    if args.loss == "ce":
-        criterion = TMeanCrossEntropyLoss()
-    else:
-        criterion = TETLoss(
-            base_criterion=torch.nn.CrossEntropyLoss(), tet_lambda=0.
-        )
-
-    scaler = None
-    if args.amp:
-        scaler = GradScaler()
-    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(
-        args, net, scaler
-    )
-
-    max_val_accuracy = 0.
-    for epoch in range(args.epochs):
-        train_results = train_step(
-            net,
-            train_data_loader,
-            criterion,
-            optimizer,
-            lr_scheduler,
-            args.device,
-            scaler,
-            epoch,
-            args.epochs,
-        )
-        val_results = val_step(
-            net,
-            val_data_loader,
-            args.device,
-            criterion,
-        )
-
-        wandb.log({
-            "loss/train_loss": train_results["loss"],
-            "acc/train_top1_acc": train_results["top1_acc"],
-            "acc/train_top5_acc": train_results["top5_acc"],
-            "time/train_epoch_time": train_results["time"],
-            "loss/val_loss": val_results["loss"],
-            "acc/val_top1_acc": val_results["top1_acc"],
-            "acc/val_top5_acc": val_results["top5_acc"],
-        })
-        print(
-            f"Epoch {epoch + 1}/{args.epochs}: "
-            f"train_loss={train_results['loss']}, "
-            f"train_top1_acc={train_results['top1_acc']}, "
-            f"train_top5_acc={train_results['top5_acc']}, "
-            f"time/train_epoch_time={train_results['time']}, "
-            f"val_loss={val_results['loss']}, "
-            f"val_top1_acc={val_results['top1_acc']}, "
-            f"val_top5_acc={val_results['top5_acc']}, "
-        )
-        if val_results["top1_acc"] > max_val_accuracy:
-            max_val_accuracy = val_results["top1_acc"]
-
-    wandb.summary["acc/max_val_top1_acc"] = max_val_accuracy
-    wandb.finish()
+    cli.trainer.callbacks
+    cli.trainer.callbacks += [
+        callbacks.ModelSummary(max_depth=-1),
+        callbacks.ModelCheckpoint(
+            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
+            save_top_k=1,
+            monitor="val_acc",
+            mode="max"
+        ),
+        callbacks.ModelCheckpoint(
+            filename="lastest-{epoch}",
+            save_top_k=1,
+            monitor="epoch",
+            mode="max"
+        ),
+        GlobalMeanBatchTimeCallback(reset_per_epoch=True),
+        SamplePerSecondCallback(),
+        PeakMemoryTillNowCallback(),
+    ]
+    if cli.trainer.is_global_zero:
+        print(cli.model)
+    cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
 if __name__ == '__main__':
