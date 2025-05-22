@@ -34,7 +34,6 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
-        num_classes: int,
         network: str,
         neuron_type: str,
         T: int,
@@ -45,7 +44,7 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
         lomo: bool = False,
     ):
         super().__init__(
-            num_classes=num_classes,
+            num_classes=1000,
             network=network,
             neuron_type=neuron_type,
             T=T,

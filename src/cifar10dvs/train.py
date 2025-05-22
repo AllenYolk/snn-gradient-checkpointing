@@ -1,16 +1,9 @@
-import time
-import argparse
-from pathlib import Path
 import sys
-from tqdm import tqdm
-import PIL
 
 sys.path.append("./src")
+sys.path.append("./src/cifar10dvs")
 
-import numpy as np
-import wandb
 import torch
-import torch.utils.data as data
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
@@ -19,334 +12,106 @@ if npu_available:
 else:
     print("NPU is not available.")
 
-import torchvision.transforms as transforms
-from spikingjelly.activation_based import functional
-from spikingjelly.datasets.cifar10_dvs import CIFAR10DVS as SJCIFAR10DVS
+from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch import callbacks
 
-from utils import set_seed, ModelNameGenerator, AverageMeter
-from utils import accuracy, TETLoss, TMeanCrossEntropyLoss
-from utils.transforms import TransformedDatasetWrapper
-from utils.optimizer import Lomo
-from augmentation import CIFAR10DVSNDA
-from cifar10dvs_dataset import CIFAR10DVS, move_data
-from modules.amp import get_autocast_context, GradScaler
+from utils import Lomo, TMeanCrossEntropyLoss, TETLoss
 import models
+from modules import ClassificationLightningModule
+from modules.lightning_callbacks import *
+from data_module import CIFAR10DVSDataModule
 
 
-def prepare_dataloaders(args):
-    """Borrowed from OSR and PSN.
-    """
-    frame_root = Path(args.data_dir) / f"frames_number_{args.T}_split_by_number"
-    if not frame_root.exists():
-        # download and integrate frames
-        ds = SJCIFAR10DVS(
-            args.data_dir,
-            data_type="frame",
-            frames_number=args.T,
-            split_by="number"
+class CIFAR10DVSLightningModule(ClassificationLightningModule):
+
+    def __init__(
+        self,
+        network: str,
+        T: int,
+        neuron_type: str,
+        spike_compressor: str,
+        decay_lambda: float,
+        learning_rate: float,
+        momentum: float,
+        l2_factor: float,
+        lomo: bool = False,
+        loss: str = "tet",
+    ):
+        super().__init__(
+            num_classes=10,
+            network=network,
+            T=T,
+            neuron_type=neuron_type,
+            spike_compressor=spike_compressor,
+            decay_lambda=decay_lambda,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            l2_factor=l2_factor,
+            lomo=lomo,
+            loss=loss,
+            y_with_T=True,
         )
-        del ds
 
-    train_set_root = frame_root / "train"
-    test_set_root = frame_root / "test"
-    if not train_set_root.exists() or not test_set_root.exists():
-        # split the dataset
-        move_data(
-            Path(args.data_dir) / f"frames_number_{args.T}_split_by_number"
+    def configure_network(self):
+        return getattr(models, self.hparams.network)(
+            T=self.hparams.T,  # for PSN and tebn
+            neuron_type=self.hparams.neuron_type,
+            spike_compressor=self.hparams.spike_compressor,
+            decay_lambda=self.hparams.decay_lambda,
+            k=4,  # for SlidingPSN
         )
 
-    train_set = CIFAR10DVS(
-        args.data_dir,
-        train=True,
-        data_type='frame',
-        frames_number=args.T,
-        split_by='number'
-    )
-    test_set = CIFAR10DVS(
-        args.data_dir,
-        train=False,
-        data_type='frame',
-        frames_number=args.T,
-        split_by='number'
-    )
+    def configure_criterion(self):
+        if self.hparams.loss == "ce":
+            return TMeanCrossEntropyLoss()
+        else:
+            return TETLoss(
+                base_criterion=torch.nn.CrossEntropyLoss(),
+                mean=1.,
+                tet_lambda=1e-3,
+            )
 
-    function_nda = CIFAR10DVSNDA(M=1, N=2)
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            momentum=self.hparams.momentum,
+            weight_decay=self.hparams.l2_factor
+        )
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
 
-    def transform_train(data):
-        data = transforms.RandomResizedCrop(
-            128, scale=(0.7, 1.0), interpolation=PIL.Image.NEAREST
-        )(data)
-        resize = transforms.Resize(size=(48, 48))  # 48 48
-        data = resize(data).float()
-        flip = np.random.random() > 0.5
-        if flip:
-            data = torch.flip(data, dims=(3,))
-        data = function_nda(data)
-        return data.float()
-
-    def transform_test(data):
-        resize = transforms.Resize(size=(48, 48))  # 48 48
-        data = resize(data).float()
-        return data.float()
-
-    train_set = TransformedDatasetWrapper(train_set, transform=transform_train)
-    test_set = TransformedDatasetWrapper(test_set, transform=transform_test)
-
-    train_data_loader = data.DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        drop_last=True,
-        pin_memory=True,
-    )
-    test_data_loader = data.DataLoader(
-        test_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        drop_last=False,
-        pin_memory=True,
-    )
-    return train_data_loader, test_data_loader
-
-
-def prepare_optimizers_and_schedulers(args, net, scaler):
-    optimizer = torch.optim.SGD(
-        net.parameters(),
-        lr=args.learning_rate,
-        momentum=args.momentum,
-        weight_decay=args.l2_factor
-    )
-
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs
-    )
-
-    if args.lomo:
-        optimizer = Lomo(optimizer, scaler=scaler)
-
-    return optimizer, lr_scheduler
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description='Classify CIFAR10DVS')
-    parser.add_argument('-T', '--T', default=10, type=int)
-    parser.add_argument("-neuron", "--neuron_type", default='LIF', type=str)
-    parser.add_argument(
-        "-sc",
-        "--spike_compressor",
-        default="IdentitySpikeCompressor",
-        type=str
-    )
-    parser.add_argument("-net", "--network", default="CIFAR10DVSVGG", type=str)
-    parser.add_argument('-dl', "--decay_lambda", default=0.25, type=float)
-    parser.add_argument('-b', "--batch_size", default=32, type=int)
-    parser.add_argument('-e', '--epochs', default=100, type=int)
-    parser.add_argument('-nw', "--num_workers", default=4, type=int)
-    parser.add_argument(
-        '--data_dir',
-        type=str,
-        default="/home/ma-user/work/datasets/CIFAR10DVS"
-    )
-    parser.add_argument(
-        '-amp',
-        "--amp",
-        action='store_true',
-        help='automatic mixed precision training'
-    )
-    parser.add_argument(
-        "-loss", "--loss", default="tet", type=str, choices=["ce", "tet"]
-    )
-    parser.add_argument('-lr', "--learning_rate", default=0.1, type=float)
-    parser.add_argument('-mom', '--momentum', default=0.9, type=float)
-    parser.add_argument('-l2', '--l2_factor', type=float, default=5e-4)
-    parser.add_argument('-d', '--device', default='cuda:0', type=str)
-    parser.add_argument("-ss", "--set_seed", type=int, default=2024)
-    parser.add_argument("-lomo", "--lomo", action='store_true')
-
-    return parser.parse_args()
-
-
-def train_step(
-    net,
-    train_data_loader,
-    criterion,
-    optimizer,
-    lr_scheduler,
-    device,
-    scaler,
-    current_epoch,
-    total_epoch,
-):
-    epoch_start_time = time.time()
-    net.train()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-    use_amp = scaler is not None
-
-    with tqdm(
-        train_data_loader,
-        desc=f"Epoch {current_epoch + 1}/{total_epoch}",
-        leave=False,
-        unit="batch"
-    ) as pbar:
-        for img, label in pbar:
-            img, label = img.float().to(device), label.to(device)
-
-            with get_autocast_context(use_amp):
-                y = net(img)  # [T, N, Categories]
-                batch_loss = criterion(y, label)
-
-            if use_amp:
-                scaler.scale(batch_loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                batch_loss.backward()
-                optimizer.step()
-            optimizer.zero_grad()
-
-            functional.reset_net(net)
-            prec1, prec5 = accuracy(y.mean(dim=0).data, label.data, topk=(1, 5))
-            losses.update(batch_loss.item(), label.size(0))
-            top1.update(prec1.item(), label.size(0))
-            top5.update(prec5.item(), label.size(0))
-
-            pbar.set_postfix({
-                "loss": losses.avg,
-                "top1_acc": top1.avg,
-                "top5_acc": top5.avg,
-            })
-
-    if lr_scheduler is not None:
-        lr_scheduler.step()
-
-    epoch_end_time = time.time()
-    epoch_time = epoch_end_time - epoch_start_time  # unit: second
-    return {
-        "loss": losses.avg,
-        "top1_acc": top1.avg,
-        "top5_acc": top5.avg,
-        "time": epoch_time
-    }
-
-
-def val_step(net, test_data_loader, device, criterion):
-    net.eval()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-
-    with torch.no_grad():
-        for img, label in test_data_loader:
-            img, label = img.float().to(device), label.to(device)
-
-            y = net(img)  # [T, N, Categories]
-            batch_loss = criterion(y, label)
-
-            functional.reset_net(net)
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(y.mean(dim=0).data, label.data, topk=(1, 5))
-            losses.update(batch_loss.item(), label.size(0))
-            top1.update(prec1.item(), label.size(0))
-            top5.update(prec5.item(), label.size(0))
-
-    return {
-        "loss": losses.avg,
-        "top1_acc": top1.avg,
-        "top5_acc": top5.avg,
-    }
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs
+        )
+        return ([optimizer], [lr_scheduler])
 
 
 def main():
-    args = parse_args()
-    print(args)
-
-    set_seed(args.set_seed)
-
-    run_name_generator = ModelNameGenerator(proj="cifar10dvs-me")
-    run_name = run_name_generator.generate(args)
-    wandb.require("core")
-    wandb.init(
-        project="cifar10dvs-me",
-        entity="pkuml-spiking",
-        config=args,
-        name=run_name,
+    cli = LightningCLI(
+        CIFAR10DVSLightningModule, CIFAR10DVSDataModule, run=False
     )
-
-    train_data_loader, val_data_loader = prepare_dataloaders(args)
-
-    net = getattr(models, args.network)(
-        T=args.T,  # for tebn and PSN
-        neuron_type=args.neuron_type,
-        spike_compressor=args.spike_compressor,
-        decay_lambda=args.decay_lambda,
-        k=4,  # for SlidingPSN
-    )
-    print(net)
-    net = net.to(args.device)
-
-    if args.loss == "ce":
-        criterion = TMeanCrossEntropyLoss()
-    else:
-        criterion = TETLoss(
-            base_criterion=torch.nn.CrossEntropyLoss(),
-            mean=1.,
-            tet_lambda=1e-3,
-        )
-
-    scaler = None
-    if args.amp:
-        scaler = GradScaler()
-    optimizer, lr_scheduler = prepare_optimizers_and_schedulers(
-        args, net, scaler
-    )
-
-    max_val_accuracy = 0.
-    for epoch in range(args.epochs):
-        train_results = train_step(
-            net,
-            train_data_loader,
-            criterion,
-            optimizer,
-            lr_scheduler,
-            args.device,
-            scaler,
-            epoch,
-            args.epochs,
-        )
-        val_results = val_step(
-            net,
-            val_data_loader,
-            args.device,
-            criterion,
-        )
-        wandb.log({
-            "loss/train_loss": train_results["loss"],
-            "acc/train_top1_acc": train_results["top1_acc"],
-            "acc/train_top5_acc": train_results["top5_acc"],
-            "time/train_epoch_time": train_results["time"],
-            "loss/val_loss": val_results["loss"],
-            "acc/val_top1_acc": val_results["top1_acc"],
-            "acc/val_top5_acc": val_results["top5_acc"],
-        })
-        print(
-            f"Epoch {epoch + 1}/{args.epochs}: "
-            f"train_loss={train_results['loss']}, "
-            f"train_top1_acc={train_results['top1_acc']}, "
-            f"train_top5_acc={train_results['top5_acc']}, "
-            f"time/train_epoch_time={train_results['time']}, "
-            f"val_loss={val_results['loss']}, "
-            f"val_top1_acc={val_results['top1_acc']}, "
-            f"val_top5_acc={val_results['top5_acc']}"
-        )
-        if val_results["top1_acc"] > max_val_accuracy:
-            max_val_accuracy = val_results["top1_acc"]
-
-    wandb.summary["acc/max_val_top1_acc"] = max_val_accuracy
-    wandb.finish()
+    cli.trainer.callbacks += [
+        callbacks.ModelSummary(max_depth=-1),
+        callbacks.ModelCheckpoint(
+            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
+            save_top_k=1,
+            monitor="val_acc",
+            mode="max"
+        ),
+        callbacks.ModelCheckpoint(
+            filename="lastest-{epoch}",
+            save_top_k=1,
+            monitor="epoch",
+            mode="max"
+        ),
+        GlobalMeanBatchTimeCallback(reset_per_epoch=True),
+        SamplePerSecondCallback(),
+        PeakMemoryTillNowCallback(),
+    ]
+    if cli.trainer.is_global_zero:
+        print(cli.model)
+    cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
 if __name__ == '__main__':

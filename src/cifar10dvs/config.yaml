@@ -1,7 +1,7 @@
 seed_everything: 2024
 
 trainer:
-  max_epochs: 200
+  max_epochs: 100
   precision: 32
   num_sanity_val_steps: 0
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
@@ -9,19 +9,20 @@ trainer:
   enable_checkpointing: False # disable automatic checkpointing; use callback instead
 
 model:
-  network: Spikformer
+  network: CIFAR10DVSVGG
+  T: 10
   neuron_type: SJLIF
-  T: 4
   spike_compressor: NullSpikeCompressor
-  learning_rate: 0.001
-  l2_factor: 5e-2
-  smoothing: 0.1
+  decay_lambda: 0.25
+  learning_rate: 0.1
+  momentum: 0.9
+  l2_factor: 5e-4
   lomo: False
+  loss: tet
 
 
 data:
-  data_dir: /export/home/data_allenyolk/ImageNet0_03125
-  cache_dataset: False
+  data_dir: /export/home/data_allenyolk/CIFAR10DVS
   batch_size: 32
   num_workers: 4
-  for_model: transformer
+  num_classes: 10

@@ -9,7 +9,6 @@ trainer:
   enable_checkpointing: False # disable automatic checkpointing; use callback instead
 
 model:
-  num_classes: 1000
   network: SEWResNet34
   neuron_type: SJLIF
   T: 4

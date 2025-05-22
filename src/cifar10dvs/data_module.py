@@ -1,23 +1,27 @@
 from typing import Callable, Dict, Optional, Tuple
-import numpy as np
-import spikingjelly.datasets as sjds
-from torchvision.datasets.utils import extract_archive
 import os
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import time
+from pathlib import Path
+import PIL
+import sys
+
+sys.path.append("./src")
+
+import lightning as L
+import numpy as np
+import torch
+from torch.utils.data.dataloader import DataLoader
+import torchvision.transforms as transforms
+from torchvision.datasets.utils import extract_archive
+import spikingjelly.datasets as sjds
+from spikingjelly.datasets.cifar10_dvs import CIFAR10DVS as SJCIFAR10DVS
+
+from utils.transforms import Cutout, TransformedDatasetWrapper
 
 EVT_DVS = 0  # DVS event type
 EVT_APS = 1  # APS event
-
-
-def read_bits(arr, mask=None, shift=None):
-    if mask is not None:
-        arr = arr & mask
-    if shift is not None:
-        arr = arr >> shift
-    return arr
-
 
 y_mask = 0x7FC00000
 y_shift = 22
@@ -30,6 +34,14 @@ polarity_shift = 11
 
 valid_mask = 0x80000000
 valid_shift = 31
+
+
+def read_bits(arr, mask=None, shift=None):
+    if mask is not None:
+        arr = arr & mask
+    if shift is not None:
+        arr = arr >> shift
+    return arr
 
 
 def skip_header(fp):
@@ -335,3 +347,140 @@ class CIFAR10DVS(sjds.NeuromorphicDatasetFolder):
                         target_file
                     )
         print(f'Used time = [{round(time.time() - t_ckp, 2)}s].')
+
+
+class CIFAR10DVSNDA:
+
+    def __init__(self, M=1, N=2):
+        self.M = M
+        self.N = N
+
+    def __call__(self, data):
+        c = 15 * self.N
+        rotate_tf = transforms.RandomRotation(degrees=c)
+        e = 8 * self.N
+        cutout_tf = Cutout(n_holes=1, length=e)
+
+        def roll(data, N=1):
+            a = N*2 + 1
+            off1 = np.random.randint(-a, a + 1)
+            off2 = np.random.randint(-a, a + 1)
+            return torch.roll(data, shifts=(off1, off2), dims=(2, 3))
+
+        def rotate(data, N):
+            return rotate_tf(data)
+
+        def cutout(data, N):
+            return cutout_tf(data)
+
+        transforms_list = [roll, rotate, cutout]
+        sampled_ops = np.random.choice(transforms_list, self.M)
+        for op in sampled_ops:
+            data = op(data, self.N)
+        return data
+
+
+class CIFAR10DVSDataModule(L.LightningDataModule):
+
+    def __init__(
+        self,
+        data_dir: str,
+        T: int,
+        batch_size: int = 128,
+        num_workers: int = 4
+    ):
+        super().__init__()
+        self.data_dir = data_dir
+        self.T = T
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+    def prepare_data(self):
+        frame_root = Path(
+            self.data_dir
+        ) / f"frames_number_{self.T}_split_by_number"
+        if not frame_root.exists():
+            # download and integrate frames
+            ds = SJCIFAR10DVS(
+                self.data_dir,
+                data_type="frame",
+                frames_number=self.T,
+                split_by="number"
+            )
+            del ds
+
+        train_set_root = frame_root / "train"
+        test_set_root = frame_root / "test"
+        if not train_set_root.exists() or not test_set_root.exists():
+            # split the dataset
+            move_data(
+                Path(self.data_dir) / f"frames_number_{self.T}_split_by_number"
+            )
+
+    def setup(self, stage: str):
+        train_set = CIFAR10DVS(
+            self.data_dir,
+            train=True,
+            data_type='frame',
+            frames_number=self.T,
+            split_by='number'
+        )
+        test_set = CIFAR10DVS(
+            self.data_dir,
+            train=False,
+            data_type='frame',
+            frames_number=self.T,
+            split_by='number'
+        )
+
+        function_nda = CIFAR10DVSNDA(M=1, N=2)
+
+        def transform_train(data):
+            data = transforms.RandomResizedCrop(
+                128, scale=(0.7, 1.0), interpolation=PIL.Image.NEAREST
+            )(data)
+            resize = transforms.Resize(size=(48, 48))  # 48 48
+            data = resize(data).float()
+            flip = np.random.random() > 0.5
+            if flip:
+                data = torch.flip(data, dims=(3,))
+            data = function_nda(data)
+            return data.float()
+
+        def transform_test(data):
+            resize = transforms.Resize(size=(48, 48))  # 48 48
+            data = resize(data).float()
+            return data.float()
+
+        self.train_set = TransformedDatasetWrapper(
+            train_set, transform=transform_train
+        )
+        self.test_set = TransformedDatasetWrapper(
+            test_set, transform=transform_test
+        )
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_set,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.test_set,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
+    def predict_dataloader(self):
+        return self.val_dataloader()
