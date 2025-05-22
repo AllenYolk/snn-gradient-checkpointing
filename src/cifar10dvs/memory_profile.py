@@ -22,7 +22,6 @@ from data_module import CIFAR10DVSDataModule
 from utils.profiler import *
 
 PROFILE_LOG_DIR = "./profile_logs"
-WARMUP_ITERATIONS = 10
 
 
 class CIFAR10DVSLightningModule(ClassificationLightningModule):
@@ -55,6 +54,16 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             y_with_T=True,
         )
 
+        optimizer = torch.optim.SGD(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            momentum=self.hparams.momentum,
+            weight_decay=self.hparams.l2_factor
+        )
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
+        self.profiled_optimizer = optimizer  # to access optimizer for profiling easily
+
     def configure_network(self):
         return getattr(models, self.hparams.network)(
             T=self.hparams.T,  # for PSN and tebn
@@ -75,18 +84,10 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             )
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            momentum=self.hparams.momentum,
-            weight_decay=self.hparams.l2_factor
-        )
-        if self.hparams.lomo:
-            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.trainer.max_epochs
+            self.profiled_optimizer, T_max=self.trainer.max_epochs
         )
-        return ([optimizer], [lr_scheduler])
+        return ([self.profiled_optimizer], [lr_scheduler])
 
 
 def main():
@@ -94,7 +95,10 @@ def main():
         CIFAR10DVSLightningModule,
         CIFAR10DVSDataModule,
         run=False,
-        trainer_defaults={"enable_progress_bar": False}
+        trainer_defaults={
+            "max_steps": 5,
+            "enable_progress_bar": False
+        }
     )
     if cli.trainer.is_global_zero:
         print(cli.model)
@@ -107,21 +111,25 @@ def main():
     log_path = Path(PROFILE_LOG_DIR) / f"CIFAR10DVS"
     if not log_path.exists():
         log_path.mkdir(parents=True)
-    profile_log_path = log_path / (run_name+".time-prof.txt")
+    mem_data_path = log_path / (run_name+".prof.pt")
+    profile_log_path = log_path / (run_name+".prof.txt")
 
     net = cli.model.net
-    profiler = LayerWiseFPCUDATimeProfiler(
-        (net.features, net.dropout, net.classifier),
-        search_mode=("direct_children", "self", "self"),
-        model_names=("feature_extractor", "dropout", "classifier"),
-        instances=(torch.nn.Module,),
-        filename=profile_log_path,
-        warmup=WARMUP_ITERATIONS,
+    optimizer = cli.model.profiled_optimizer
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename=profile_log_path),
+        LayerWiseMemoryProfiler(
+            (net.features, net.dropout, net.classifier),
+            search_mode=("direct_children", "self", "self"),
+            model_names=("feature_extractor", "dropout", "classifier"),
+            instances=(torch.nn.Module,),
+            filename=profile_log_path,
+        ),
     )
 
-    cli.trainer.validate(cli.model, datamodule=cli.datamodule)
-    profiler.clear_hooks()
-    profiler.profile()
+    cli.trainer.fit(cli.model, datamodule=cli.datamodule)
+    profiler.profile(sort_by="backward_peak_memory")
+    profiler.save_data((None, mem_data_path))
 
 
 if __name__ == '__main__':

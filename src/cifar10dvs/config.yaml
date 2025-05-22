@@ -23,6 +23,6 @@ model:
 
 data:
   data_dir: /export/home/data_allenyolk/CIFAR10DVS
+  T: 10
   batch_size: 32
   num_workers: 4
-  num_classes: 10
