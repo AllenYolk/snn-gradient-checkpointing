@@ -38,6 +38,14 @@ class ImageNetDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.for_model = for_model
 
+        # We want to make batch_per_training_epoch available once the datamodule
+        # is constructed. To do so, the datasets should be set up in advance,
+        # and a dummy train_loader is constructed (and released once we get
+        # the length).
+        self.dataset_train, self.dataset_val = None, None
+        self.setup(None)
+        self.batch_per_training_epoch = self._get_batch_per_training_epoch()
+
     @staticmethod
     def _get_cache_path(filepath):
         h = hashlib.sha1(str(filepath).encode()).hexdigest()
@@ -112,7 +120,7 @@ class ImageNetDataModule(L.LightningDataModule):
                 print(f"Saving dataset_train to {cache_path}")
                 mkdir(cache_path.parent)
                 save_on_master((ds, dir), cache_path)
-        print("Took", time.time() - st)
+        print("Took", time.time() - st, "sec")
         return ds
 
     def prepare_data(self):
@@ -124,14 +132,17 @@ class ImageNetDataModule(L.LightningDataModule):
             )
 
     def setup(self, stage: str):
-        print("Loading training data")
-        self.dataset_train = self._load_dataset(
-            self.train_dir, self.cache_dataset, True, self.for_model
-        )
-        print("Loading validation data")
-        self.dataset_val = self._load_dataset(
-            self.val_dir, self.cache_dataset, False, self.for_model
-        )
+        # The datasets are singleton objects!
+        if self.dataset_train is None:
+            print("Loading training data")
+            self.dataset_train = self._load_dataset(
+                self.train_dir, self.cache_dataset, True, self.for_model
+            )
+        if self.dataset_val is None:
+            print("Loading validation data")
+            self.dataset_val = self._load_dataset(
+                self.val_dir, self.cache_dataset, False, self.for_model
+            )
         print(
             f"dataset_train:{len(self.dataset_train)}, "
             f"dataset_val:{len(self.dataset_val)}"
@@ -164,3 +175,10 @@ class ImageNetDataModule(L.LightningDataModule):
 
     def predict_dataloader(self):
         return self.val_dataloader()
+
+    def _get_batch_per_training_epoch(self):
+        # create a dummy train_dataloader, get its length, and free it
+        dl = self.train_dataloader()
+        n = len(dl)
+        del dl
+        return n

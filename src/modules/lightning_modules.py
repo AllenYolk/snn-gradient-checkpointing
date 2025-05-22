@@ -9,8 +9,8 @@ class ClassificationLightningModule(LightningModule):
     def __init__(
         self,
         num_classes: int,
-        y_with_T: bool = False,
-        label_as_prob: bool = False,
+        y_with_T: bool = False,  # for computing accuracy
+        label_as_prob: bool = False,  # for computing accuracy
         **kwargs
     ):
         super().__init__()
@@ -55,7 +55,7 @@ class ClassificationLightningModule(LightningModule):
     def training_step(self, batch, batch_idx):
         x, label = batch[0].float(), batch[1]
         y = self(x)
-        batch_loss = self.criterion(y, label)
+        batch_loss = self.criterion(y, label)  # must properly handle the sizes!
         if self.y_with_T:
             y = y.mean(dim=0)
         if self.label_as_prob:
@@ -84,7 +84,7 @@ class ClassificationLightningModule(LightningModule):
     def validation_step(self, batch, batch_idx):
         x, label = batch
         y = self(x)
-        batch_loss = self.criterion(y, label)
+        batch_loss = self.criterion(y, label)  # must properly handle the sizes!
         if self.y_with_T:
             y = y.mean(dim=0)
         if self.label_as_prob:
