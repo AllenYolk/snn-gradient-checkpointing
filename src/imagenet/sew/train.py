@@ -20,7 +20,7 @@ from lightning.pytorch import callbacks
 import models
 from data_module import ImageNetDataModule
 from modules import ClassificationLightningModule
-from modules.lightning_callbacks import *
+from utils.lightning_callbacks import *
 from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
 
 

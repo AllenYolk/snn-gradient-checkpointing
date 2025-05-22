@@ -17,7 +17,7 @@ from lightning.pytorch.cli import LightningCLI
 from utils import Lomo
 import models as models
 from modules import ClassificationLightningModule
-from modules.lightning_callbacks import *
+from utils.lightning_callbacks import *
 from utils.profiler import *
 from data_module import SCIFARDataModule
 

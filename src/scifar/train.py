@@ -18,7 +18,7 @@ from lightning.pytorch import callbacks
 from utils import Lomo
 import models
 from modules import ClassificationLightningModule
-from modules.lightning_callbacks import *
+from utils.lightning_callbacks import *
 from data_module import SCIFARDataModule
 
 

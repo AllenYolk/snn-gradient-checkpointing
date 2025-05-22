@@ -23,7 +23,7 @@ from timm.optim import create_optimizer_v2
 import models
 from data_module import ImageNetDataModule
 from modules import ClassificationLightningModule
-from modules.lightning_callbacks import *
+from utils.lightning_callbacks import *
 from utils import Lomo
 from utils.profiler import *
 

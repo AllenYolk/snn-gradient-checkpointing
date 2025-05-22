@@ -1,43 +1,99 @@
 # snn-me-bptt
 
-## Reproducibility
+## Preparation
 
-Required packages: `timm, spikingjelly=0.0.0.0.15, torch>=2.0.0, torchvision`.
-`triton` and `cupy` are also needed for reproducing the training speed experiments. However, they are not necessary for the memory experiments.
+Required packages: `timm, spikingjelly=0.0.0.0.15, torch>=2.0.0, torchvision, lightning`.
 
-Overall instructions:
+* `triton` and `cupy` are also needed for reproducing the training speed experiments. However, they are not necessary for reproducing the results about memory usage.
+* To install the latest version of `spikingjelly`, please clone the [github repository](https://github.com/fangwei123456/spikingjelly) and run `pip install .` in the spikingjelly repository's root directory.
 
-* `train.py` runs the full training process and measure time cost. `memory.py` profiles memory cost.
-* "FGC" means sGC, "PGC" means pdsGC.
-* Use the `-h` flag to explore other options (like `-lomo, -amp`, ...)
-* Before running the scripts, fill in your wandb accounts to the scripts. Alternatively, you can run with `WANDB_MODE=disabled`.
-* Only single-gpu training is supported now.
+## Reproduce the Results
 
-### Sequential CIFAR-10
+Experiment scripts can be found in `src/<dataset_name>`. 
 
-```bash
-python src/scifar/[train/memory].py --data_dir [path] --neuron_type [SJLIF/HandWrittenLIF/PSN/SlidingPSN] --spike_compressor [NullSpikeCompressor/BitSpikeCompressor] --network [SequentialCIFARNet/FGCSequentialCIFARNet/PGCSequentialCIFARNet] -nc 10 
+* `src/scifar`: Sequential CIFAR-10 (and Sequential CIFAR-100)
+* `src/cifar10dvs`: CIFAR10-DVS
+* `src/imagenet/sew`: ImageNet, using SEW ResNet
+* `src/imagenet/transformer`: ImageNet, using Spikformer or QKFormer
+
+In each experiment directory, the following scripts can be found:
+
+* `models.py`: SNN definitions
+* `train.py`: training script; accuracies, training speed and peak memory usage will be printed to stdout
+* `memory_profile.py`: profile layer-wise memory usage and category-wise memory usage
+* `forward_time_cost.py`: profile inference time cost of each layer; used for greedily disabling gradient checkpointing (GC)
+* `config.yaml`: configuration file that `LightningCLI` reads
+
+We organize the code after `lightning`'s style, using `LightningCLI` as the commandline interface. For a better understanding of our code, we strongly recommend you to read [lightning's tutorial and docs](https://lightning.ai/docs/pytorch/stable/starter/introduction.html) first. Use the `--help` flag to see all available CLI arguments.
+
+```shell
+> python src/scifar/train.py --help
+> ......
+  usage: train.py [-h] [-c CONFIG] [--print_config[=flags]] [--seed_everything SEED_EVERYTHING] [--trainer CONFIG]
+                [--trainer.accelerator.help CLASS_PATH_OR_NAME] [--trainer.accelerator ACCELERATOR]
+                [--trainer.strategy.help CLASS_PATH_OR_NAME] [--trainer.strategy STRATEGY] [--trainer.devices DEVICES]
+                [--trainer.num_nodes NUM_NODES] [--trainer.precision PRECISION] [--trainer.logger.help CLASS_PATH_OR_NAME]
+                [--trainer.logger LOGGER] [--trainer.callbacks.help CLASS_PATH_OR_NAME] [--trainer.callbacks CALLBACKS]
+                [--trainer.fast_dev_run FAST_DEV_RUN] [--trainer.max_epochs MAX_EPOCHS] [--trainer.min_epochs MIN_EPOCHS]
+                [--trainer.max_steps MAX_STEPS] [--trainer.min_steps MIN_STEPS] [--trainer.max_time MAX_TIME]
+                [--trainer.limit_train_batches LIMIT_TRAIN_BATCHES] [--trainer.limit_val_batches LIMIT_VAL_BATCHES]
+                [--trainer.limit_test_batches LIMIT_TEST_BATCHES] [--trainer.limit_predict_batches LIMIT_PREDICT_BATCHES]
+                [--trainer.overfit_batches OVERFIT_BATCHES] [--trainer.val_check_interval VAL_CHECK_INTERVAL]
+                [--trainer.check_val_every_n_epoch CHECK_VAL_EVERY_N_EPOCH]
+                [--trainer.num_sanity_val_steps NUM_SANITY_VAL_STEPS] [--trainer.log_every_n_steps LOG_EVERY_N_STEPS]
+                [--trainer.enable_checkpointing {true,false,null}] [--trainer.enable_progress_bar {true,false,null}]
+                [--trainer.enable_model_summary {true,false,null}]
+                [--trainer.accumulate_grad_batches ACCUMULATE_GRAD_BATCHES] [--trainer.gradient_clip_val GRADIENT_CLIP_VAL]
+                [--trainer.gradient_clip_algorithm GRADIENT_CLIP_ALGORITHM] [--trainer.deterministic DETERMINISTIC]
+                [--trainer.benchmark {true,false,null}] [--trainer.inference_mode {true,false}]
+                [--trainer.use_distributed_sampler {true,false}] [--trainer.profiler.help CLASS_PATH_OR_NAME]
+                [--trainer.profiler PROFILER] [--trainer.detect_anomaly {true,false}] [--trainer.barebones {true,false}]
+                [--trainer.plugins.help CLASS_PATH_OR_NAME] [--trainer.plugins PLUGINS]
+                [--trainer.sync_batchnorm {true,false}]
+                [--trainer.reload_dataloaders_every_n_epochs RELOAD_DATALOADERS_EVERY_N_EPOCHS]
+                [--trainer.default_root_dir DEFAULT_ROOT_DIR] [--model CONFIG] --model.num_classes NUM_CLASSES
+                --model.network NETWORK --model.channels CHANNELS --model.neuron_type NEURON_TYPE
+                --model.spike_compressor SPIKE_COMPRESSOR --model.decay_lambda DECAY_LAMBDA
+                --model.learning_rate LEARNING_RATE --model.momentum MOMENTUM [--model.lomo {true,false}] [--data CONFIG]
+                --data.data_dir DATA_DIR [--data.num_classes NUM_CLASSES] [--data.batch_size BATCH_SIZE]
+                [--data.num_workers NUM_WORKERS] [--optimizer.help [CLASS_PATH_OR_NAME]]
+                [--optimizer CONFIG | CLASS_PATH_OR_NAME | .INIT_ARG_NAME VALUE] [--lr_scheduler.help CLASS_PATH_OR_NAME]
+                [--lr_scheduler CONFIG | CLASS_PATH_OR_NAME | .INIT_ARG_NAME VALUE]
+
+  Lightning Trainer command line tool
+  optional arguments:
+  ......
 ```
 
-### CIFAR10-DVS
+The arguments' default values are listed in `config.yaml`. Critical arguments include:
 
-```bash
-python src/cifar10dvs/[train/memory].py --data_dir [path] --neuron_type [SJLIF/HandWrittenLIF/PSN/SlidingPSN] --spike_compressor [NullSpikeCompressor/BitSpikeCompressor] --network [CIFAR10DVSVGG/FGCCIFAR10DVSVGG/PGCCIFAR10DVSVGG]
+* `--config`: should point to the configuration YAML file.
+* `--trainer.accelerator`: typically set as `gpu`
+* `--trainer.devices`: an integer indicating the total number of used devices (`2` means using 2 GPUs), or a list of GPU indices (`"[2]"` means using GPU 2). We suggest using the later style.
+* `--model.network`: SNN type. See `models.py` for their definitions.
+    * Take Sequential CIFAR-10 as an example. This argument can be set as `SequentialCIFARNet`, `FGCSequentialCIFARNet`, `PGCSequentialCIFARNet`, ...
+        * `SequentialCIFARNet` is the SNN without gradient checkpointing (GC)
+        * `FGC...` applies full GC with critical GC segments split into sub-segments (sGC in the paper)
+        * `PGC...` applies partial GC with greedy GC disabling strategy.nn
+* `--model.neuron_type`: spiking neuron model. `SJLIF`, `HandWrittenLIF`, `PSN`, and `SlidingPSN` are supported.
+* `--model.spike_compressor`: the spike compressor. Typically, set this argument as `NullSpikeCompressor` or `BitSpikeCompressor`. For more choices, you may explore `src/modules/compress/spike_compressor.py`.
+
+For instance, you may run Sequential CIFAR-10 experiments with the following command:
+
+```shell
+python src/scifar/train.py --config ./src/scifar/config.yaml --model.network PGCSequentialCIFARNet --model.spike_compressor BitSpikeCompressor --model.neuron_type HandWrittenLIF --trainer.accelerator gpu --trainer.devices "[2]"
 ```
 
-### ImageNet, SEW ResNet
+Do not set those CLI arguments provided by `LightningCLI` unless you fully understand their meanings!
 
-```bash
-python src/imagenet/sew/[train/memory].py --data_dir [path] --neuron_type [SJLIF/HandWrittenLIF/PSN/SlidingPSN] --spike_compressor [NullSpikeCompressor/BitSpikeCompressor] --network [SEWResNet34/FGCSEWResNet34/PGCSEWResNet34]
-```
+## Use the Framework on Your Own SNNs
 
-### ImageNet, Transformer
-
-```bash
-python src/imagenet/transformer/[train/memory].py --data_dir [path] --neuron_type [SJLIF/HandWrittenLIF/PSN/SlidingPSN] --spike_compressor [NullSpikeCompressor/BitSpikeCompressor] --network [Spikformer/FGCSpikformer/PGCSpikformer/QKFormer/FGCQKFormer/PGCQKFormer]
-```
+`tutorial.ipynb` is a minimal demo showing how to apply GC and spike compression to your own SNNs for direct training.
 
 ## Known Issues
 
 Q1: `Triton Error [CUDA]: device kernel image is invalid`
 A1: According to [this comment](https://github.com/InternLM/lmdeploy/pull/1621#issuecomment-2179731554), the `ptxas` prepackaged in Triton is not compatible with our cuda driver version. We can specify the path to the correct `ptxas` by the environment variable `TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas`.
+
+Q2: Is multi-device training possible?
+A2: Yes. Though not mentioned in the manuscript's main text, **we have verified that our framework works well when DDP is enabled.** See our Appendix for more details. The results resemble the trend under single-device training cases. To enable DDP, use `--trainer.devices` to specify multiple devices (e.g. `--trainer.devices "[0,1,2]"`).

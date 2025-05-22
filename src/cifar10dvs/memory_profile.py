@@ -17,7 +17,7 @@ from lightning.pytorch.cli import LightningCLI
 from utils import Lomo, TMeanCrossEntropyLoss, TETLoss
 import models
 from modules import ClassificationLightningModule
-from modules.lightning_callbacks import *
+from utils.lightning_callbacks import *
 from data_module import CIFAR10DVSDataModule
 from utils.profiler import *
 
