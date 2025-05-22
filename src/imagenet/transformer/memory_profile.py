@@ -1,5 +1,6 @@
 """Modified from Spikformer and QKFormer source code.
 """
+from pathlib import Path
 import sys
 
 sys.path.append("./src")
@@ -15,7 +16,6 @@ else:
     print("NPU is not available.")
 
 from lightning.pytorch.cli import LightningCLI
-from lightning.pytorch import callbacks
 from timm.loss import LabelSmoothingCrossEntropy
 from timm.scheduler import create_scheduler_v2
 from timm.optim import create_optimizer_v2
@@ -25,6 +25,9 @@ from data_module import ImageNetDataModule
 from modules import ClassificationLightningModule
 from modules.lightning_callbacks import *
 from utils import Lomo
+from utils.profiler import *
+
+PROFILE_LOG_DIR = "./profile_logs"
 
 
 class TransformerImageNetLightningModule(ClassificationLightningModule):
@@ -55,6 +58,16 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
         # this property should be properly assigned before `configure_optimizers`
         self.batch_per_training_epoch = None
 
+        optimizer = create_optimizer_v2(
+            self.parameters(),
+            opt="adamw",
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.l2_factor,
+        )  # timm's optimizers are inherited from torch's optimizer
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
+        self.profiled_optimizer = optimizer
+
     def configure_network(self):
         return getattr(models, self.hparams.network)(
             neuron_type=self.hparams.neuron_type,
@@ -76,15 +89,6 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
         return criterion
 
     def configure_optimizers(self):
-        optimizer = create_optimizer_v2(
-            self.parameters(),
-            opt="adamw",
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.l2_factor,
-        )  # timm's optimizers are inherited from torch's optimizer
-        if self.hparams.lomo:
-            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
-
         if self.batch_per_training_epoch is None:
             raise ValueError(
                 "`TransformerImageNetLightningModule.batch_per_training_batch`"
@@ -97,7 +101,7 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
                 f"{self.batch_per_training_epoch} batches per training epoch."
             )
         lr_scheduler, total_epochs = create_scheduler_v2(
-            optimizer,
+            self.profiled_optimizer,
             sched="cosine",
             num_epochs=self.trainer.max_epochs,
             min_lr=1e-5,
@@ -114,7 +118,7 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
             )
             self.trainer.fit_loop.max_epochs = total_epochs
 
-        return ([optimizer], [{
+        return ([self.profiled_optimizer], [{
             "scheduler": lr_scheduler,
             "interval": "step",
             "frequency": 1,
@@ -144,29 +148,70 @@ class CustomLightningCLI(LightningCLI):
 
 def main():
     cli = CustomLightningCLI(
-        TransformerImageNetLightningModule, ImageNetDataModule, run=False
+        TransformerImageNetLightningModule,
+        ImageNetDataModule,
+        run=False,
+        trainer_defaults={
+            "max_steps": 5,
+            "enable_progress_bar": False
+        }
     )
-    cli.trainer.callbacks += [
-        callbacks.ModelSummary(max_depth=-1),
-        callbacks.ModelCheckpoint(
-            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
-            save_top_k=1,
-            monitor="val_acc",
-            mode="max"
-        ),
-        callbacks.ModelCheckpoint(
-            filename="lastest-{epoch}",
-            save_top_k=1,
-            monitor="epoch",
-            mode="max"
-        ),
-        GlobalMeanBatchTimeCallback(reset_per_epoch=True),
-        SamplePerSecondCallback(),
-        PeakMemoryTillNowCallback(),
-    ]
     if cli.trainer.is_global_zero:
         print(cli.model)
+
+    args = cli.config.model
+    run_name = (
+        f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
+        f"lomo{args.lomo}_amp{cli.trainer.precision}"
+    )
+    log_path = Path(PROFILE_LOG_DIR) / f"ImageNet-transformer"
+    if not log_path.exists():
+        log_path.mkdir(parents=True)
+    mem_data_path = log_path / (run_name+".prof.pt")
+    profile_log_path = log_path / (run_name+".prof.txt")
+
+    net = cli.model.net
+    optimizer = cli.model.profiled_optimizer
+    if args.network.endswith("Spikformer"):
+        model_list = (net.patch_embed, *[b for b in net.block], net.head)
+        search_mode_list = (
+            "direct_children", *["direct_children" for _ in net.block], "self"
+        )
+        model_name_list = (
+            "patch_embed", *[f"block{i}" for i in range(net.depths)], "head"
+        )
+    elif args.network.endswith("QKFormer"):
+        model_list = (
+            net.patch_embed1, *[b for b in net.block1], net.patch_embed2,
+            *[b for b in net.block2], net.patch_embed3,
+            *[b for b in net.block3], net.head
+        )
+        search_mode_list = (
+            *["direct_children" for _ in range(3 + net.depths)], "self"
+        )
+        model_name_list = (
+            "patch_embed1",
+            *[f"block1_{i}" for i in range(1)],
+            "patch_embed2",
+            *[f"block2_{i}" for i in range(2)],
+            "patch_embed3",
+            *[f"block3_{i}" for i in range(net.depths - 3)],
+            "head",
+        )
+    profiler = MemoryProfilerList(
+        CategoryMemoryProfiler(net, optimizer, filename=profile_log_path),
+        LayerWiseMemoryProfiler(
+            model_list,
+            search_mode=search_mode_list,
+            model_names=model_name_list,
+            instances=(torch.nn.Module,),
+            filename=profile_log_path,
+        ),
+    )
+
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
+    profiler.profile(sort_by="backward_peak_memory")
+    profiler.save_data((None, mem_data_path))
 
 
 if __name__ == '__main__':
