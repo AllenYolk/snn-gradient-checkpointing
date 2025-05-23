@@ -5,11 +5,11 @@
 Required packages: `timm, spikingjelly=0.0.0.0.15, torch>=2.0.0, torchvision, lightning`.
 
 * `triton` and `cupy` are also needed for reproducing the training speed experiments. However, they are not necessary for reproducing the results about memory usage.
-* To install the latest version of `spikingjelly`, please clone the [github repository](https://github.com/fangwei123456/spikingjelly) and run `pip install .` in the spikingjelly repository's root directory.
+* To install the latest version of `spikingjelly`, please clone the [github repository](https://github.com/fangwei123456/spikingjelly) and run `pip install .` in the its root directory.
 
 ## Reproduce the Results
 
-Experiment scripts can be found in `src/<dataset_name>`. 
+Experiment scripts can be found in `src/<dataset_name>`.
 
 * `src/scifar`: Sequential CIFAR-10 (and Sequential CIFAR-100)
 * `src/cifar10dvs`: CIFAR10-DVS
@@ -28,8 +28,9 @@ We organize the code after `lightning`'s style, using `LightningCLI` as the comm
 
 ```shell
 > python src/scifar/train.py --help
-> ......
-  usage: train.py [-h] [-c CONFIG] [--print_config[=flags]] [--seed_everything SEED_EVERYTHING] [--trainer CONFIG]
+
+......
+usage: train.py [-h] [-c CONFIG] [--print_config[=flags]] [--seed_everything SEED_EVERYTHING] [--trainer CONFIG]
                 [--trainer.accelerator.help CLASS_PATH_OR_NAME] [--trainer.accelerator ACCELERATOR]
                 [--trainer.strategy.help CLASS_PATH_OR_NAME] [--trainer.strategy STRATEGY] [--trainer.devices DEVICES]
                 [--trainer.num_nodes NUM_NODES] [--trainer.precision PRECISION] [--trainer.logger.help CLASS_PATH_OR_NAME]
@@ -60,9 +61,9 @@ We organize the code after `lightning`'s style, using `LightningCLI` as the comm
                 [--optimizer CONFIG | CLASS_PATH_OR_NAME | .INIT_ARG_NAME VALUE] [--lr_scheduler.help CLASS_PATH_OR_NAME]
                 [--lr_scheduler CONFIG | CLASS_PATH_OR_NAME | .INIT_ARG_NAME VALUE]
 
-  Lightning Trainer command line tool
-  optional arguments:
-  ......
+Lightning Trainer command line tool
+optional arguments:
+......
 ```
 
 The arguments' default values are listed in `config.yaml`. Critical arguments include:
