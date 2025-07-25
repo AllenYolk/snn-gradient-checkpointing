@@ -1,0 +1,20 @@
+seed_everything: 2024
+
+trainer:
+  max_epochs: 192
+  precision: 32
+  num_sanity_val_steps: 0
+  default_root_dir: ./ # training logs will be saved at `./lightning_logs`
+
+model:
+  network: SEWResNet
+  neuron_type: SJLIF
+  spike_compressor: NullSpikeCompressor
+  lomo: False
+
+
+data:
+  data_dir: /export/home/data_allenyolk/DVSGesture
+  T: 16
+  batch_size: 16
+  num_workers: 4
