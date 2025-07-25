@@ -41,7 +41,7 @@ class DVSGestureLightningModule(ClassificationLightningModule):
         )
 
     def configure_network(self):
-        return models.SEWResNet("ADD")
+        return models.SEWResNet()
 
     def configure_criterion(self):
         return nn.CrossEntropyLoss()

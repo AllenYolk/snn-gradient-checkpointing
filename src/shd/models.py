@@ -1,194 +1,113 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
+from spikingjelly.activation_based import surrogate
 
 
-def gaussian(x, mu=0., sigma=.5):
-    return torch.exp(-((x - mu)**2) / (2 * sigma**2)
-                    ) / torch.sqrt(2 * torch.tensor(math.pi)) / sigma
+def plif_update(x, v, spike, vth, _beta):
+    beta = torch.sigmoid(_beta)
+    v = v*beta + (1-beta) * x - vth*spike
+    spike = surrogate.atan.apply(v - vth, 2.)
+    return v, spike
 
 
-class SG(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, input):
-        ctx.save_for_backward(input)
-        return input.gt(0).float()
-
-    @staticmethod
-    def backward(ctx, grad_output):  # approximate the gradients
-        input, = ctx.saved_tensors
-        grad_input = grad_output.clone()
-        scale = 6.0
-        hight = .15
-        temp = gaussian(input, mu=0., sigma=0.5) * (1. + hight) \
-            - gaussian(input, mu=0.5, sigma=scale * 0.5) * hight \
-            - gaussian(input, mu=-0.5, sigma=scale * 0.5) * hight
-        return grad_input * temp.float() * 0.5
+def output_plif_update(x, v, _beta):
+    beta = torch.sigmoid(_beta)
+    v = v*beta + (1-beta) * x
+    return v
 
 
-def mem_update_pra(inputs, mem, spike, v_th, tau_m, dt=1, device=None):
-    """
-    neural model with soft reset
-    """
-    alpha = torch.sigmoid(tau_m)
-    mem = mem*alpha + (1-alpha) * inputs - v_th*spike
-    inputs_ = mem - v_th
-
-    spike = SG.apply(inputs_)
-    return mem, spike
-
-
-def output_Neuron_pra(inputs, mem, tau_m, dt=1, device=None):
-    """
-    The read out neuron is leaky integrator without spike
-    Args:
-        input(float): soma input.
-        mem(float): soma membrane potential
-        tau_m(float): time factors of soma
-    """
-    alpha = torch.sigmoid(tau_m).to(device)
-    mem = mem*alpha + (1-alpha) * inputs
-    return mem
-
-
-class spike_dense_test_origin(nn.Module):
+class LinearPLIF(nn.Module):
 
     def __init__(
         self,
-        input_dim,
-        output_dim,
-        tau_minitializer='uniform',
-        low_m=0,
-        high_m=4,
+        in_features,
+        out_features,
+        beta_initializer='uniform',
+        beta_low=0,
+        beta_high=4,
         vth=0.5,
-        dt=1,
-        device='cuda',
-        bias=True
     ):
-        """
-        Args:
-            input_dim(int): input dimension.
-            output_dim(int): the number of readout neurons
-            tau_minitializer(str): the method of initialization of tau_m
-            low_m(float): the low limit of the init values of tau_m
-            high_m(float): the upper limit of the init values of tau_m
-            vth(float): threshold
-        """
-        super(spike_dense_test_origin, self).__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.device = device
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
         self.vth = vth
-        self.dt = dt
 
-        self.dense = nn.Linear(input_dim, output_dim)
-        self.tau_m = nn.Parameter(torch.Tensor(self.output_dim))
+        self.dense = nn.Linear(in_features, out_features)
+        self._beta = nn.Parameter(torch.empty([self.out_features]))
 
-        if tau_minitializer == 'uniform':
-            nn.init.uniform_(self.tau_m, low_m, high_m)
-        elif tau_minitializer == 'constant':
-            nn.init.constant_(self.tau_m, low_m)
+        if beta_initializer == 'uniform':
+            nn.init.uniform_(self._beta, beta_low, beta_high)
+        elif beta_initializer == 'constant':
+            nn.init.constant_(self._beta, beta_low)
 
-    def set_neuron_state(self, batch_size):
+    def forward(self, x_seq):
+        # x_seq.shape = [T, N, in_features]
+        T = x_seq.shape[0]
 
-        self.mem = Variable(torch.rand(batch_size,
-                                       self.output_dim)).to(self.device)
-        self.spike = Variable(torch.rand(batch_size,
-                                         self.output_dim)).to(self.device)
+        x_seq = self.dense(x_seq)
 
-        self.v_th = Variable(
-            torch.ones(batch_size, self.output_dim) * self.vth
-        ).to(self.device)
-
-    def forward(self, input_spike):
-        k_input = input_spike.float()
-
-        d_input = self.dense(k_input)
-        self.mem, self.spike = mem_update_pra(
-            d_input,
-            self.mem,
-            self.spike,
-            self.v_th,
-            self.tau_m,
-            self.dt,
-            device=self.device
-        )
-        return self.mem, self.spike
+        v = torch.rand_like(x_seq[0])  # rand: follow the practice of DH-SNN
+        s = torch.rand_like(x_seq[0])
+        s_seq = torch.empty_like(x_seq)
+        for t in range(T):
+            x = x_seq[t]
+            v, s = plif_update(x, v, s, self.vth, self._beta)
+            s_seq[t] = s
+        return s_seq
 
 
-class readout_integrator_test(nn.Module):
+class LinearOutputPLIF(nn.Module):
 
     def __init__(
         self,
-        input_dim,
-        output_dim,
-        tau_minitializer='uniform',
-        low_m=0,
-        high_m=4,
-        device='cuda',
-        bias=True,
-        dt=1
+        in_features,
+        out_features,
+        beta_initializer='uniform',
+        beta_low=0,
+        beta_high=4,
     ):
-        """
-        Args:
-            input_dim(int): input dimension.
-            output_dim(int): the number of readout neurons
-            tau_minitializer(str): the method of initialization of tau_m
-            low_m(float): the low limit of the init values of tau_m
-            high_m(float): the upper limit of the init values of tau_m
-        """
-        super(readout_integrator_test, self).__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.device = device
-        self.dt = dt
-        self.dense = nn.Linear(input_dim, output_dim, bias=bias)
-        self.tau_m = nn.Parameter(torch.Tensor(self.output_dim))
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
 
-        if tau_minitializer == 'uniform':
-            nn.init.uniform_(self.tau_m, low_m, high_m)
-        elif tau_minitializer == 'constant':
-            nn.init.constant_(self.tau_m, low_m)
+        self.dense = nn.Linear(in_features, out_features)
+        self._beta = nn.Parameter(torch.empty([self.out_features]))
 
-    def set_neuron_state(self, batch_size):
-        self.mem = (torch.rand(batch_size, self.output_dim)).to(self.device)
+        if beta_initializer == 'uniform':
+            nn.init.uniform_(self._beta, beta_low, beta_high)
+        elif beta_initializer == 'constant':
+            nn.init.constant_(self._beta, beta_low)
 
-    def forward(self, input_spike):
-        #synaptic inputs
-        d_input = self.dense(input_spike.float())
-        # neuron model without spiking
-        self.mem = output_Neuron_pra(
-            d_input, self.mem, self.tau_m, self.dt, device=self.device
-        )
-        return self.mem
+    def forward(self, x_seq):
+        # x_seq.shape = (T, N, in_features)
+        T = x_seq.shape[0]
+
+        x_seq = self.dense(x_seq)
+
+        v = torch.rand_like(x_seq[0])
+        v_seq = torch.rand_like(x_seq)
+        for t in range(T):
+            x = x_seq[t]
+            v = output_plif_update(x, v, self._beta)
+            v_seq[t] = v
+        return v_seq
 
 
-class LIFFCNet(nn.Module):
+class PLIFSFNN(nn.Module):
 
     def __init__(self):
         super().__init__()
-        n = 64
-
-        self.dense_1 = spike_dense_test_origin(700, n, vth=1, dt=1)
-
-        #readout layer
-        self.dense_2 = readout_integrator_test(n, 20, dt=1)
+        H = 64
+        self.dense_1 = LinearPLIF(700, H, vth=1.)
+        self.dense_2 = LinearOutputPLIF(H, 20)
         nn.init.xavier_normal_(self.dense_2.dense.weight)
         nn.init.constant_(self.dense_2.dense.bias, 0)
 
-    def forward(self, input):
-        b, seq_length, input_dim = input.shape
-        self.dense_1.set_neuron_state(b)
-        self.dense_2.set_neuron_state(b)
-        output = 0
-        for i in range(seq_length):
-            input_x = input[:, i, :].reshape(b, input_dim)
-            mem_layer1, spike_layer1 = self.dense_1.forward(input_x)
-            mem_layer2 = self.dense_2.forward(spike_layer1)
-            if i > 10:
-                output += F.softmax(mem_layer2, dim=1)
-        return output
+    def forward(self, x_seq):
+        x_seq = x_seq.transpose(0, 1)  # [T, N, C]
+        x_seq = self.dense_1(x_seq)
+        x_seq = self.dense_2(x_seq)  # [T, N, 20]
+
+        logits = F.softmax(x_seq, dim=-1)  # [T, N, 20]
+        return torch.sum(logits[10:], dim=0)  # [N, 20]; discard 1st 10 steps

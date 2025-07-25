@@ -33,9 +33,8 @@ def conv1x1(in_channels, out_channels):
 
 class SEWBlock(nn.Module):
 
-    def __init__(self, in_channels, mid_channels, connect_f=None):
-        super(SEWBlock, self).__init__()
-        self.connect_f = connect_f
+    def __init__(self, in_channels, mid_channels):
+        super().__init__()
         self.conv = nn.Sequential(
             conv3x3(in_channels, mid_channels),
             conv3x3(mid_channels, in_channels),
@@ -43,22 +42,14 @@ class SEWBlock(nn.Module):
 
     def forward(self, x: torch.Tensor):
         out = self.conv(x)
-        if self.connect_f == 'ADD':
-            out += x
-        elif self.connect_f == 'AND':
-            out *= x
-        elif self.connect_f == 'IAND':
-            out = x * (1.-out)
-        else:
-            raise NotImplementedError(self.connect_f)
-
+        out += x
         return out
 
 
 class PlainBlock(nn.Module):
 
     def __init__(self, in_channels, mid_channels):
-        super(PlainBlock, self).__init__()
+        super().__init__()
         self.conv = nn.Sequential(
             conv3x3(in_channels, mid_channels),
             conv3x3(mid_channels, in_channels),
@@ -71,7 +62,7 @@ class PlainBlock(nn.Module):
 class BasicBlock(nn.Module):
 
     def __init__(self, in_channels, mid_channels):
-        super(BasicBlock, self).__init__()
+        super().__init__()
         self.conv = nn.Sequential(
             conv3x3(in_channels, mid_channels),
             layer.SeqToANNContainer(
@@ -97,7 +88,7 @@ class BasicBlock(nn.Module):
 class ResNetN(nn.Module):
 
     def __init__(self, layer_list, num_classes, connect_f=None):
-        super(ResNetN, self).__init__()
+        super().__init__()
         in_channels = 2
         conv = []
 
@@ -152,15 +143,16 @@ class ResNetN(nn.Module):
                     x = m(x)
             out_features = x.numel() * in_channels
 
-        self.out = nn.Linear(out_features, num_classes, bias=True)
+        self.out = nn.Linear(out_features, num_classes)
 
-    def forward(self, x: torch.Tensor):
-        x = x.permute(1, 0, 2, 3, 4)  # [T, N, 2, *, *]
-        x = self.conv(x)
-        return self.out(x.mean(0))
+    def forward(self, x_seq: torch.Tensor):
+        # x_seq.shape = [N, T, 2, H, W]
+        x_seq = x_seq.permute(1, 0, 2, 3, 4)  # [T, N, 2, H, W]
+        x_seq = self.conv(x_seq)
+        return self.out(x_seq.mean(0))
 
 
-def SEWResNet(connect_f):
+def SEWResNet():
     layer_list = [
         {
             'channels': 32,
@@ -220,4 +212,4 @@ def SEWResNet(connect_f):
         },
     ]
     num_classes = 11
-    return ResNetN(layer_list, num_classes, connect_f)
+    return ResNetN(layer_list, num_classes)

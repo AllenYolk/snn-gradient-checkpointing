@@ -40,7 +40,7 @@ class SHDLightningModule(ClassificationLightningModule):
         )
 
     def configure_network(self):
-        return models.LIFFCNet()
+        return models.PLIFSFNN()
 
     def configure_criterion(self):
         return torch.nn.CrossEntropyLoss()
