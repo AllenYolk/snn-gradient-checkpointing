@@ -52,12 +52,6 @@ api = {
         handwritten_lif_backward_not_detached_compiled,
     "handwritten_lif_backward_detached":
         handwritten_lif_backward_detached_compiled,
-    "handwritten_hqlif_forward":
-        handwritten_hqlif_forward_compiled,
-    "handwritten_hqlif_backward_not_detached":
-        handwritten_hqlif_backward_not_detached_compiled,
-    "handwritten_hqlif_backward_detached":
-        handwritten_hqlif_backward_detached_compiled,
     "psn_forward":
         psn_forward_compiled,
     "sliding_psn_forward":
@@ -84,20 +78,6 @@ else:
     print("Using torch kernels for BitSpikeCompressor.")
     print("Using torch kernels for HandWrittenLIF.")
 
-if TRITON_FLOAT8E4NV_AVAILABLE or (
-    TRITON_AVAILABLE and (not TORCH_FLOAT8E4M3FN_AVAILABLE)
-):
-    print("Using Triton kernels for HQLIF.")
-    api["handwritten_hqlif_forward"] = handwritten_hqlif_forward_triton
-    api["handwritten_hqlif_backward_not_detached"] = (
-        handwritten_hqlif_backward_not_detached_triton
-    )
-    api["handwritten_hqlif_backward_detached"] = (
-        handwritten_hqlif_backward_detached_triton
-    )
-else:
-    print("Using torch kernels for HQLIF.")
-
 linear_forward = api["linear_forward"]
 linear_bn_forward = api["linear_bn_forward"]
 avgpool1d_flatten_linear_forward = api["avgpool1d_flatten_linear_forward"]
@@ -121,11 +101,6 @@ handwritten_lif_backward_not_detached = (
     api["handwritten_lif_backward_not_detached"]
 )
 handwritten_lif_backward_detached = api["handwritten_lif_backward_detached"]
-handwritten_hqlif_forward = api["handwritten_hqlif_forward"]
-handwritten_hqlif_backward_not_detached = (
-    api["handwritten_hqlif_backward_not_detached"]
-)
-handwritten_hqlif_backward_detached = api["handwritten_hqlif_backward_detached"]
 psn_forward = api["psn_forward"]
 sliding_psn_forward = api["sliding_psn_forward"]
 bit_spike_compress = api["bit_spike_compress"]

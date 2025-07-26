@@ -10,7 +10,6 @@ model:
   network: LIFFCNet
   neuron_type: SJLIF
   spike_compressor: NullSpikeCompressor
-  lomo: False
 
 
 data:

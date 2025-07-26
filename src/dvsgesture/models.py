@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from spikingjelly.activation_based import layer
+from spikingjelly.activation_based import layer, functional
 from spikingjelly.activation_based.neuron import ParametricLIFNode
 
 
@@ -114,9 +114,7 @@ class ResNetN(nn.Module):
                 num_blocks = cfg_dict['num_blocks']
                 if cfg_dict['block_type'] == 'sew':
                     for _ in range(num_blocks):
-                        conv.append(
-                            SEWBlock(in_channels, mid_channels, connect_f)
-                        )
+                        conv.append(SEWBlock(in_channels, mid_channels))
                 elif cfg_dict['block_type'] == 'plain':
                     for _ in range(num_blocks):
                         conv.append(PlainBlock(in_channels, mid_channels))
@@ -146,6 +144,7 @@ class ResNetN(nn.Module):
         self.out = nn.Linear(out_features, num_classes)
 
     def forward(self, x_seq: torch.Tensor):
+        functional.reset_net(self)
         # x_seq.shape = [N, T, 2, H, W]
         x_seq = x_seq.permute(1, 0, 2, 3, 4)  # [T, N, 2, H, W]
         x_seq = self.conv(x_seq)

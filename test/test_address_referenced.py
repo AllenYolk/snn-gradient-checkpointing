@@ -40,34 +40,25 @@ def test_linear_lif_address_referenced():
     x = x.to("cuda")
     print(f"network input: {x.data_ptr()}")
 
-    h_quantizer_type = "NullHQuantizer"
     net = nn.Sequential(
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(
-                h_quantizer=get_h_quantizer(h_quantizer_type)
-            ),
+            neuron=HandWrittenLIF(),
             spike_compressor=Uint8SpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(
-                h_quantizer=get_h_quantizer(h_quantizer_type)
-            ),
+            neuron=HandWrittenLIF(),
             spike_compressor=BooleanSpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(
-                h_quantizer=get_h_quantizer(h_quantizer_type)
-            ),
+            neuron=HandWrittenLIF(),
             spike_compressor=BitSpikeCompressor(),
         ),
         LinearLIF(
             proj=nn.Linear(C, C),
-            neuron=HandWrittenLIF(
-                h_quantizer=get_h_quantizer(h_quantizer_type)
-            ),
+            neuron=HandWrittenLIF(),
             spike_compressor=SparseSpikeCompressor(),
         )
     ).to("cuda")

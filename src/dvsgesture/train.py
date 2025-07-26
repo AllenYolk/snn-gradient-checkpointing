@@ -16,7 +16,6 @@ else:
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch import callbacks
 
-from utils import Lomo
 import models
 from modules import ClassificationLightningModule
 from utils.lightning_callbacks import *
@@ -30,14 +29,12 @@ class DVSGestureLightningModule(ClassificationLightningModule):
         network: str,
         neuron_type: str,
         spike_compressor: str,
-        lomo: bool = False,
     ):
         super().__init__(
-            num_classes=10,
+            num_classes=11,
             network=network,
             neuron_type=neuron_type,
             spike_compressor=spike_compressor,
-            lomo=lomo,
         )
 
     def configure_network(self):
@@ -66,7 +63,7 @@ def main():
                 "class_path": "CSVLogger",
                 "init_args": {
                     "save_dir": "./logs",
-                    "name": "SHD"
+                    "name": "DVSGesture"
                 }
             },
             "enable_model_summary": False,
