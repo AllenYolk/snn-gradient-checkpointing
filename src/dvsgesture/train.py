@@ -26,19 +26,28 @@ class DVSGestureLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
+        T: int,
         network: str,
         neuron_type: str,
         spike_compressor: str,
     ):
         super().__init__(
             num_classes=11,
+            T=T,
             network=network,
             neuron_type=neuron_type,
             spike_compressor=spike_compressor,
         )
 
     def configure_network(self):
-        return models.SEWResNet()
+        return getattr(models, self.hparams.network)(
+            neuron_type=self.hparams.neuron_type,
+            T=self.hparams.T,
+            spike_compressor=self.hparams.spike_compressor,
+            decay_lambda=0.5,
+            detach_reset=True,
+            k=4,
+        )
 
     def configure_criterion(self):
         return nn.CrossEntropyLoss()
@@ -82,6 +91,7 @@ def main():
         SamplePerSecondCallback(),
         PeakMemoryTillNowCallback(),
     ]
+    assert cli.model.hparams.T == cli.datamodule.T
     if cli.trainer.is_global_zero:
         print(cli.model)
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
