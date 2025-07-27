@@ -53,7 +53,7 @@ class MyDataset(data.Dataset):
 
     def __getitem__(self, index):
         p = str(self.data_paths[index])
-        x = torch.from_numpy(np.load(p))
+        x = torch.from_numpy(np.load(p)).to(torch.float32)
         y_ = p.split('_')[-1]
         y_ = int(y_.split('.')[0])
         y = torch.tensor(int(y_))

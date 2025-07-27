@@ -12,6 +12,7 @@ if npu_available:
 else:
     print("NPU is not available.")
 
+from lightning.pytorch import profilers
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch import callbacks
 
@@ -26,30 +27,29 @@ class SHDLightningModule(ClassificationLightningModule):
     def __init__(
         self,
         network: str,
-        neuron_type: str,
         spike_compressor: str,
     ):
         super().__init__(
             num_classes=20,
             network=network,
-            neuron_type=neuron_type,
             spike_compressor=spike_compressor,
         )
 
     def configure_network(self):
-        return models.PLIFSFNN()
+        net_class = getattr(models, self.hparams.network)
+        return net_class(spike_compressor=self.hparams.spike_compressor)
 
     def configure_criterion(self):
         return torch.nn.CrossEntropyLoss()
 
     def configure_optimizers(self):
         learning_rate = 1e-2
-        base_params = [
-            self.net.dense_2.dense.weight,
-            self.net.dense_2.dense.bias,
-            self.net.dense_1.dense.weight,
-            self.net.dense_1.dense.bias,
-        ]
+        base_params, other_params = [], []
+        for name, param in self.named_parameters():
+            if name.endswith(".tau_m"):
+                other_params.append(param)
+            else:
+                base_params.append(param)
         optimizer = torch.optim.Adam(
             [
                 {
@@ -57,11 +57,7 @@ class SHDLightningModule(ClassificationLightningModule):
                     'lr': learning_rate
                 },
                 {
-                    'params': self.net.dense_2.tau_m,
-                    'lr': learning_rate * 2
-                },
-                {
-                    'params': self.net.dense_1.tau_m,
+                    'params': other_params,
                     'lr': learning_rate * 2
                 },
             ],

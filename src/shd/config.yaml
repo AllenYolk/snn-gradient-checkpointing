@@ -7,8 +7,7 @@ trainer:
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
 
 model:
-  network: LIFFCNet
-  neuron_type: SJLIF
+  network: PLIFSFNN
   spike_compressor: NullSpikeCompressor
 
 
