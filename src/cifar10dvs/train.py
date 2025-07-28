@@ -89,8 +89,22 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
 
 def main():
     cli = LightningCLI(
-        CIFAR10DVSLightningModule, CIFAR10DVSDataModule, run=False
+        CIFAR10DVSLightningModule,
+        CIFAR10DVSDataModule,
+        run=False,
+        trainer_defaults={
+            "logger": {
+                "class_path": "CSVLogger",
+                "init_args": {
+                    "save_dir": "./logs",
+                    "name": "SHD"
+                }
+            },
+            "enable_model_summary": False,
+            "enable_checkpointing": False,
+        }
     )
+    assert cli.model.hparams.T == cli.datamodule.T
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(
