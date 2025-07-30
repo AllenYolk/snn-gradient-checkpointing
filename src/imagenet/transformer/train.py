@@ -143,7 +143,20 @@ class CustomLightningCLI(LightningCLI):
 
 def main():
     cli = CustomLightningCLI(
-        TransformerImageNetLightningModule, ImageNetDataModule, run=False
+        TransformerImageNetLightningModule,
+        ImageNetDataModule,
+        run=False,
+        trainer_defaults={
+            "logger": {
+                "class_path": "CSVLogger",
+                "init_args": {
+                    "save_dir": "./logs",
+                    "name": "ImageNet-transformer"
+                }
+            },
+            "enable_model_summary": False,
+            "enable_checkpointing": False,
+        }
     )
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),

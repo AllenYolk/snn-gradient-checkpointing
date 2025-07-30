@@ -79,7 +79,22 @@ class SCIFARLightningModule(ClassificationLightningModule):
 
 
 def main():
-    cli = LightningCLI(SCIFARLightningModule, SCIFARDataModule, run=False)
+    cli = LightningCLI(
+        SCIFARLightningModule,
+        SCIFARDataModule,
+        run=False,
+        trainer_defaults={
+            "logger": {
+                "class_path": "CSVLogger",
+                "init_args": {
+                    "save_dir": "./logs",
+                    "name": "SCIFAR"
+                }
+            },
+            "enable_model_summary": False,
+            "enable_checkpointing": False,
+        }
+    )
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(

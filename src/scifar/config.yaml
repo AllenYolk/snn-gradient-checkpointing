@@ -5,8 +5,6 @@ trainer:
   precision: 32
   num_sanity_val_steps: 0
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
-  enable_model_summary: False # disable automatic model summary; use callback instead
-  enable_checkpointing: False # disable automatic checkpointing; use callback instead
 
 model:
   num_classes: 10
