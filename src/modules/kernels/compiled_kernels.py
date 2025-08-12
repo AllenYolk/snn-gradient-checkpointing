@@ -20,7 +20,7 @@ print(f"DEFAULT_BACKEND is manually set to {DEFAULT_BACKEND}. ")
 
 def _conditional_compile(
     fullgraph=False,
-    dynamic=False,
+    dynamic=True,
     backend=DEFAULT_BACKEND,
     mode="default",
     disable=DISABLE_COMPILE

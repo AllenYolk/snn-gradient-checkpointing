@@ -7,8 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from spikingjelly.activation_based import surrogate
 
-from modules.blocks.checkpointing import BaseCheckpointingBlock
-from modules.blocks.checkpointing import SNNCheckpointingBlockFunction
+from modules.blocks.checkpointing import BaseGCBlock
+from modules.blocks.checkpointing import InputCompressedGCFunction
 from modules.compress import get_spike_compressor
 
 
@@ -59,7 +59,7 @@ class LinearPLIF(nn.Module):
         return s_seq
 
 
-class LinearPLIFCheckpointing(BaseCheckpointingBlock):
+class LinearPLIFCheckpointing(BaseGCBlock):
 
     def __init__(
         self,
@@ -105,7 +105,7 @@ class LinearPLIFCheckpointing(BaseCheckpointingBlock):
         return s_seq
 
     def forward(self, x_seq):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -200,7 +200,7 @@ class LinearOutputPLIFCheckpointing(nn.Module):
         return v_seq
 
     def forward(self, x_seq):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -383,7 +383,7 @@ class LinearDHLIFCheckpointing(nn.Module):
         return s_seq
 
     def forward(self, x_seq):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,

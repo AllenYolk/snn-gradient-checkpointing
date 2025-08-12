@@ -4,11 +4,11 @@ import torch.nn as nn
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
 from ..kernels import *
-from .checkpointing import SNNCheckpointingBlockFunction, BaseCheckpointingBlock
+from .checkpointing import InputCompressedGCFunction, BaseGCBlock
 from ..tebn import TEBNProjection
 
 
-class Conv2d(BaseCheckpointingBlock):
+class Conv2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -41,7 +41,7 @@ class Conv2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -54,7 +54,7 @@ class Conv2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dLIF(BaseCheckpointingBlock):
+class Conv2dLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class Conv2dLIF(BaseCheckpointingBlock):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -99,7 +99,7 @@ class Conv2dLIF(BaseCheckpointingBlock):
         )
 
 
-class Conv2dPSN(BaseCheckpointingBlock):
+class Conv2dPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -131,7 +131,7 @@ class Conv2dPSN(BaseCheckpointingBlock):
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -146,7 +146,7 @@ class Conv2dPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dSlidingPSN(BaseCheckpointingBlock):
+class Conv2dSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -181,7 +181,7 @@ class Conv2dSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -197,7 +197,7 @@ class Conv2dSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBN(BaseCheckpointingBlock):
+class Conv2dBN(BaseGCBlock):
 
     def __init__(
         self,
@@ -243,7 +243,7 @@ class Conv2dBN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -261,7 +261,7 @@ class Conv2dBN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNLIF(BaseCheckpointingBlock):
+class Conv2dBNLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -311,7 +311,7 @@ class Conv2dBNLIF(BaseCheckpointingBlock):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -330,7 +330,7 @@ class Conv2dBNLIF(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNPSN(BaseCheckpointingBlock):
+class Conv2dBNPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -381,7 +381,7 @@ class Conv2dBNPSN(BaseCheckpointingBlock):
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -401,7 +401,7 @@ class Conv2dBNPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
+class Conv2dBNSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -455,7 +455,7 @@ class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -476,7 +476,7 @@ class Conv2dBNSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dTEBN(BaseCheckpointingBlock):
+class Conv2dTEBN(BaseGCBlock):
 
     def __init__(
         self,
@@ -526,7 +526,7 @@ class Conv2dTEBN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -545,7 +545,7 @@ class Conv2dTEBN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dTEBNLIF(BaseCheckpointingBlock):
+class Conv2dTEBNLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -599,7 +599,7 @@ class Conv2dTEBNLIF(BaseCheckpointingBlock):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -619,7 +619,7 @@ class Conv2dTEBNLIF(BaseCheckpointingBlock):
         )
 
 
-class Conv2dTEBNSlidingPSN(BaseCheckpointingBlock):
+class Conv2dTEBNSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -677,7 +677,7 @@ class Conv2dTEBNSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -699,7 +699,7 @@ class Conv2dTEBNSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class AvgPool2dConv2dBNLIF(BaseCheckpointingBlock):
+class AvgPool2dConv2dBNLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -757,7 +757,7 @@ class AvgPool2dConv2dBNLIF(BaseCheckpointingBlock):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -779,7 +779,7 @@ class AvgPool2dConv2dBNLIF(BaseCheckpointingBlock):
         )
 
 
-class AvgPool2dConv2dBNPSN(BaseCheckpointingBlock):
+class AvgPool2dConv2dBNPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -838,7 +838,7 @@ class AvgPool2dConv2dBNPSN(BaseCheckpointingBlock):
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -861,7 +861,7 @@ class AvgPool2dConv2dBNPSN(BaseCheckpointingBlock):
         )
 
 
-class AvgPool2dConv2dBNSlidingPSN(BaseCheckpointingBlock):
+class AvgPool2dConv2dBNSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -923,7 +923,7 @@ class AvgPool2dConv2dBNSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -947,7 +947,7 @@ class AvgPool2dConv2dBNSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class AvgPool2dConv2dTEBNLIF(BaseCheckpointingBlock):
+class AvgPool2dConv2dTEBNLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -1009,7 +1009,7 @@ class AvgPool2dConv2dTEBNLIF(BaseCheckpointingBlock):
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -1032,7 +1032,7 @@ class AvgPool2dConv2dTEBNLIF(BaseCheckpointingBlock):
         )
 
 
-class AvgPool2dConv2dTEBNSlidingPSN(BaseCheckpointingBlock):
+class AvgPool2dConv2dTEBNSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -1098,7 +1098,7 @@ class AvgPool2dConv2dTEBNSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, x_seq: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
@@ -1123,7 +1123,7 @@ class AvgPool2dConv2dTEBNSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNLIFMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNLIFMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1182,7 +1182,7 @@ class Conv2dBNLIFMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1205,7 +1205,7 @@ class Conv2dBNLIFMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNPSNMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNPSNMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1265,7 +1265,7 @@ class Conv2dBNPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1289,7 +1289,7 @@ class Conv2dBNPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNSlidingPSNMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNSlidingPSNMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1352,7 +1352,7 @@ class Conv2dBNSlidingPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1377,7 +1377,7 @@ class Conv2dBNSlidingPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1433,7 +1433,7 @@ class Conv2dBNMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1455,7 +1455,7 @@ class Conv2dBNMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNMaxPool2dLIF(BaseCheckpointingBlock):
+class Conv2dBNMaxPool2dLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -1515,7 +1515,7 @@ class Conv2dBNMaxPool2dLIF(BaseCheckpointingBlock):
         return neuron(x_seq)
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1538,7 +1538,7 @@ class Conv2dBNMaxPool2dLIF(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNMaxPool2dPSN(BaseCheckpointingBlock):
+class Conv2dBNMaxPool2dPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -1599,7 +1599,7 @@ class Conv2dBNMaxPool2dPSN(BaseCheckpointingBlock):
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1623,7 +1623,7 @@ class Conv2dBNMaxPool2dPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNMaxPool2dSlidingPSN(BaseCheckpointingBlock):
+class Conv2dBNMaxPool2dSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -1687,7 +1687,7 @@ class Conv2dBNMaxPool2dSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1712,7 +1712,7 @@ class Conv2dBNMaxPool2dSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNRepeatLIFMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNRepeatLIFMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1775,7 +1775,7 @@ class Conv2dBNRepeatLIFMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1799,7 +1799,7 @@ class Conv2dBNRepeatLIFMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNRepeatPSNMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNRepeatPSNMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1863,7 +1863,7 @@ class Conv2dBNRepeatPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,
@@ -1888,7 +1888,7 @@ class Conv2dBNRepeatPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
 
-class Conv2dBNRepeatSlidingPSNMaxPool2d(BaseCheckpointingBlock):
+class Conv2dBNRepeatSlidingPSNMaxPool2d(BaseGCBlock):
 
     def __init__(
         self,
@@ -1955,7 +1955,7 @@ class Conv2dBNRepeatSlidingPSNMaxPool2d(BaseCheckpointingBlock):
         )
 
     def forward(self, x: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             x,

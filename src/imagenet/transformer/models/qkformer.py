@@ -1231,3 +1231,262 @@ class PGCQKFormer(nn.Module):
         x = self.forward_features(x)
         x = self.head(x.mean(0))
         return x  # [B, num_classes]
+
+
+class QKFormerVideo(nn.Module):
+
+    def __init__(
+        self,
+        neuron_type,
+        T=4,
+        in_channels=3,
+        img_size_h=224,
+        img_size_w=224,
+        patch_size=16,
+        num_classes=1000,
+        embed_dims=768,
+        num_heads=8,
+        mlp_ratios=4,
+        depths=9,
+        **kwargs,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.depths = depths
+        self.T = T
+        kwargs["T"] = T
+
+        self.patch_embed1 = PatchEmbedInit(
+            neuron_type,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            in_channels=in_channels,
+            embed_dims=embed_dims // 4,
+            checkpointing=[False, False, False, False],
+            **kwargs
+        )
+        self.block1 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 4,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=[False, False],
+                **kwargs
+            ) for _ in range(1)
+        ])
+
+        self.patch_embed2 = PatchEmbedStage(
+            neuron_type,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            embed_dims=embed_dims // 2,
+            checkpointing=[False, False, False],
+            **kwargs
+        )
+        self.block2 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 2,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=[False, False],
+                **kwargs
+            ) for _ in range(2)
+        ])
+
+        self.patch_embed3 = PatchEmbedStage(
+            neuron_type,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            embed_dims=embed_dims,
+            checkpointing=[False, False, False],
+            **kwargs
+        )
+        self.block3 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="SSA",
+                dim=embed_dims,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=[False, False],
+                **kwargs
+            ) for _ in range(depths - 3)
+        ])
+
+        # classification head
+        if num_classes > 0:
+            self.head = nn.Linear(embed_dims, num_classes)
+        else:
+            self.head = nn.Identity()
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward_features(self, x):
+        x = self.patch_embed1(x)
+        for blk in self.block1:
+            x = blk(x)  # [T, B, C, H, W]
+
+        x = self.patch_embed2(x)
+        for blk in self.block2:
+            x = blk(x)
+
+        x = self.patch_embed3(x)
+        for blk in self.block3:
+            x = blk(x)
+
+        return x.flatten(3).mean(3)
+
+    def forward(self, x):
+        x = x.repeat(self.T, 1, 1, 1, 1)  # [T, B, C, H, W]
+        x = self.forward_features(x)
+        x = self.head(x.mean(0))
+        return x  # [B, num_classes]
+
+
+class PGCQKFormerVideo(nn.Module):
+
+    def __init__(
+        self,
+        neuron_type,
+        spike_compressor: str,
+        T=4,
+        in_channels=3,
+        img_size_h=224,
+        img_size_w=224,
+        patch_size=16,
+        num_classes=1000,
+        embed_dims=768,
+        num_heads=8,
+        mlp_ratios=4,
+        depths=9,
+        **kwargs,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.depths = depths
+        self.T = T
+        kwargs["T"] = T
+
+        self.patch_embed1 = PatchEmbedInit(
+            neuron_type,
+            spike_compressor,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            in_channels=in_channels,
+            embed_dims=embed_dims // 4,
+            checkpointing=[True, True, True, True],
+            **kwargs
+        )
+        self.block1 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 4,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=[True, False],
+                spike_compressor=spike_compressor,
+                split_critical_layer=(
+                    (i == 0) and (neuron_type_to_str(neuron_type) != "LIF")
+                ),
+                **kwargs
+            ) for i in range(1)
+        ])
+
+        self.patch_embed2 = PatchEmbedStage(
+            neuron_type,
+            spike_compressor,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            embed_dims=embed_dims // 2,
+            checkpointing=[True, False, True],
+            **kwargs
+        )
+        self.block2 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="QKA",
+                dim=embed_dims // 2,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=[True, i < 1],
+                spike_compressor=spike_compressor,
+                **kwargs
+            ) for i in range(2)
+        ])
+
+        self.patch_embed3 = PatchEmbedStage(
+            neuron_type,
+            spike_compressor,
+            img_size_h=img_size_h,
+            img_size_w=img_size_w,
+            patch_size=patch_size,
+            embed_dims=embed_dims,
+            checkpointing=[True, True, True],
+            **kwargs
+        )
+        self.block3 = nn.ModuleList([
+            Block(
+                neuron_type,
+                attn_type="SSA",
+                dim=embed_dims,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratios,
+                checkpointing=[True, i < depths - 4],
+                spike_compressor=spike_compressor,
+                **kwargs
+            ) for i in range(depths - 3)
+        ])
+
+        # classification head
+        if num_classes > 0:
+            self.head = nn.Linear(embed_dims, num_classes)
+        else:
+            self.head = nn.Identity()
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward_features(self, x):
+        x = self.patch_embed1(x)
+        for blk in self.block1:
+            x = blk(x)  # [T, B, C, H, W]
+
+        x = self.patch_embed2(x)
+        for blk in self.block2:
+            x = blk(x)
+
+        x = self.patch_embed3(x)
+        for blk in self.block3:
+            x = blk(x)
+        return x.flatten(3).mean(3)
+
+    def forward(self, x):
+        x = x.repeat(self.T, 1, 1, 1, 1)  # [T, B, C, H, W]
+        x = self.forward_features(x)
+        x = self.head(x.mean(0))
+        return x  # [B, num_classes]

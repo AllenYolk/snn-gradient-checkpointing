@@ -5,8 +5,20 @@ import torch.autograd as autograd
 from ..amp import get_autocast_context, is_autocast_enabled
 
 
-class SNNCheckpointingBlockFunction(autograd.Function):
-    """Reference:
+class InputCompressedGCFunction(autograd.Function):
+    """Gradient checkpointing with input compression.
+
+    Args:
+        forward_function (callable): the forward function whose arguments will
+            be checkpointed.
+        x_compressor (BaseSpikeCompressor): the compressor for x_seq
+        x_seq (Tensor): the input to be compressed and checkpointed.
+        *args: other arguments that will be checkpointed without compression.
+
+    Returns:
+        a Tensor or a tuple
+
+    Reference:
     https://github.com/pytorch/pytorch/blob/v2.6.0/torch/utils/checkpoint.py
     """
 
@@ -40,11 +52,11 @@ class SNNCheckpointingBlockFunction(autograd.Function):
 
         # depend on external autocast context
         with torch.no_grad():
-            y_seq = forward_function(x_seq, *args, in_backward=False)
-        return y_seq
+            outputs = forward_function(x_seq, *args, in_backward=False)
+        return outputs  # tensor or tuple
 
     @staticmethod
-    def backward(ctx, grad_y_seq):
+    def backward(ctx, *grad_outputs):
         cnt_input = len(ctx.input_args) + 2
         grads = [None] * cnt_input
 
@@ -69,8 +81,13 @@ class SNNCheckpointingBlockFunction(autograd.Function):
                             tensor_args[i].requires_grad
                         )
                         args[idx] = tensor_args[i].detach().requires_grad_(rg)
-                    y_seq = ctx.forward_function(x_seq, *args, in_backward=True)
-                y_seq.backward(grad_y_seq)
+                    outputs = ctx.forward_function(
+                        x_seq, *args, in_backward=False
+                    )
+                # grad_outputs is a tuple, while outputs can be a tensor or a tuple
+                if isinstance(outputs, torch.Tensor):
+                    outputs = (outputs,)
+                torch.autograd.backward(outputs, grad_outputs)
 
             if ctx.needs_input_grad[2]:
                 grads[2] = x_seq.grad
@@ -81,7 +98,7 @@ class SNNCheckpointingBlockFunction(autograd.Function):
         return tuple(grads)
 
 
-class BaseCheckpointingBlock(nn.Module):
+class BaseGCBlock(nn.Module):
 
     def __init__(self):
         super().__init__()

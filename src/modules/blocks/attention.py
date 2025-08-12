@@ -4,10 +4,10 @@ import torch.nn as nn
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
 from ..kernels import *
-from .checkpointing import SNNCheckpointingBlockFunction, BaseCheckpointingBlock
+from .checkpointing import InputCompressedGCFunction, BaseGCBlock
 
 
-class SSACoreLIF(BaseCheckpointingBlock):
+class SSACoreLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class SSACoreLIF(BaseCheckpointingBlock):
         return neuron(x)
 
     def forward(self, qkv: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -35,7 +35,7 @@ class SSACoreLIF(BaseCheckpointingBlock):
         )
 
 
-class SSACorePSN(BaseCheckpointingBlock):
+class SSACorePSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -56,7 +56,7 @@ class SSACorePSN(BaseCheckpointingBlock):
         return PSN.forward_function(x, neuron_weight, neuron_bias)
 
     def forward(self, qkv: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -66,7 +66,7 @@ class SSACorePSN(BaseCheckpointingBlock):
         )
 
 
-class SSACoreSlidingPSN(BaseCheckpointingBlock):
+class SSACoreSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -89,7 +89,7 @@ class SSACoreSlidingPSN(BaseCheckpointingBlock):
         )
 
     def forward(self, qkv: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -100,7 +100,7 @@ class SSACoreSlidingPSN(BaseCheckpointingBlock):
         )
 
 
-class QKACoreLIF(BaseCheckpointingBlock):
+class QKACoreLIF(BaseGCBlock):
 
     def __init__(
         self,
@@ -120,7 +120,7 @@ class QKACoreLIF(BaseCheckpointingBlock):
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
     def forward(self, qkv: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -128,7 +128,7 @@ class QKACoreLIF(BaseCheckpointingBlock):
         )
 
 
-class QKACorePSN(BaseCheckpointingBlock):
+class QKACorePSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -148,7 +148,7 @@ class QKACorePSN(BaseCheckpointingBlock):
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
     def forward(self, qkv: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -157,7 +157,7 @@ class QKACorePSN(BaseCheckpointingBlock):
         )
 
 
-class QKACoreSlidingPSN(BaseCheckpointingBlock):
+class QKACoreSlidingPSN(BaseGCBlock):
 
     def __init__(
         self,
@@ -179,7 +179,7 @@ class QKACoreSlidingPSN(BaseCheckpointingBlock):
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
     def forward(self, qkv: torch.Tensor):
-        return SNNCheckpointingBlockFunction.apply(
+        return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
