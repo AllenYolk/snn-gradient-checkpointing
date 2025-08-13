@@ -22,7 +22,15 @@ class SSACoreLIF(BaseGCBlock):
 
     @staticmethod
     def conventional_forward(qkv, scale, neuron, in_backward=False):
-        x = ssa_core_forward(qkv, scale)
+        # qkv.shape = [3, T, B, num_heads, num_patches, C//num_heads]
+        q = qkv[0]
+        k = qkv[1]
+        v = qkv[2]  # [T, B, num_heads, num_patches, C//num_heads]
+
+        x = k.transpose(-2, -1) @ v
+        x = (q@x) * scale
+        x = x.transpose(-1, -2)  # [T, B, num_heads, C//num_heads, num_patches]
+        x = x.reshape(x.shape[0], x.shape[1], -1, x.shape[-1])
         return neuron(x)
 
     def forward(self, qkv: torch.Tensor):
@@ -52,7 +60,15 @@ class SSACorePSN(BaseGCBlock):
     def conventional_forward(
         qkv, scale, neuron_weight, neuron_bias, in_backward=False
     ):
-        x = ssa_core_forward(qkv, scale)
+        # qkv.shape = [3, T, B, num_heads, num_patches, C//num_heads]
+        q = qkv[0]
+        k = qkv[1]
+        v = qkv[2]  # [T, B, num_heads, num_patches, C//num_heads]
+
+        x = k.transpose(-2, -1) @ v
+        x = (q@x) * scale
+        x = x.transpose(-1, -2)  # [T, B, num_heads, C//num_heads, num_patches]
+        x = x.reshape(x.shape[0], x.shape[1], -1, x.shape[-1])
         return PSN.forward_function(x, neuron_weight, neuron_bias)
 
     def forward(self, qkv: torch.Tensor):
@@ -83,7 +99,15 @@ class SSACoreSlidingPSN(BaseGCBlock):
     def conventional_forward(
         qkv, scale, neuron_weight, neuron_bias, neuron_k, in_backward=False
     ):
-        x = ssa_core_forward(qkv, scale)
+        # qkv.shape = [3, T, B, num_heads, num_patches, C//num_heads]
+        q = qkv[0]
+        k = qkv[1]
+        v = qkv[2]  # [T, B, num_heads, num_patches, C//num_heads]
+
+        x = k.transpose(-2, -1) @ v
+        x = (q@x) * scale
+        x = x.transpose(-1, -2)  # [T, B, num_heads, C//num_heads, num_patches]
+        x = x.reshape(x.shape[0], x.shape[1], -1, x.shape[-1])
         return SlidingPSN.forward_function(
             x, neuron_weight, neuron_bias, neuron_k
         )

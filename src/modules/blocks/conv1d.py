@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
@@ -29,15 +30,11 @@ class Conv1d(BaseGCBlock):
         groups,
         in_backward=False
     ):
-        return conv1d_forward(
-            x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-        )
+        T = x_seq.size(0)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x_seq: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -78,9 +75,10 @@ class Conv1dLIF(BaseGCBlock):
         neuron,
         in_backward=False,  # will be used in checkpointing function
     ):
-        y_seq = conv1d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
+        T = x_seq.size(0)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        y_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
         return neuron(y_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -124,9 +122,10 @@ class Conv1dPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False,  # will be used in checkpointing function
     ):
-        x_seq = conv1d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
+        T = x_seq.size(0)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -172,9 +171,10 @@ class Conv1dSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False,  # will be used in checkpointing function
     ):
-        x_seq = conv1d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
+        T = x_seq.size(0)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -228,21 +228,19 @@ class Conv1dBNLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        x_seq = conv1d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -298,21 +296,19 @@ class Conv1dBNPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        x_seq = conv1d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -370,21 +366,19 @@ class Conv1dBNSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        x_seq = conv1d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -448,24 +442,20 @@ class AvgPool1dConv1dBNLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        y_seq = avgpool1d_conv1d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool1d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(y_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -529,24 +519,20 @@ class AvgPool1dConv1dBNPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        y_seq = avgpool1d_conv1d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool1d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(y_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -612,25 +598,20 @@ class AvgPool1dConv1dBNSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-
-        y_seq = avgpool1d_conv1d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool1d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv1d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             y_seq, neuron_weight, neuron_bias, neuron_k
         )

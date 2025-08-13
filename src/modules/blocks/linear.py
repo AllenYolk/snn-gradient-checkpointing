@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
@@ -22,7 +23,7 @@ class LinearLIF(BaseGCBlock):
 
     @staticmethod
     def conventional_forward(x_seq, weight, bias, neuron, in_backward=False):
-        y_seq = linear_forward(x_seq, weight, bias)
+        y_seq = F.linear(x_seq, weight, bias)
         return neuron(y_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -53,7 +54,7 @@ class LinearPSN(BaseGCBlock):
     def conventional_forward(
         x_seq, weight, bias, neuron_weight, neuron_bias, in_backward=False
     ):
-        y_seq = linear_forward(x_seq, weight, bias)
+        y_seq = F.linear(x_seq, weight, bias)
         return PSN.forward_function(y_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -87,7 +88,7 @@ class LinearSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        y_seq = linear_forward(x_seq, weight, bias)
+        y_seq = F.linear(x_seq, weight, bias)
         return SlidingPSN.forward_function(
             y_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -133,17 +134,19 @@ class LinearBNLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        y_seq = linear_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = F.linear(x_seq, weight, bias)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(y_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -191,17 +194,19 @@ class LinearBNPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        x_seq = linear_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = F.linear(x_seq, weight, bias)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -252,17 +257,19 @@ class LinearBNSlidingPSN(BaseGCBlock):
         spike_compressor,
         in_backward=False
     ):
-        x_seq = linear_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = F.linear(x_seq, weight, bias)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -312,9 +319,17 @@ class AvgPool1dFlattenLinearLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        y_seq = avgpool1d_flatten_linear_forward(
-            x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
+        T, N = x_seq.size(0), x_seq.size(1)
+        y_seq = x_seq.flatten(0, 1)
+        y_seq = F.avg_pool1d(
+            y_seq,
+            kernel_size=pool_kernel_size,
+            stride=pool_stride,
+            padding=pool_padding
         )
+        y_seq = y_seq.flatten(1)
+        y_seq = F.linear(y_seq, weight, bias)
+        y_seq = y_seq.reshape(T, N, -1)
         return neuron(y_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -358,9 +373,17 @@ class AvgPool1dFlattenLinearPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        y_seq = avgpool1d_flatten_linear_forward(
-            x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
+        T, N = x_seq.size(0), x_seq.size(1)
+        y_seq = x_seq.flatten(0, 1)
+        y_seq = F.avg_pool1d(
+            y_seq,
+            kernel_size=pool_kernel_size,
+            stride=pool_stride,
+            padding=pool_padding
         )
+        y_seq = y_seq.flatten(1)
+        y_seq = F.linear(y_seq, weight, bias)
+        y_seq = y_seq.reshape(T, N, -1)
         return PSN.forward_function(y_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -406,9 +429,17 @@ class AvgPool1dFlattenLinearSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        y_seq = avgpool1d_flatten_linear_forward(
-            x_seq, pool_kernel_size, pool_stride, pool_padding, weight, bias
+        T, N = x_seq.size(0), x_seq.size(1)
+        y_seq = x_seq.flatten(0, 1)
+        y_seq = F.avg_pool1d(
+            y_seq,
+            kernel_size=pool_kernel_size,
+            stride=pool_stride,
+            padding=pool_padding
         )
+        y_seq = y_seq.flatten(1)
+        y_seq = F.linear(y_seq, weight, bias)
+        y_seq = y_seq.reshape(T, N, -1)
         return SlidingPSN.forward_function(
             y_seq, neuron_weight, neuron_bias, neuron_k
         )

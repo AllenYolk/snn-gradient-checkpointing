@@ -120,7 +120,10 @@ class PSN(neuron.PSN):
 
     @staticmethod
     def forward_function(x_seq, weight, bias):
-        return psn_forward(x_seq, weight, bias)
+        # x_seq.shape = [T, N, ...]; weight.shape = [T, T]; bias.shape = [T, 1]
+        h_seq = torch.addmm(bias, weight, x_seq.flatten(1))
+        s_seq = surrogate.atan.apply(h_seq, 2.)
+        return s_seq.reshape(x_seq.shape)
 
 
 class SlidingPSN(neuron.SlidingPSN):
@@ -148,7 +151,20 @@ class SlidingPSN(neuron.SlidingPSN):
 
     @staticmethod
     def forward_function(x_seq, weight, bias, k):
-        return sliding_psn_forward(x_seq, weight, bias, k)
+        T = x_seq.shape[0]
+        gemm_weight = torch.zeros([T, T], device=weight.device)
+        for i in range(T):
+            end = i + 1
+            start = max(0, i + 1 - k)
+            length = min(end - start, k)
+            gemm_weight[i][start:end] = weight[k - length:k]
+
+        h_seq = torch.addmm(
+            bias,
+            gemm_weight,
+            x_seq.flatten(1),
+        ).reshape(x_seq.shape)
+        return surrogate.atan.apply(h_seq, 2.)
 
 
 # ================ Hand-written Multistep LIF neuron ================

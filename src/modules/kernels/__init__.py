@@ -10,52 +10,12 @@ from .triton_kernels import *
 
 # api dict
 api = {
-    "linear_forward":
-        linear_forward_compiled,
-    "linear_bn_forward":
-        linear_bn_forward_compiled,
-    "avgpool1d_flatten_linear_forward":
-        avgpool1d_flatten_linear_forward_compiled,
-    "conv1d_forward":
-        conv1d_forward_compiled,
-    "conv1d_bn_forward":
-        conv1d_bn_forward_compiled,
-    "avgpool1d_conv1d_bn_forward":
-        avgpool1d_conv1d_bn_forward_compiled,
-    "bn_forward":
-        bn_forward_compiled,
-    "tebn_forward":
-        tebn_forward_compiled,
-    "conv2d_forward":
-        conv2d_forward_compiled,
-    "avgpool2d_forward":
-        avgpool2d_forward_compiled,
-    "maxpool2d_forward":
-        maxpool2d_forward_compiled,
-    "conv2d_bn_forward":
-        conv2d_bn_forward_compiled,
-    "conv2d_bn_maxpool2d_forward":
-        conv2d_bn_maxpool2d_forward_compiled,
-    "conv2d_tebn_forward":
-        conv2d_tebn_forward_compiled,
-    "avgpool2d_conv2d_bn_forward":
-        avgpool2d_conv2d_bn_forward_compiled,
-    "avgpool2d_conv2d_tebn_forward":
-        avgpool2d_conv2d_tebn_forward_compiled,
-    "conv2d_bn_ann_forward":
-        conv2d_bn_ann_forward_compiled,
-    "ssa_core_forward":
-        ssa_core_forward_compiled,
     "handwritten_lif_forward":
         handwritten_lif_forward_compiled,
     "handwritten_lif_backward_not_detached":
         handwritten_lif_backward_not_detached_compiled,
     "handwritten_lif_backward_detached":
         handwritten_lif_backward_detached_compiled,
-    "psn_forward":
-        psn_forward_compiled,
-    "sliding_psn_forward":
-        sliding_psn_forward_compiled,
     "bit_spike_compress":
         bit_spike_compress_compiled,
     "bit_spike_decompress":
@@ -78,31 +38,11 @@ else:
     print("Using torch kernels for BitSpikeCompressor.")
     print("Using torch kernels for HandWrittenLIF.")
 
-linear_forward = api["linear_forward"]
-linear_bn_forward = api["linear_bn_forward"]
-avgpool1d_flatten_linear_forward = api["avgpool1d_flatten_linear_forward"]
-conv1d_forward = api["conv1d_forward"]
-conv1d_bn_forward = api["conv1d_bn_forward"]
-avgpool1d_conv1d_bn_forward = api["avgpool1d_conv1d_bn_forward"]
-bn_forward = api["bn_forward"]
-tebn_forward = api["tebn_forward"]
-conv2d_forward = api["conv2d_forward"]
-avgpool2d_forward = api["avgpool2d_forward"]
-maxpool2d_forward = api["maxpool2d_forward"]
-conv2d_bn_forward = api["conv2d_bn_forward"]
-conv2d_bn_maxpool2d_forward = api["conv2d_bn_maxpool2d_forward"]
-conv2d_tebn_forward = api["conv2d_tebn_forward"]
-avgpool2d_conv2d_bn_forward = api["avgpool2d_conv2d_bn_forward"]
-avgpool2d_conv2d_tebn_forward = api["avgpool2d_conv2d_tebn_forward"]
-conv2d_bn_ann_forward = api["conv2d_bn_ann_forward"]
-ssa_core_forward = api["ssa_core_forward"]
 handwritten_lif_forward = api["handwritten_lif_forward"]
 handwritten_lif_backward_not_detached = (
     api["handwritten_lif_backward_not_detached"]
 )
 handwritten_lif_backward_detached = api["handwritten_lif_backward_detached"]
-psn_forward = api["psn_forward"]
-sliding_psn_forward = api["sliding_psn_forward"]
 bit_spike_compress = api["bit_spike_compress"]
 bit_spike_decompress = api["bit_spike_decompress"]
 

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
@@ -30,15 +31,11 @@ class Conv2d(BaseGCBlock):
         groups,
         in_backward=False
     ):
-        return conv2d_forward(
-            x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-        )
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x_seq: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -79,9 +76,10 @@ class Conv2dLIF(BaseGCBlock):
         neuron,
         in_backward=False,  # will be used in checkpointing function
     ):
-        x_seq = conv2d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -125,9 +123,10 @@ class Conv2dPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False,  # will be used in checkpointing function
     ):
-        x_seq = conv2d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -173,9 +172,10 @@ class Conv2dSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False,  # will be used in checkpointing function
     ):
-        x_seq = conv2d_forward(
-            x_seq, weight, bias, stride, padding, dilation, groups
-        )
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -226,21 +226,20 @@ class Conv2dBN(BaseGCBlock):
         training,
         in_backward=False
     ):
-        return conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x_seq: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -293,21 +292,19 @@ class Conv2dBNLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        x_seq = conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -363,21 +360,19 @@ class Conv2dBNPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        x_seq = conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -435,21 +430,19 @@ class Conv2dBNSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        x_seq = conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -508,22 +501,20 @@ class Conv2dTEBN(BaseGCBlock):
         tebn_proj_weight,
         in_backward=False
     ):
-        return conv2d_tebn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.,
-            tebn_proj_weight=tebn_proj_weight
         )
+        y_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        return y_seq * tebn_proj_weight
 
     def forward(self, x_seq: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -580,22 +571,20 @@ class Conv2dTEBNLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        x_seq = conv2d_tebn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.,
-            tebn_proj_weight=tebn_proj_weight
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        x_seq = x_seq * tebn_proj_weight
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -656,22 +645,20 @@ class Conv2dTEBNSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        x_seq = conv2d_tebn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.,
-            tebn_proj_weight=tebn_proj_weight
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        x_seq = x_seq * tebn_proj_weight
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -736,24 +723,20 @@ class AvgPool2dConv2dBNLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        x_seq = avgpool2d_conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -817,24 +800,20 @@ class AvgPool2dConv2dBNPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        x_seq = avgpool2d_conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x_seq: torch.Tensor):
@@ -900,24 +879,20 @@ class AvgPool2dConv2dBNSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        x_seq = avgpool2d_conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -987,25 +962,21 @@ class AvgPool2dConv2dTEBNLIF(BaseGCBlock):
         tebn_proj_weight,
         in_backward=False
     ):
-        x_seq = avgpool2d_conv2d_tebn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.,
-            tebn_proj_weight=tebn_proj_weight
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        x_seq = x_seq * tebn_proj_weight
         return neuron(x_seq)
 
     def forward(self, x_seq: torch.Tensor):
@@ -1074,25 +1045,21 @@ class AvgPool2dConv2dTEBNSlidingPSN(BaseGCBlock):
         tebn_proj_weight,
         in_backward=False
     ):
-        x_seq = avgpool2d_conv2d_tebn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.avg_pool2d(x_seq, pool_kernel_size, pool_stride, pool_padding)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.,
-            tebn_proj_weight=tebn_proj_weight
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        x_seq = x_seq * tebn_proj_weight
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -1161,25 +1128,26 @@ class Conv2dBNLIFMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        x_seq = conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         x_seq = neuron(x_seq)
-        return maxpool2d_forward(
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
             x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
         )
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -1244,25 +1212,26 @@ class Conv2dBNPSNMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        x_seq = conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         x_seq = PSN.forward_function(x_seq, neuron_weight, neuron_bias)
-        return maxpool2d_forward(
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
             x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
         )
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -1329,27 +1298,28 @@ class Conv2dBNSlidingPSNMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        x_seq = conv2d_bn_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         x_seq = SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
-        return maxpool2d_forward(
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
             x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
         )
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -1412,25 +1382,22 @@ class Conv2dBNMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        return conv2d_bn_maxpool2d_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
-            0.1 if in_backward else 0.,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            pool_dilation,
+            bn_weight,
+            bn_bias,
+            training=training,
+            momentum=0.1 if in_backward else 0.,
         )
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        return x_seq.reshape(T, N, *x_seq.shape[1:])
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -1493,25 +1460,22 @@ class Conv2dBNMaxPool2dLIF(BaseGCBlock):
         neuron,
         in_backward=False
     ):
-        x_seq = conv2d_bn_maxpool2d_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
-            0.1 if in_backward else 0.,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            pool_dilation,
+            bn_weight,
+            bn_bias,
+            training=training,
+            momentum=0.1 if in_backward else 0.,
         )
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return neuron(x_seq)
 
     def forward(self, x: torch.Tensor):
@@ -1577,25 +1541,22 @@ class Conv2dBNMaxPool2dPSN(BaseGCBlock):
         neuron_bias,
         in_backward=False
     ):
-        x_seq = conv2d_bn_maxpool2d_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
-            0.1 if in_backward else 0.,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            pool_dilation,
+            bn_weight,
+            bn_bias,
+            training=training,
+            momentum=0.1 if in_backward else 0.,
         )
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return PSN.forward_function(x_seq, neuron_weight, neuron_bias)
 
     def forward(self, x: torch.Tensor):
@@ -1663,25 +1624,22 @@ class Conv2dBNMaxPool2dSlidingPSN(BaseGCBlock):
         neuron_k,
         in_backward=False
     ):
-        x_seq = conv2d_bn_maxpool2d_forward(
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = F.batch_norm(
             x_seq,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
-            0.1 if in_backward else 0.,
-            pool_kernel_size,
-            pool_stride,
-            pool_padding,
-            pool_dilation,
+            bn_weight,
+            bn_bias,
+            training=training,
+            momentum=0.1 if in_backward else 0.,
         )
+        x_seq = F.max_pool2d(
+            x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
+        )
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
         return SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
@@ -1753,26 +1711,24 @@ class Conv2dBNRepeatLIFMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        x = conv2d_bn_ann_forward(
+        x = F.conv2d(x, weight, bias, stride, padding, dilation, groups)
+        x = F.batch_norm(
             x,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
         x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
         x_seq = neuron(x_seq)
-        return maxpool2d_forward(
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
             x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
         )
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -1841,26 +1797,24 @@ class Conv2dBNRepeatPSNMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        x = conv2d_bn_ann_forward(
+        x = F.conv2d(x, weight, bias, stride, padding, dilation, groups)
+        x = F.batch_norm(
             x,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
         x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
         x_seq = PSN.forward_function(x_seq, neuron_weight, neuron_bias)
-        return maxpool2d_forward(
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
             x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
         )
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
@@ -1931,28 +1885,26 @@ class Conv2dBNRepeatSlidingPSNMaxPool2d(BaseGCBlock):
         pool_dilation,
         in_backward=False
     ):
-        x = conv2d_bn_ann_forward(
+        x = F.conv2d(x, weight, bias, stride, padding, dilation, groups)
+        x = F.batch_norm(
             x,
-            weight,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bn_weight,
-            bn_bias,
             bn_running_mean,
             bn_running_var,
-            training,
+            bn_weight,
+            bn_bias,
+            training=training,
             momentum=0.1 if in_backward else 0.
         )
         x_seq = x.repeat(T, *[1 for _ in range(x.ndim)])
         x_seq = SlidingPSN.forward_function(
             x_seq, neuron_weight, neuron_bias, neuron_k
         )
-        return maxpool2d_forward(
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.max_pool2d(
             x_seq, pool_kernel_size, pool_stride, pool_padding, pool_dilation
         )
+        x_seq = x_seq.reshape(T, -1, *x_seq.shape[1:])
+        return x_seq
 
     def forward(self, x: torch.Tensor):
         return InputCompressedGCFunction.apply(
