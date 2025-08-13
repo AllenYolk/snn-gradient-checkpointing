@@ -61,34 +61,21 @@ def handwritten_lif_forward_compiled(x_seq, decay_lambda):
 
 
 @_conditional_compile()
-def handwritten_lif_backward_not_detached_compiled(
-    grad_s_seq, h_seq, decay_lambda, T
+def handwritten_lif_backward_compiled(
+    grad_s_seq, h_seq, decay_lambda, detach_reset
 ):
     grad_x_seq = torch.empty_like(grad_s_seq)
     grad_v = 0.
+    T = grad_s_seq.shape[0]
     for t in range(T - 1, -1, -1):
         grad_s = grad_s_seq[t]
         h = h_seq[t]
-        grad_v = ((grad_s - grad_v*h) / (1. + (torch.pi * (h-1.)).pow_(2)) +
-                  grad_v * (1 - (h >= 1.).to(h)))
-        grad_x_seq[t] = grad_v
-        grad_v *= decay_lambda
-    return grad_x_seq
-
-
-@_conditional_compile()
-def handwritten_lif_backward_detached_compiled(
-    grad_s_seq, h_seq, decay_lambda, T
-):
-    grad_x_seq = torch.empty_like(grad_s_seq)
-    grad_v = 0.
-    for t in range(T - 1, -1, -1):
-        grad_s = grad_s_seq[t]
-        h = h_seq[t]
-        grad_v = (
-            grad_s / (1. + (torch.pi * (h-1.)).pow_(2)) + grad_v *
-            (1 - (h >= 1.).to(h))
-        )
+        s = (h >= 1.).to(h)
+        sg_r = 1. + (torch.pi * (h-1.)).pow_(2)
+        if detach_reset:
+            grad_v = grad_s/sg_r + grad_v * (1.-s)
+        else:
+            grad_v = (grad_s - grad_v*h) / sg_r + grad_v * (1.-s)
         grad_x_seq[t] = grad_v
         grad_v *= decay_lambda
     return grad_x_seq

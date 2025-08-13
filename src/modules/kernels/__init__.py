@@ -10,16 +10,10 @@ from .triton_kernels import *
 
 # api dict
 api = {
-    "handwritten_lif_forward":
-        handwritten_lif_forward_compiled,
-    "handwritten_lif_backward_not_detached":
-        handwritten_lif_backward_not_detached_compiled,
-    "handwritten_lif_backward_detached":
-        handwritten_lif_backward_detached_compiled,
-    "bit_spike_compress":
-        bit_spike_compress_compiled,
-    "bit_spike_decompress":
-        bit_spike_decompress_compiled,
+    "handwritten_lif_forward": handwritten_lif_forward_compiled,
+    "handwritten_lif_backward": handwritten_lif_backward_compiled,
+    "bit_spike_compress": bit_spike_compress_compiled,
+    "bit_spike_decompress": bit_spike_decompress_compiled,
 }
 
 if TRITON_AVAILABLE:
@@ -28,21 +22,13 @@ if TRITON_AVAILABLE:
     api["bit_spike_decompress"] = bit_spike_decompress_triton
     print("Using Triton kernels for HandWrittenLIF.")
     api["handwritten_lif_forward"] = handwritten_lif_forward_triton
-    api["handwritten_lif_backward_not_detached"] = (
-        handwritten_lif_backward_not_detached_triton
-    )
-    api["handwritten_lif_backward_detached"] = (
-        handwritten_lif_backward_detached_triton
-    )
+    api["handwritten_lif_backward"] = handwritten_lif_backward_triton
 else:
     print("Using torch kernels for BitSpikeCompressor.")
     print("Using torch kernels for HandWrittenLIF.")
 
 handwritten_lif_forward = api["handwritten_lif_forward"]
-handwritten_lif_backward_not_detached = (
-    api["handwritten_lif_backward_not_detached"]
-)
-handwritten_lif_backward_detached = api["handwritten_lif_backward_detached"]
+handwritten_lif_backward = api["handwritten_lif_backward"]
 bit_spike_compress = api["bit_spike_compress"]
 bit_spike_decompress = api["bit_spike_decompress"]
 

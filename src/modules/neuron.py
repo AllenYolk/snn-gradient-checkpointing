@@ -168,46 +168,27 @@ class SlidingPSN(neuron.SlidingPSN):
 
 
 # ================ Hand-written Multistep LIF neuron ================
-class _BaseHandWrittenLIFAutogradFunction(autograd.Function):
+class HandWrittenLIFAutogradFunction(autograd.Function):
 
     @staticmethod
-    def forward(ctx, x_seq, decay_lambda):
-        s_seq, h_seq = handwritten_lif_forward(x_seq, decay_lambda)
+    def forward(ctx, x_seq, decay_lambda: float, detach_reset: bool):
+        s_seq, h_seq = handwritten_lif_forward(x_seq.contiguous(), decay_lambda)
         if any(ctx.needs_input_grad):
             ctx.save_for_backward(h_seq)  # internal states
             ctx.decay_lambda = decay_lambda
-            ctx.T = x_seq.shape[0]
+            ctx.detach_reset = detach_reset
         return s_seq
 
     @staticmethod
     def backward(ctx, grad_s_seq):
-        raise NotImplementedError('`backward` method should be implemented.')
-
-
-class _HandWrittenLIFAutogradFunctionNotDetached(
-    _BaseHandWrittenLIFAutogradFunction
-):
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
-        grad_x_seq = handwritten_lif_backward_not_detached(
-            grad_s_seq.contiguous(), h_seq, ctx.decay_lambda, ctx.T
+        grad_x_seq = handwritten_lif_backward(
+            grad_s_seq.contiguous(),
+            h_seq.contiguous(),
+            ctx.decay_lambda,
+            ctx.detach_reset,
         )
-        return grad_x_seq, None
-
-
-class _HandWrittenLIFAutogradFunctionDetached(
-    _BaseHandWrittenLIFAutogradFunction
-):
-
-    @staticmethod
-    def backward(ctx, grad_s_seq):
-        h_seq = ctx.saved_tensors[0]
-        grad_x_seq = handwritten_lif_backward_detached(
-            grad_s_seq.contiguous(), h_seq, ctx.decay_lambda, ctx.T
-        )
-        return grad_x_seq, None
+        return grad_x_seq, None, None
 
 
 class HandWrittenLIF(nn.Module):
@@ -232,17 +213,30 @@ class HandWrittenLIF(nn.Module):
             raise ValueError('`decay_lambda` should be in the range [0, 1).')
         self.decay_lambda = decay_lambda
         self.detach_reset = detach_reset
-
-        if detach_reset:
-            self.core = _HandWrittenLIFAutogradFunctionDetached.apply
-        else:
-            self.core = _HandWrittenLIFAutogradFunctionNotDetached.apply
+        self.core = HandWrittenLIFAutogradFunction.apply
 
     def forward(self, x_seq):
-        return self.core(x_seq, self.decay_lambda)
+        return self.core(x_seq, self.decay_lambda, self.detach_reset)
 
     def extra_repr(self):
         return (
             f"decay_lambda={self.decay_lambda}, "
             f"detach_reset={self.detach_reset}, "
         )
+
+
+# TODO: implement Triton kernels
+def lif_rnn_forward(
+    x_seq: torch.Tensor, v: torch.Tensor, decay_lambda: float,
+    detach_reset: bool
+):
+    T = x_seq.shape[0]
+    s_seq = torch.empty_like(x_seq)
+    for t in range(T):
+        v = decay_lambda*v + x_seq[t]
+        s = surrogate.atan.apply(v - 1., 2.)
+        s_seq[t] = s
+        if detach_reset:
+            s = s.detach()
+        v = v * (1.-s)
+    return s_seq
