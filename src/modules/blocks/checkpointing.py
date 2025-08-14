@@ -115,7 +115,37 @@ class BaseGCBlock(nn.Module):
     def extra_repr(self) -> str:
         if hasattr(self, "spike_compressor"):
             return (
-                f"Spike compressor: {self.spike_compressor.__class__.__name__}"
+                f"spike_compressor={self.spike_compressor.__class__.__name__}"
             )
         else:
             return ""
+
+
+class BaseTCGCBlock(BaseGCBlock):
+
+    def __init__(self, n_chunk: int):
+        super().__init__()
+        self.n_chunk = n_chunk
+
+    @staticmethod
+    def conventional_forward(*args, **kwargs):
+        # RNN-style forward
+        raise NotImplementedError(
+            "The temporally chunked conventional forward function is not implemented."
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        # 1. temporally chunk x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        # 2. state initialization
+        # 3. chunked forward
+        # 4. stack chunked outputs
+        raise NotImplementedError("The forward function is not implemented.")
+
+    def extra_repr(self) -> str:
+        if hasattr(self, "spike_compressor"):
+            return (
+                f"n_chunk={self.n_chunk},"
+                f"spike_compressor={self.spike_compressor.__class__.__name__}"
+            )
+        else:
+            return f"n_chunk={self.n_chunk}"

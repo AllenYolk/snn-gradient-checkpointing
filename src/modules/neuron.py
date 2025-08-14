@@ -1,3 +1,4 @@
+from typing import Tuple
 import sys
 
 sys.path.insert(0, "./src")
@@ -26,6 +27,35 @@ def get_neuron(neuron_type: str, **kwargs):
 @torch.jit.script
 def atan_derivative(x: torch.Tensor, alpha: float = 2.):
     return alpha / 2 / (1 + (torch.pi / 2 * alpha * x).pow_(2))
+
+
+# TODO: implement Triton kernels
+def lif_rnn_function(
+    x_seq: torch.Tensor, v: torch.Tensor, decay_lambda: float,
+    detach_reset: bool
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """T-step RNN-like LIF neuron: 
+    s_seq[0...T-1], v[T-1] = lif_rnn(x_seq[0...T-1], v[-1])
+
+    Args:
+        x_seq[0...T-1] (torch.Tensor)
+        v[-1] (torch.Tensor)
+        decay_lambda (float)
+        detach_reset (bool)
+
+    Returns:
+        s_seq[0...T-1], v[T-1]
+    """
+    T = x_seq.shape[0]
+    s_seq = torch.empty_like(x_seq)
+    for t in range(T):
+        v = decay_lambda*v + x_seq[t]
+        s = surrogate.atan.apply(v - 1., 2.)
+        s_seq[t] = s
+        if detach_reset:
+            s = s.detach()
+        v = v * (1.-s)
+    return s_seq, v
 
 
 # ================ Standard SpikingJelly Multi-step neurons ================
@@ -66,6 +96,9 @@ class SJLIF(neuron.LIFNode):
         functional.reset_net(self)  #! reset internal states before forwarding
         return self.multi_step_forward(x_seq)
 
+    def rnn_forward(self, x_seq, v):
+        return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
+
 
 # =========================== Simplified SJLIF ===========================
 class AutogradLIF(nn.Module):
@@ -104,6 +137,9 @@ class AutogradLIF(nn.Module):
                 s = s.detach()
             v = v * (1.-s)
         return s_seq
+
+    def rnn_forward(self, x_seq, v):
+        return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
 
 
 # =========================== Multi-step PSN Family ===========================
@@ -218,25 +254,11 @@ class HandWrittenLIF(nn.Module):
     def forward(self, x_seq):
         return self.core(x_seq, self.decay_lambda, self.detach_reset)
 
+    def rnn_forward(self, x_seq, v) -> Tuple[torch.Tensor, torch.Tensor]:
+        return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
+
     def extra_repr(self):
         return (
             f"decay_lambda={self.decay_lambda}, "
             f"detach_reset={self.detach_reset}, "
         )
-
-
-# TODO: implement Triton kernels
-def lif_rnn_forward(
-    x_seq: torch.Tensor, v: torch.Tensor, decay_lambda: float,
-    detach_reset: bool
-):
-    T = x_seq.shape[0]
-    s_seq = torch.empty_like(x_seq)
-    for t in range(T):
-        v = decay_lambda*v + x_seq[t]
-        s = surrogate.atan.apply(v - 1., 2.)
-        s_seq[t] = s
-        if detach_reset:
-            s = s.detach()
-        v = v * (1.-s)
-    return s_seq

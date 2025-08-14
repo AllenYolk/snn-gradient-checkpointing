@@ -73,9 +73,7 @@ def _test_conv2d_equality(
     W = 32
     x = torch.randn(T, N, C, H, W) + 0.6
     x = (x >= 0.0).float()
-    grad_s = torch.randn(T, N, C, H, W)
     x = x.to("cuda:0")
-    grad_s = grad_s.to("cuda:0")
 
     net1 = net1.to("cuda:0")
     net2 = net2.to("cuda:0")
