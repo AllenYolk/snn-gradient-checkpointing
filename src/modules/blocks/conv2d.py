@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
 from ..kernels import *
-from .checkpointing import InputCompressedGCFunction, BaseGCBlock
+from .checkpointing import InputCompressedGCFunction, BaseGCBlock, BaseTCGCBlock
 from ..tebn import TEBNProjection
 
 
@@ -49,6 +49,54 @@ class Conv2d(BaseGCBlock):
             self.proj.dilation,
             self.proj.groups,
         )
+
+
+class TCConv2d(BaseTCGCBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+        n_chunk: int = 2,
+    ):
+        super().__init__(n_chunk)
+        self.proj = proj
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        in_backward=False
+    ):
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        return x_seq
+
+    def forward(self, x_seq: torch.Tensor):
+        x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        out_seq = []
+        for xc in x_seqs:
+            yc = InputCompressedGCFunction.apply(
+                self.conventional_forward,
+                self.spike_compressor,
+                xc,
+                self.proj.weight,
+                self.proj.bias,
+                self.proj.stride,
+                self.proj.padding,
+                self.proj.dilation,
+                self.proj.groups,
+            )
+            out_seq.append(yc)
+        return torch.cat(out_seq, dim=0)
 
 
 class Conv2dLIF(BaseGCBlock):
@@ -95,6 +143,61 @@ class Conv2dLIF(BaseGCBlock):
             self.proj.groups,
             self.neuron,
         )
+
+
+class TCConv2dLIF(BaseTCGCBlock):
+
+    def __init__(
+        self,
+        proj: nn.Conv2d,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+        n_chunk: int = 2,
+    ):
+        super().__init__(n_chunk)
+        self.proj = proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        neuron,
+        v,
+        in_backward=False,  # will be used in checkpointing function
+    ):
+        T, N = x_seq.size(0), x_seq.size(1)
+        x_seq = x_seq.flatten(0, 1)
+        x_seq = F.conv2d(x_seq, weight, bias, stride, padding, dilation, groups)
+        x_seq = x_seq.reshape(T, N, *x_seq.shape[1:])
+        return neuron.rnn_forward(x_seq, v)  # s_seq, v
+
+    def forward(self, x_seq: torch.Tensor):
+        x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        v = torch.zeros([], device=x_seq.device)
+        out_seq = []
+        for xc in x_seqs:
+            sc, v = InputCompressedGCFunction.apply(
+                self.conventional_forward,
+                self.spike_compressor,
+                xc,
+                self.proj.weight,
+                self.proj.bias,
+                self.proj.stride,
+                self.proj.padding,
+                self.proj.dilation,
+                self.proj.groups,
+                self.neuron,
+                v,
+            )
+            out_seq.append(sc)
+        return torch.cat(out_seq, dim=0)
 
 
 class Conv2dPSN(BaseGCBlock):

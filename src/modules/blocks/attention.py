@@ -73,7 +73,7 @@ class TCSSACoreLIF(BaseTCGCBlock):
     def forward(self, qkv: torch.Tensor):
         qkv_seqs = torch.chunk(qkv, self.n_chunk, dim=1)
         T, B, H, L, Cph = qkv.shape[1:]
-        v_neuron = torch.zeros([B, H * Cph, L], device=qkv.device)
+        v_neuron = torch.zeros([], device=qkv.device)
         out_seq = []
         for qkv_c in qkv_seqs:
             out_c, v_neuron = InputCompressedGCFunction.apply(
@@ -188,13 +188,52 @@ class QKACoreLIF(BaseGCBlock):
         k = torch.mul(q, k)  # [T, B, num_heads, C//num_heads, num_patches]
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
-    def forward(self, qkv: torch.Tensor):
+    def forward(self, qk: torch.Tensor):
         return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
-            qkv,
+            qk,
             self.neuron,
         )
+
+
+class TCQKACoreLIF(BaseTCGCBlock):
+
+    def __init__(
+        self,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+        n_chunk: int = 2,
+    ):
+        super().__init__(n_chunk)
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(qk, neuron, v_neuron, in_backward=False):
+        q, k = qk[0], qk[1]  # [Tc, B, num_heads, C//num_heads, num_patches]
+        q = torch.sum(q, dim=3, keepdim=True)
+        q, v_neuron = neuron.rnn_forward(
+            q, v_neuron
+        )  # [Tc, B, num_heads, 1, num_patches]
+        k = torch.mul(q, k)  # [Tc, B, num_heads, C//num_heads, num_patches]
+        return k.flatten(2, 3), v_neuron
+
+    def forward(self, qk: torch.Tensor):
+        qk_seqs = torch.chunk(qk, self.n_chunk, dim=1)
+        T, B, H, Cph, L = qk.shape[1:]
+        v_neuron = torch.zeros([], device=qk.device)
+        out_seq = []
+        for qk_c in qk_seqs:
+            out_c, v_neuron = InputCompressedGCFunction.apply(
+                self.conventional_forward,
+                self.spike_compressor,
+                qk_c,
+                self.neuron,
+                v_neuron,
+            )
+            out_seq.append(out_c)
+        return torch.cat(out_seq, dim=0)
 
 
 class QKACorePSN(BaseGCBlock):
@@ -216,11 +255,11 @@ class QKACorePSN(BaseGCBlock):
         k = torch.mul(q, k)  # [T, B, num_heads, C//num_heads, num_patches]
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
-    def forward(self, qkv: torch.Tensor):
+    def forward(self, qk: torch.Tensor):
         return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
-            qkv,
+            qk,
             self.neuron.weight,
             self.neuron.bias,
         )
@@ -247,11 +286,11 @@ class QKACoreSlidingPSN(BaseGCBlock):
         k = torch.mul(q, k)  # [T, B, num_heads, C//num_heads, num_patches]
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
-    def forward(self, qkv: torch.Tensor):
+    def forward(self, qk: torch.Tensor):
         return InputCompressedGCFunction.apply(
             self.conventional_forward,
             self.spike_compressor,
-            qkv,
+            qk,
             self.neuron.weight,
             self.neuron.bias,
             self.neuron.k,

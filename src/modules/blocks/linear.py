@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from ..compress import *
 from ..neuron import SlidingPSN, PSN
 from ..kernels import *
-from .checkpointing import InputCompressedGCFunction, BaseGCBlock
+from .checkpointing import InputCompressedGCFunction, BaseGCBlock, BaseTCGCBlock
 
 
 class LinearLIF(BaseGCBlock):
@@ -35,6 +35,43 @@ class LinearLIF(BaseGCBlock):
             self.proj.bias,
             self.neuron,
         )
+
+
+class TCLinearLIF(BaseTCGCBlock):
+
+    def __init__(
+        self,
+        proj: nn.Linear,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+        n_chunk: int = 2,
+    ):
+        super().__init__(n_chunk)
+        self.proj = proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(x_seq, weight, bias, neuron, v, in_backward=False):
+        y_seq = F.linear(x_seq, weight, bias)
+        return neuron.rnn_forward(y_seq, v)  # s_seq, v
+
+    def forward(self, x_seq: torch.Tensor):
+        x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        v = torch.zeros([], device=x_seq.device)
+        out_seq = []
+        for xc in x_seqs:
+            sc, v = InputCompressedGCFunction.apply(
+                self.conventional_forward,
+                self.spike_compressor,
+                xc,
+                self.proj.weight,
+                self.proj.bias,
+                self.neuron,
+                v,
+            )
+            out_seq.append(sc)
+        return torch.cat(out_seq, dim=0)
 
 
 class LinearPSN(BaseGCBlock):
@@ -344,6 +381,68 @@ class AvgPool1dFlattenLinearLIF(BaseGCBlock):
             self.proj.bias,
             self.neuron,
         )
+
+
+class TCAvgPool1dFlattenLinearLIF(BaseTCGCBlock):
+
+    def __init__(
+        self,
+        pool: nn.AvgPool1d,
+        proj: nn.Linear,
+        neuron: nn.Module,
+        spike_compressor: BaseSpikeCompressor = BitSpikeCompressor(),
+        n_chunk: int = 2,
+    ):
+        super().__init__(n_chunk)
+        self.pool = pool
+        self.proj = proj
+        self.neuron = neuron
+        self.spike_compressor = spike_compressor
+
+    @staticmethod
+    def conventional_forward(
+        x_seq,
+        pool_kernel_size,
+        pool_stride,
+        pool_padding,
+        weight,
+        bias,
+        neuron,
+        v,
+        in_backward=False
+    ):
+        T, N = x_seq.size(0), x_seq.size(1)
+        y_seq = x_seq.flatten(0, 1)
+        y_seq = F.avg_pool1d(
+            y_seq,
+            kernel_size=pool_kernel_size,
+            stride=pool_stride,
+            padding=pool_padding
+        )
+        y_seq = y_seq.flatten(1)
+        y_seq = F.linear(y_seq, weight, bias)
+        y_seq = y_seq.reshape(T, N, -1)
+        return neuron.rnn_forward(y_seq, v)  # s_seq, v
+
+    def forward(self, x_seq: torch.Tensor):
+        x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        v = torch.zeros([], device=x_seq.device)
+        out_seq = []
+        for xc in x_seqs:
+            sc, v = InputCompressedGCFunction.apply(
+                self.conventional_forward,
+                self.spike_compressor,
+                xc,
+                self.pool.kernel_size[0],
+                self.pool.stride[0],
+                self.pool.padding[0],
+                self.proj.weight,
+                self.proj.bias,
+                self.neuron,
+                v,
+            )
+            out_seq.append(sc)
+        return torch.cat(out_seq, dim=0)
 
 
 class AvgPool1dFlattenLinearPSN(BaseGCBlock):

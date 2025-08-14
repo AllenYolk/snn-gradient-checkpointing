@@ -5,8 +5,11 @@ from .bn_neuron import *
 from .attention import *
 
 
-def get_block(block_type, **kwargs):
-    return globals()[block_type](**kwargs)
+def get_block(block_type, n_chunk=1, **kwargs):
+    if n_chunk > 1:
+        return globals()["TC" + block_type](n_chunk=n_chunk, **kwargs)
+    else:
+        return globals()[block_type](**kwargs)
 
 
 def neuron_type_to_str(neuron_type):
