@@ -112,16 +112,15 @@ def main():
     net = cli.model.net
     profiler = LayerWiseFPCUDATimeProfiler(
         (net.features, net.dropout, net.classifier),
-        search_mode=("direct_children", "self", "self"),
         model_names=("feature_extractor", "dropout", "classifier"),
+        search_mode=("direct_children", "self", "self"),
         instances=(torch.nn.Module,),
-        filename=profile_log_path,
         warmup=WARMUP_ITERATIONS,
+        log_path=profile_log_path,
     )
 
     cli.trainer.validate(cli.model, datamodule=cli.datamodule)
-    profiler.clear_hooks()
-    profiler.profile()
+    profiler.export()
 
 
 if __name__ == '__main__':

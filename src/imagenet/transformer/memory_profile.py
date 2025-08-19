@@ -197,20 +197,20 @@ def main():
             *[f"block3_{i}" for i in range(net.depths - 3)],
             "head",
         )
-    profiler = MemoryProfilerList(
-        CategoryMemoryProfiler(net, optimizer, filename=profile_log_path),
+    profiler = ProfilerList(
+        CategoryMemoryProfiler(net, optimizer, log_path=profile_log_path),
         LayerWiseMemoryProfiler(
             model_list,
-            search_mode=search_mode_list,
             model_names=model_name_list,
+            search_mode=search_mode_list,
             instances=(torch.nn.Module,),
-            filename=profile_log_path,
+            log_path=profile_log_path,
+            data_path=mem_data_path,
         ),
     )
 
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
-    profiler.profile(sort_by="backward_peak_memory")
-    profiler.save_data((None, mem_data_path))
+    profiler.export(sort_by="backward_peak_memory")
 
 
 if __name__ == '__main__':

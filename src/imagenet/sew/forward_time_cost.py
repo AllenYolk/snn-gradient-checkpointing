@@ -116,21 +116,20 @@ def main():
             net.pre_conv, net.layer1, net.layer2, net.layer3, net.layer4,
             net.avgpool, net.fc
         ),
+        model_names=(
+            "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool", "fc"
+        ),
         search_mode=(
             "self", "direct_children", "direct_children", "direct_children",
             "direct_children", "self", "self"
         ),
-        model_names=(
-            "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool", "fc"
-        ),
         instances=(torch.nn.Module,),
-        filename=profile_log_path,
         warmup=WARMUP_ITERATIONS,
+        log_path=profile_log_path,
     )
 
     cli.trainer.validate(cli.model, datamodule=cli.datamodule)
-    profiler.clear_hooks()
-    profiler.profile()
+    profiler.export()
 
 
 if __name__ == '__main__':

@@ -194,16 +194,15 @@ def main():
         )
     profiler = LayerWiseFPCUDATimeProfiler(
         model_list,
-        search_mode=search_mode_list,
         model_names=model_name_list,
+        search_mode=search_mode_list,
         instances=(torch.nn.Module,),
-        filename=profile_log_path,
         warmup=WARMUP_ITERATIONS,
+        log_path=profile_log_path,
     )
 
     cli.trainer.validate(cli.model, datamodule=cli.datamodule)
-    profiler.clear_hooks()
-    profiler.profile()
+    profiler.export()
 
 
 if __name__ == '__main__':

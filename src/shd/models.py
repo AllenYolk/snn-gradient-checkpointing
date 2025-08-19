@@ -7,16 +7,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 from spikingjelly.activation_based import surrogate
 
-from modules.blocks.checkpointing import BaseGCBlock
+from modules.blocks.checkpointing import BaseGCBlock, BaseTCGCBlock
 from modules.blocks.checkpointing import InputCompressedGCFunction
 from modules.compress import get_spike_compressor
 
 
-def plif_update(x, v, spike, vth, _beta):
+def plif_update(x, v, _beta, vth):
+    """(x, v) -> (s, v)"""
     beta = torch.sigmoid(_beta)
-    v = v*beta + (1-beta) * x - vth*spike
-    spike = surrogate.atan.apply(v - vth, 2.)
-    return v, spike
+    v = v*beta + (1-beta) * x
+    s = surrogate.atan.apply(v - vth, 2.)
+    v = v - vth*s
+    return s, v
 
 
 class LinearPLIF(nn.Module):
@@ -49,12 +51,11 @@ class LinearPLIF(nn.Module):
 
         x_seq = self.dense(x_seq)
 
-        v = torch.rand_like(x_seq[0])  # rand: follow the practice of DH-SNN
-        s = torch.rand_like(x_seq[0])
+        v = torch.zeros_like(x_seq[0])
         s_seq = torch.empty_like(x_seq)
         for t in range(T):
             x = x_seq[t]
-            v, s = plif_update(x, v, s, self.vth, self._beta)
+            s, v = plif_update(x, v, self._beta, self.vth)
             s_seq[t] = s
         return s_seq
 
@@ -92,15 +93,12 @@ class LinearPLIFCheckpointing(BaseGCBlock):
     ):
         # x_seq.shape = [T, N, in_features]
         T = x_seq.shape[0]
-
         x_seq = F.linear(x_seq, weight, bias)
-
-        v = torch.rand_like(x_seq[0])  # rand: follow the practice of DH-SNN
-        s = torch.rand_like(x_seq[0])
+        v = torch.zeros_like(x_seq[0])
         s_seq = torch.empty_like(x_seq)
         for t in range(T):
             x = x_seq[t]
-            v, s = plif_update(x, v, s, vth, _beta)
+            s, v = plif_update(x, v, _beta, vth)
             s_seq[t] = s
         return s_seq
 
@@ -114,6 +112,67 @@ class LinearPLIFCheckpointing(BaseGCBlock):
             self._beta,
             self.vth,
         )
+
+
+class LinearPLIFTCCheckpointing(BaseTCGCBlock):
+
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        beta_initializer='uniform',
+        beta_low=0,
+        beta_high=4,
+        vth=1.,
+        spike_compressor="NullSpikeCompressor",
+        n_chunk: int = 2,
+    ):
+        super().__init__(n_chunk)
+        self.in_features = in_features
+        self.out_features = out_features
+        self.vth = vth
+
+        self.dense = nn.Linear(in_features, out_features)
+        self._beta = nn.Parameter(torch.empty([self.out_features]))
+
+        if beta_initializer == 'uniform':
+            nn.init.uniform_(self._beta, beta_low, beta_high)
+        elif beta_initializer == 'constant':
+            nn.init.constant_(self._beta, beta_low)
+
+        self.spike_compressor = get_spike_compressor(spike_compressor)
+
+    @staticmethod
+    def conventional_forward(
+        x_seq, weight, bias, v, _beta, vth, in_backward=False
+    ):
+        # x_seq.shape = [Tc, N, in_features]
+        Tc = x_seq.shape[0]
+        x_seq = F.linear(x_seq, weight, bias)
+        s_seq = torch.empty_like(x_seq)
+        for t in range(Tc):
+            x = x_seq[t]
+            s, v = plif_update(x, v, _beta, vth)
+            s_seq[t] = s
+        return s_seq, v
+
+    def forward(self, x_seq):
+        x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        v = torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)
+        out_seq = []
+        for xc in x_seqs:
+            sc, v = InputCompressedGCFunction.apply(
+                self.conventional_forward,
+                self.spike_compressor,
+                xc,
+                self.dense.weight,
+                self.dense.bias,
+                v,
+                self._beta,
+                self.vth,
+            )
+            out_seq.append(sc)
+        return torch.cat(out_seq, dim=0)
 
 
 def output_plif_update(x, v, _beta):
@@ -150,7 +209,7 @@ class LinearOutputPLIF(nn.Module):
 
         x_seq = self.dense(x_seq)
 
-        v = torch.rand_like(x_seq[0])
+        v = torch.zeros_like(x_seq[0])
         v_seq = torch.rand_like(x_seq)
         for t in range(T):
             x = x_seq[t]
@@ -191,7 +250,7 @@ class LinearOutputPLIFCheckpointing(nn.Module):
 
         x_seq = F.linear(x_seq, weight, bias)
 
-        v = torch.rand_like(x_seq[0])
+        v = torch.zeros_like(x_seq[0])
         v_seq = torch.rand_like(x_seq)
         for t in range(T):
             x = x_seq[t]
@@ -282,13 +341,12 @@ class LinearDHLIF(nn.Module):
         alpha = torch.sigmoid(self._alpha)
         vd = torch.zeros_like(x_seq[0])
         v = torch.rand([N, self.out_features], device=x_seq.device)
-        s = torch.rand_like(v)  # rand: follow the practice of DH-SNN
         s_seq = torch.empty([T, N, self.out_features], device=s.device)
         for t in range(T):
             x = x_seq[t]
             vd = alpha*vd + (1-alpha) * x
             y = torch.sum(vd, dim=-1)  # [N, out_features]
-            v, s = plif_update(y, v, s, self.vth, self._beta)
+            s, v = plif_update(y, v, self._beta, self.vth)
             s_seq[t] = s
         return s_seq
 
@@ -372,13 +430,12 @@ class LinearDHLIFCheckpointing(nn.Module):
         alpha = torch.sigmoid(_alpha)
         vd = torch.zeros_like(x_seq[0])
         v = torch.rand([N, out_features], device=x_seq.device)
-        s = torch.rand_like(v)  # rand: follow the practice of DH-SNN
         s_seq = torch.empty([T, N, out_features], device=s.device)
         for t in range(T):
             x = x_seq[t]
             vd = alpha*vd + (1-alpha) * x
             y = torch.sum(vd, dim=-1)  # [N, out_features]
-            v, s = plif_update(y, v, s, vth, _beta)
+            s, v = plif_update(y, v, _beta, vth)
             s_seq[t] = s
         return s_seq
 
@@ -435,6 +492,37 @@ class GCPLIFSFNN(nn.Module):
         )
         self.dense_3 = LinearPLIFCheckpointing(
             H, H, vth=1., spike_compressor=spike_compressor
+        )
+        self.dense_out = LinearOutputPLIFCheckpointing(
+            H, 20, spike_compressor=spike_compressor
+        )
+        nn.init.xavier_normal_(self.dense_out.dense.weight)
+        nn.init.constant_(self.dense_out.dense.bias, 0)
+
+    def forward(self, x_seq):
+        x_seq = x_seq.transpose(0, 1)  # [T, N, C]
+        x_seq = self.dense_1(x_seq)
+        x_seq = self.dense_2(x_seq)
+        x_seq = self.dense_3(x_seq)
+        x_seq = self.dense_out(x_seq)  # [T, N, 20]
+
+        logits = F.softmax(x_seq, dim=-1)  # [T, N, 20]
+        return torch.sum(logits[10:], dim=0)  # [N, 20]; discard 1st 10 steps
+
+
+class TCGCPLIFSFNN(nn.Module):
+
+    def __init__(self, spike_compressor: str, *args, **kwargs):
+        super().__init__()
+        H = 512
+        self.dense_1 = LinearPLIFTCCheckpointing(
+            700, H, vth=1., spike_compressor="NullSpikeCompressor", n_chunk=25
+        )
+        self.dense_2 = LinearPLIFTCCheckpointing(
+            H, H, vth=1., spike_compressor=spike_compressor, n_chunk=10
+        )
+        self.dense_3 = LinearPLIFTCCheckpointing(
+            H, H, vth=1., spike_compressor=spike_compressor, n_chunk=25
         )
         self.dense_out = LinearOutputPLIFCheckpointing(
             H, 20, spike_compressor=spike_compressor

@@ -116,29 +116,29 @@ def main():
 
     net = cli.model.net
     optimizer = cli.model.profiled_optimizer
-    profiler = MemoryProfilerList(
-        CategoryMemoryProfiler(net, optimizer, filename=profile_log_path),
+    profiler = ProfilerList(
+        CategoryMemoryProfiler(net, optimizer, log_path=profile_log_path),
         LayerWiseMemoryProfiler(
             (
                 net.pre_conv, net.layer1, net.layer2, net.layer3, net.layer4,
                 net.avgpool, net.fc
             ),
-            search_mode=(
-                "self", "direct_children", "direct_children", "direct_children",
-                "direct_children", "self", "self"
-            ),
             model_names=(
                 "pre_conv", "layer1", "layer2", "layer3", "layer4", "avgpool",
                 "fc"
             ),
+            search_mode=(
+                "self", "direct_children", "direct_children", "direct_children",
+                "direct_children", "self", "self"
+            ),
             instances=(torch.nn.Module,),
-            filename=profile_log_path,
+            log_path=profile_log_path,
+            data_path=mem_data_path,
         ),
     )
 
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
-    profiler.profile(sort_by="backward_peak_memory")
-    profiler.save_data((None, mem_data_path))
+    profiler.export(sort_by="backward_peak_memory")
 
 
 if __name__ == '__main__':

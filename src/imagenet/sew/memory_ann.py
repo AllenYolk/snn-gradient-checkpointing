@@ -309,7 +309,7 @@ def main():
     )
 
     print("Stage 1: Peak Memory Checking")
-    profiler = MemoryProfilerList()
+    profiler = ProfilerList()
 
     torch.cuda.reset_peak_memory_stats(args.device)
     mem_stats = torch.cuda.memory_stats(args.device)
@@ -361,22 +361,23 @@ def main():
             max_val_accuracy = val_results["top1_acc"]
 
     print("Stage 2: Memory Profiling")
-    profiler = MemoryProfilerList(
-        CategoryMemoryProfiler(net, optimizer, filename=log_path),
+    profiler = ProfilerList(
+        CategoryMemoryProfiler(net, optimizer, log_path=log_path),
         LayerWiseMemoryProfiler(
             (
                 net.layer1, net.layer2, net.layer3, net.layer4, net.avgpool,
                 net.fc
             ),
+            model_names=(
+                "layer1", "layer2", "layer3", "layer4", "avgpool", "fc"
+            ),
             search_mode=(
                 "direct_children", "direct_children", "direct_children",
                 "direct_children", "self", "self"
             ),
-            model_names=(
-                "layer1", "layer2", "layer3", "layer4", "avgpool", "fc"
-            ),
             instances=(torch.nn.Module,),
-            filename=log_path,
+            log_path=log_path,
+            data_path=mem_data_path,
         ),
     )
 
@@ -404,7 +405,7 @@ def main():
             real_epochs + 1,
             early_exit=True,
         )
-        profiler.save_data((None, mem_data_path))
+        profiler.export()
         print(
             f"Profiling Epoch: "
             f"train_loss={train_results['loss']}, "

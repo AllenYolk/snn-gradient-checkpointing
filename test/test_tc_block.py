@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from modules import *
+from shd.models import *
 
 DEVICE = "cuda"
 
@@ -18,6 +19,7 @@ def make_parameters_equal(net, reference_net):
 
 
 def check_equal(x1, x2):
+    print(x1.mean(), x2.mean())
     assert (
         torch.allclose(x1, x2, atol=1e-5) or
         F.cosine_similarity(x1.flatten(), x2.flatten(), dim=0).item() > 0.99
@@ -63,6 +65,79 @@ def test_ssa_equality():
     check_equal(s1, s2)
 
     check_equal(x1.grad, x2.grad)
+
+
+def test_linear_lif_equality():
+    T, N, L = 32, 16, 70
+    net1 = LinearLIF(
+        proj=nn.Linear(L, L),
+        neuron=AutogradLIF(),
+        spike_compressor=BitSpikeCompressor()
+    )
+    net2 = TCLinearLIF(
+        proj=nn.Linear(L, L),
+        neuron=AutogradLIF(),
+        spike_compressor=BitSpikeCompressor()
+    )
+    x = torch.randn(T, N, L)
+    x = (x >= 0.0).float()
+    x = x.to(DEVICE)
+
+    net1 = net1.to(DEVICE)
+    net2 = net2.to(DEVICE)
+    make_parameters_equal(net1, net2)
+
+    x1 = x.clone()
+    x1.requires_grad = True
+    s1 = net1(x1)
+    loss1 = (s1 - 0.9).pow(2).sum()
+    loss1.backward()
+
+    x2 = x.clone()
+    x2.requires_grad = True
+    s2 = net2(x2)
+    loss2 = (s2 - 0.9).pow(2).sum()
+    loss2.backward()
+
+    print("Firing rate: ", s1.mean().item(), s2.mean().item())
+    check_equal(s1, s2)
+
+    check_equal(x1.grad, x2.grad)
+    check_equal(net1.proj.weight.grad, net2.proj.weight.grad)
+
+
+def test_linear_plif_equality():
+    T, N, L = 32, 8, 700
+    net1 = LinearPLIF(L, 20)
+    net2 = LinearPLIFTCCheckpointing(
+        L, 20, spike_compressor="BitSpikeCompressor"
+    )
+    x = torch.rand(T, N, L)
+    x = (x >= 0.0).float()
+    x = x.to(DEVICE)
+
+    net1 = net1.to(DEVICE)
+    net2 = net2.to(DEVICE)
+    make_parameters_equal(net1, net2)
+
+    x1 = x.clone()
+    x1.requires_grad = True
+    s1 = net1(x1)
+    loss1 = (s1 - 0.9).pow(2).sum()
+    loss1.backward()
+
+    x2 = x.clone()
+    x2.requires_grad = True
+    s2 = net2(x2)
+    loss2 = (s2 - 0.9).pow(2).sum()
+    loss2.backward()
+
+    print("Firing rate: ", s1.mean().item(), s2.mean().item())
+    check_equal(s1, s2)
+
+    check_equal(x1.grad, x2.grad)
+    check_equal(net1.dense.weight.grad, net2.dense.weight.grad)
+    check_equal(net1._beta.grad, net2._beta.grad)
 
 
 def test_ssa_memory_gc():
@@ -129,6 +204,8 @@ def test_ssa_memory_tcgc():
 
 
 if __name__ == "__main__":
-    test_ssa_equality()
-    test_ssa_memory_gc()
-    test_ssa_memory_tcgc()
+    test_linear_lif_equality()
+    test_linear_plif_equality()
+    # test_ssa_equality()
+    # test_ssa_memory_gc()
+    # test_ssa_memory_tcgc()
