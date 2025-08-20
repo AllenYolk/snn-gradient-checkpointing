@@ -1,8 +1,26 @@
+import threading
+import contextlib
+
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
 
 from ..amp import get_autocast_context, is_autocast_enabled
+
+_thread_local = threading.local()
+
+
+@contextlib.contextmanager
+def gc_1st_forward():
+    _thread_local.in_gc_1st_forward = True
+    try:
+        yield
+    finally:
+        _thread_local.in_gc_1st_forward = False
+
+
+def in_gc_1st_forward():
+    return getattr(_thread_local, "in_gc_1st_forward", False)
 
 
 class InputCompressedGCFunction(autograd.Function):
@@ -50,9 +68,16 @@ class InputCompressedGCFunction(autograd.Function):
             ctx.input_args = input_args
             ctx.tensor_args_indices = tensor_args_indices
 
+            # save RNG states
+            ctx.fwd_rng_state_cpu = torch.get_rng_state()
+            if torch.cuda._initialized:
+                ctx.fwd_rng_state_cuda = torch.cuda.get_rng_state_all()
+            else:
+                ctx.fwd_rng_state_cuda = []
+
         # depend on external autocast context
         with torch.no_grad():
-            outputs = forward_function(x_seq, *args, in_backward=False)
+            outputs = forward_function(x_seq, *args)
         return outputs  # tensor or tuple
 
     @staticmethod
@@ -81,9 +106,13 @@ class InputCompressedGCFunction(autograd.Function):
                             tensor_args[i].requires_grad
                         )
                         args[idx] = tensor_args[i].detach().requires_grad_(rg)
-                    outputs = ctx.forward_function(
-                        x_seq, *args, in_backward=False
-                    )
+
+                    devices = range(torch.cuda.device_count())
+                    with torch.random.fork_rng(devices):
+                        torch.set_rng_state(ctx.fwd_rng_state_cpu)
+                        torch.cuda.set_rng_state_all(ctx.fwd_rng_state_cuda)
+                        outputs = ctx.forward_function(x_seq, *args)
+
                 # grad_outputs is a tuple, while outputs can be a tensor or a tuple
                 if isinstance(outputs, torch.Tensor):
                     outputs = (outputs,)
