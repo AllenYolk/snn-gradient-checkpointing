@@ -62,7 +62,7 @@ def _test_linear_equatlity(
         check_equal(net1.bn.bias.grad, net2[2].bias.grad)
     check_equal(net1.proj.weight.grad, net2[0].weight.grad)
     check_equal(net1.proj.bias.grad, net2[0].bias.grad)
-    print("Firing rate: ", s1.mean().item())
+    print("Equal firing rate! Firing rate: ", s1.mean().item())
 
 
 def _test_conv2d_equality(
@@ -104,7 +104,7 @@ def _test_conv2d_equality(
         idx = 4 if with_bn else 3
         check_equal(net1.neuron.weight.grad, net2[idx].weight.grad)
         check_equal(net1.neuron.bias.grad, net2[idx].bias.grad)
-    print("Firing rate: ", s1.mean().item())
+    print("Equal firing rate! Firing rate: ", s1.mean().item())
 
 
 def _test_linear_memory(net, C=700, T=50):

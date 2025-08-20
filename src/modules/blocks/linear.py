@@ -6,6 +6,7 @@ from ..compress import *
 from ..neuron import SlidingPSN, PSN
 from ..kernels import *
 from .checkpointing import InputCompressedGCFunction, BaseGCBlock, BaseTCGCBlock
+from .checkpointing import input_compressed_gc
 
 
 class LinearLIF(BaseGCBlock):
@@ -22,17 +23,16 @@ class LinearLIF(BaseGCBlock):
         self.spike_compressor = spike_compressor
 
     @staticmethod
-    def conventional_forward(x_seq, weight, bias, neuron, in_backward=False):
-        y_seq = F.linear(x_seq, weight, bias)
+    def conventional_forward(x_seq, proj, neuron):
+        y_seq = proj(x_seq)
         return neuron(y_seq)
 
     def forward(self, x_seq: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return input_compressed_gc(
             self.conventional_forward,
             self.spike_compressor,
             x_seq,
-            self.proj.weight,
-            self.proj.bias,
+            self.proj,
             self.neuron,
         )
 

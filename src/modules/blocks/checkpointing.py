@@ -42,38 +42,37 @@ class InputCompressedGCFunction(autograd.Function):
 
     @staticmethod
     def forward(ctx, forward_function, x_compressor, x_seq, *args):
-        if any(ctx.needs_input_grad):
-            ctx.forward_function = forward_function
-            ctx.x_compressor = x_compressor
-            ctx.x_seq_shape = x_seq.shape
-            ctx.is_autocast_enabled = is_autocast_enabled()
+        ctx.forward_function = forward_function
+        ctx.x_compressor = x_compressor
+        ctx.x_seq_shape = x_seq.shape
+        ctx.is_autocast_enabled = is_autocast_enabled()
 
-            input_args = []  # (x_seq_compressed, *args); tensors -> None
-            tensor_args = []  # tensors in (x_seq_compressed, *args)
-            tensor_args_indices = []  # indices of the tensors in (*args,)
-            x_seq_compressed = x_compressor.compress(x_seq)
-            if torch.is_tensor(x_seq_compressed):
-                tensor_args.append(x_seq_compressed)
+        input_args = []  # (x_seq_compressed, *args); tensors -> None
+        tensor_args = []  # tensors in (x_seq_compressed, *args)
+        tensor_args_indices = []  # indices of the tensors in (*args,)
+        x_seq_compressed = x_compressor.compress(x_seq)
+        if torch.is_tensor(x_seq_compressed):
+            tensor_args.append(x_seq_compressed)
+            input_args.append(None)
+        else:
+            input_args.append(x_seq_compressed)
+        for i, arg in enumerate(args):
+            if torch.is_tensor(arg):
+                tensor_args.append(arg)
+                tensor_args_indices.append(i)
                 input_args.append(None)
             else:
-                input_args.append(x_seq_compressed)
-            for i, arg in enumerate(args):
-                if torch.is_tensor(arg):
-                    tensor_args.append(arg)
-                    tensor_args_indices.append(i)
-                    input_args.append(None)
-                else:
-                    input_args.append(arg)
-            ctx.save_for_backward(*tensor_args)
-            ctx.input_args = input_args
-            ctx.tensor_args_indices = tensor_args_indices
+                input_args.append(arg)
+        ctx.save_for_backward(*tensor_args)
+        ctx.input_args = input_args
+        ctx.tensor_args_indices = tensor_args_indices
 
-            # save RNG states
-            ctx.fwd_rng_state_cpu = torch.get_rng_state()
-            if torch.cuda._initialized:
-                ctx.fwd_rng_state_cuda = torch.cuda.get_rng_state_all()
-            else:
-                ctx.fwd_rng_state_cuda = []
+        # save RNG states
+        ctx.fwd_rng_state_cpu = torch.get_rng_state()
+        if torch.cuda._initialized:
+            ctx.fwd_rng_state_cuda = torch.cuda.get_rng_state_all()
+        else:
+            ctx.fwd_rng_state_cuda = []
 
         # depend on external autocast context
         with torch.no_grad():
@@ -125,6 +124,17 @@ class InputCompressedGCFunction(autograd.Function):
                     grads[idx + 3] = args[idx].grad
 
         return tuple(grads)
+
+
+def input_compressed_gc(forward_function, x_compressor, x_seq, *args):
+    if torch.is_grad_enabled():
+        x_seq.requires_grad_(True)  # make sure the retval requires grad
+        return InputCompressedGCFunction.apply(
+            forward_function, x_compressor, x_seq, *args
+        )
+    else:
+        # If gradients are not enabled, call the forward function directly
+        return forward_function(x_seq, *args)
 
 
 class BaseGCBlock(nn.Module):
