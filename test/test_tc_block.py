@@ -8,7 +8,7 @@ import torch.nn as nn
 from modules import *
 from shd.models import *
 
-DEVICE = "cuda"
+DEVICE = "cpu"
 
 
 def make_parameters_equal(net, reference_net):
@@ -69,11 +69,7 @@ def test_ssa_equality():
 
 def test_linear_lif_equality():
     T, N, L = 32, 16, 70
-    net1 = LinearLIF(
-        proj=nn.Linear(L, L),
-        neuron=AutogradLIF(),
-        spike_compressor=BitSpikeCompressor()
-    )
+    net1 = GCContainer(BitSpikeCompressor(), nn.Linear(L, L), AutogradLIF())
     net2 = TCLinearLIF(
         proj=nn.Linear(L, L),
         neuron=AutogradLIF(),

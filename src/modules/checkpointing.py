@@ -1,11 +1,13 @@
+from typing import Optional, Callable
 import threading
 import contextlib
+import functools
 
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
 
-from ..amp import get_autocast_context, is_autocast_enabled
+from .amp import get_autocast_context, is_autocast_enabled
 
 _thread_local = threading.local()
 
@@ -23,7 +25,7 @@ def in_gc_1st_forward():
     return getattr(_thread_local, "in_gc_1st_forward", False)
 
 
-class InputCompressedGCFunction(autograd.Function):
+class InputCompressedGC(autograd.Function):
     """Gradient checkpointing with input compression.
 
     Args:
@@ -129,7 +131,7 @@ class InputCompressedGCFunction(autograd.Function):
 def input_compressed_gc(forward_function, x_compressor, x_seq, *args):
     if torch.is_grad_enabled():
         x_seq.requires_grad_(True)  # make sure the retval requires grad
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             forward_function, x_compressor, x_seq, *args
         )
     else:
@@ -137,30 +139,73 @@ def input_compressed_gc(forward_function, x_compressor, x_seq, *args):
         return forward_function(x_seq, *args)
 
 
-class BaseGCBlock(nn.Module):
+def to_gc_function(x_compressor, forward_function: Optional[Callable] = None):
+    """Convert a forward function to a GC-blocked forward function.
 
-    def __init__(self):
-        super().__init__()
+    Usage 1. as a decorator:
+    ```
+    @to_gc_block(x_compressor)
+    def forward_function(x_seq, *args):
+        ...
+    ```
 
-    @staticmethod
-    def conventional_forward(*args, **kwargs):
-        raise NotImplementedError(
-            "The conventional forward function is not implemented."
-        )
+    Usage 2. as a conversion function:
+    ```
+    forward_function = to_gc_block(x_compressor, forward_function)
+    ```
 
-    def forward(self, x_seq: torch.Tensor):
-        raise NotImplementedError("The forward function is not implemented.")
+    Args:
+        x_compressor
+        forward_function (Callable, optional): if None, use the decorator mode;
+            otherwise, use the conversion function mode. Defaults to None.
 
-    def extra_repr(self) -> str:
-        if hasattr(self, "spike_compressor"):
-            return (
-                f"spike_compressor={self.spike_compressor.__class__.__name__}"
+    Returns:
+        Callable: the GC-blocked forward function
+    """
+
+    if forward_function is None:  # as a decorator
+
+        def decorator_function(forward_function):
+
+            @functools.wraps(forward_function)
+            def wrapped_forward_function(x_seq, *args):
+                return input_compressed_gc(
+                    forward_function, x_compressor, x_seq, *args
+                )
+
+            return wrapped_forward_function
+
+        return decorator_function
+
+    else:  # as a conversion function
+
+        @functools.wraps(forward_function)
+        def wrapped_forward_function(x_seq, *args):
+            return input_compressed_gc(
+                forward_function, x_compressor, x_seq, *args
             )
-        else:
-            return ""
+
+        return wrapped_forward_function
 
 
-class BaseTCGCBlock(BaseGCBlock):
+class GCContainer(nn.Sequential):
+    """A GC block module that can be defined just as nn.Sequential."""
+
+    def __init__(self, x_compressor, *args):
+        """Construct a GC block module in nn.Sequential style.
+
+        Args:
+            x_compressor
+            *args: multiple nn.Module
+        """
+        super().__init__(*args)
+        self.x_compressor = x_compressor
+
+    def forward(self, x, *args):
+        return input_compressed_gc(super().forward, self.x_compressor, x, *args)
+
+
+class BaseTCGCBlock(nn.Module):
 
     def __init__(self, n_chunk: int):
         super().__init__()
@@ -188,3 +233,26 @@ class BaseTCGCBlock(BaseGCBlock):
             )
         else:
             return f"n_chunk={self.n_chunk}"
+
+
+class BaseGCBlock(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def conventional_forward(*args, **kwargs):
+        raise NotImplementedError(
+            "The conventional forward function is not implemented."
+        )
+
+    def forward(self, x_seq: torch.Tensor):
+        raise NotImplementedError("The forward function is not implemented.")
+
+    def extra_repr(self) -> str:
+        if hasattr(self, "spike_compressor"):
+            return (
+                f"spike_compressor={self.spike_compressor.__class__.__name__}"
+            )
+        else:
+            return ""

@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from ..compress import *
-from ..neuron import SlidingPSN, PSN
-from ..kernels import *
-from .checkpointing import InputCompressedGCFunction, BaseGCBlock, BaseTCGCBlock
+from .compress import *
+from .neuron import SlidingPSN, PSN
+from .kernels import *
+from .checkpointing import InputCompressedGC, BaseGCBlock, BaseTCGCBlock
 
 
 class SSACoreLIF(BaseGCBlock):
@@ -34,7 +34,7 @@ class SSACoreLIF(BaseGCBlock):
         return neuron(x)
 
     def forward(self, qkv: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -76,7 +76,7 @@ class TCSSACoreLIF(BaseTCGCBlock):
         v_neuron = torch.zeros([], device=qkv.device)
         out_seq = []
         for qkv_c in qkv_seqs:
-            out_c, v_neuron = InputCompressedGCFunction.apply(
+            out_c, v_neuron = InputCompressedGC.apply(
                 self.conventional_forward,
                 self.spike_compressor,
                 qkv_c,
@@ -117,7 +117,7 @@ class SSACorePSN(BaseGCBlock):
         return PSN.forward_function(x, neuron_weight, neuron_bias)
 
     def forward(self, qkv: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -158,7 +158,7 @@ class SSACoreSlidingPSN(BaseGCBlock):
         )
 
     def forward(self, qkv: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             self.conventional_forward,
             self.spike_compressor,
             qkv,
@@ -189,7 +189,7 @@ class QKACoreLIF(BaseGCBlock):
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
     def forward(self, qk: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             self.conventional_forward,
             self.spike_compressor,
             qk,
@@ -225,7 +225,7 @@ class TCQKACoreLIF(BaseTCGCBlock):
         v_neuron = torch.zeros([], device=qk.device)
         out_seq = []
         for qk_c in qk_seqs:
-            out_c, v_neuron = InputCompressedGCFunction.apply(
+            out_c, v_neuron = InputCompressedGC.apply(
                 self.conventional_forward,
                 self.spike_compressor,
                 qk_c,
@@ -256,7 +256,7 @@ class QKACorePSN(BaseGCBlock):
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
     def forward(self, qk: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             self.conventional_forward,
             self.spike_compressor,
             qk,
@@ -287,7 +287,7 @@ class QKACoreSlidingPSN(BaseGCBlock):
         return k.flatten(2, 3)  # [T, B, C, num_patches]
 
     def forward(self, qk: torch.Tensor):
-        return InputCompressedGCFunction.apply(
+        return InputCompressedGC.apply(
             self.conventional_forward,
             self.spike_compressor,
             qk,
