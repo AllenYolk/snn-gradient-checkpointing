@@ -1,4 +1,4 @@
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple, Union
 import threading
 import contextlib
 import functools
@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.autograd as autograd
 
 from .amp import get_autocast_context, is_autocast_enabled
+from .compress import get_spike_compressor, BaseSpikeCompressor
 
 _thread_local = threading.local()
 
@@ -43,7 +44,9 @@ class InputCompressedGC(autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, forward_function, x_compressor, x_seq, *args):
+    def forward(
+        ctx, forward_function, x_compressor: BaseSpikeCompressor, x_seq, *args
+    ):
         ctx.forward_function = forward_function
         ctx.x_compressor = x_compressor
         ctx.x_seq_shape = x_seq.shape
@@ -128,7 +131,9 @@ class InputCompressedGC(autograd.Function):
         return tuple(grads)
 
 
-def input_compressed_gc(forward_function, x_compressor, x_seq, *args):
+def input_compressed_gc(
+    forward_function, x_compressor: BaseSpikeCompressor, x_seq, *args
+):
     if torch.is_grad_enabled():
         x_seq.requires_grad_(True)  # make sure the retval requires grad
         return InputCompressedGC.apply(
@@ -139,7 +144,10 @@ def input_compressed_gc(forward_function, x_compressor, x_seq, *args):
         return forward_function(x_seq, *args)
 
 
-def to_gc_function(x_compressor, forward_function: Optional[Callable] = None):
+def to_gc_function(
+    x_compressor: BaseSpikeCompressor,
+    forward_function: Optional[Callable] = None
+):
     """Convert a forward function to a GC-blocked forward function.
 
     Usage 1. as a decorator:
@@ -191,7 +199,7 @@ def to_gc_function(x_compressor, forward_function: Optional[Callable] = None):
 class GCContainer(nn.Sequential):
     """A GC block module that can be defined just as nn.Sequential."""
 
-    def __init__(self, x_compressor, *args):
+    def __init__(self, x_compressor: BaseSpikeCompressor, *args):
         """Construct a GC block module in nn.Sequential style.
 
         Args:
@@ -203,6 +211,22 @@ class GCContainer(nn.Sequential):
 
     def forward(self, x, *args):
         return input_compressed_gc(super().forward, self.x_compressor, x, *args)
+
+
+def apply_gc(
+    net: nn.Module, instance: Union[type, Tuple[type]], x_compressor: str
+):
+    # use list() to make a snapshot so that we can modify the model
+    for name, child in list(net.named_children()):
+        if isinstance(child, instance):
+            setattr(
+                net, name,
+                GCContainer(get_spike_compressor(x_compressor), child)
+            )
+        elif not isinstance(child, GCContainer):
+            apply_gc(child, instance, x_compressor)
+        # skip the child if it is already a GCContainer
+    return net
 
 
 class BaseTCGCBlock(nn.Module):
