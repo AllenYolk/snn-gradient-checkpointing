@@ -8,8 +8,8 @@ from spikingjelly.activation_based import layer
 
 from modules.neuron import get_neuron
 from modules.compress import *
-from modules.bn import TEBNProjection
-from modules.checkpointing import GCContainer
+from modules.bn import TEBNProjection, BatchNorm2d_
+from modules.checkpointing import GCContainer, memory_optimization
 
 
 class VGGBlock(nn.Module):
@@ -33,7 +33,7 @@ class VGGBlock(nn.Module):
             l.append(nn.AvgPool2d(2))
         l += [
             nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            nn.BatchNorm2d(out_plane),
+            BatchNorm2d_(out_plane),
         ]
         self.proj_bn = layer.SeqToANNContainer(*l)
         if neuron_type != "PSN":
@@ -135,6 +135,13 @@ def vgg_critical_block_checkpointing(
                 layer.SeqToANNContainer(nn.AvgPool2d(2)),
             )
         ]
+
+
+def AutoGCCIFAR10DVSVGG(
+    T, neuron_type, spike_compressor: str, dropout=0.25, **kwargs
+):
+    net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs)
+    return memory_optimization(net, (VGGBlock,), spike_compressor, level=1)
 
 
 class GCCIFAR10DVSVGG(nn.Module):

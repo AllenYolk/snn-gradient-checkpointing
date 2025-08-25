@@ -80,7 +80,7 @@ class InputCompressedGC(autograd.Function):
             ctx.fwd_rng_state_cuda = []
 
         # depend on external autocast context
-        with torch.no_grad():
+        with gc_1st_forward(), torch.no_grad():
             outputs = forward_function(x_seq, *args)
         return outputs  # tensor or tuple
 
@@ -226,6 +226,21 @@ def apply_gc(
         elif not isinstance(child, GCContainer):
             apply_gc(child, instance, x_compressor)
         # skip the child if it is already a GCContainer
+    return net
+
+
+def memory_optimization(
+    net: nn.Module,
+    instance: Union[type, Tuple[type]],
+    x_compressor: str,
+    level: int = 0,
+):
+    if level > 0:
+        net = apply_gc(net, instance, x_compressor)
+
+    if level > 1:
+        raise NotImplementedError()
+
     return net
 
 

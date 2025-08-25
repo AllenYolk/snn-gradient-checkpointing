@@ -1,6 +1,7 @@
 seed_everything: 2024
 
 trainer:
+  deterministic: True
   max_epochs: 100
   precision: 32
   num_sanity_val_steps: 0

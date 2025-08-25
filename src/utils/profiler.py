@@ -171,7 +171,7 @@ class CategoryMemoryProfiler(BaseProfiler):
 
         return memory_usage
 
-    def export(self, depth=2, *args, **kwargs):
+    def export(self, depth=2, output: bool = True, *args, **kwargs):
         memory_usage = self._get_memory_stats()
 
         total_mem = {}
@@ -182,30 +182,33 @@ class CategoryMemoryProfiler(BaseProfiler):
                     'reserved': torch.cuda.memory_reserved() / MB,
                 }
 
-        caller_str = _get_caller_info(depth)
-        header_str = (
-            f"=== Category-wise Memory Stats ({time.ctime()}; {caller_str}) ==="
-        )
-
-        out_str = "=" * len(header_str) + "\n"
-        out_str += header_str + "\n"
-        out_str += "=" * len(header_str) + "\n"
-        for device_id in range(self.device_count):
-            out_str += (
-                f"cuda:{device_id} - "
-                f"Allocated: {total_mem[device_id]['allocated']:.2f} MB, "
-                f"Reserved: {total_mem[device_id]['reserved']:.2f} MB\n"
+        if output:
+            caller_str = _get_caller_info(depth)
+            header_str = (
+                f"=== Category-wise Memory ({time.ctime()}; {caller_str}) ==="
             )
-        out_str += "Memory Usage by Category:\n"
-        for category, usage in memory_usage.items():
-            out_str += f"  {category}: {usage / MB:.2f} MB\n"
-        out_str += f"  Total Tracked: {sum(memory_usage.values()) / MB:.2f} MB\n"
-        out_str += "=" * len(header_str) + "\n"
-        out_str += "=" * len(header_str) + "\n"*3
 
-        print(out_str)
-        with open(self.log_path, 'a') as f:
-            f.write(out_str)
+            out_str = "=" * len(header_str) + "\n"
+            out_str += header_str + "\n"
+            out_str += "=" * len(header_str) + "\n"
+            for device_id in range(self.device_count):
+                out_str += (
+                    f"cuda:{device_id} - "
+                    f"Allocated: {total_mem[device_id]['allocated']:.2f} MB, "
+                    f"Reserved: {total_mem[device_id]['reserved']:.2f} MB\n"
+                )
+            out_str += "Memory Usage by Category:\n"
+            for category, usage in memory_usage.items():
+                out_str += f"  {category}: {usage / MB:.2f} MB\n"
+            out_str += f"  Total: {sum(memory_usage.values()) / MB:.2f} MB\n"
+            out_str += "=" * len(header_str) + "\n"
+            out_str += "=" * len(header_str) + "\n"*3
+
+            print(out_str)
+            with open(self.log_path, 'a') as f:
+                f.write(out_str)
+
+        return memory_usage, total_mem
 
 
 class LayerWiseMemoryProfiler(BaseProfiler):
@@ -270,7 +273,7 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         self.backward_start_memory = defaultdict(float)
         self.backward_end_memory = defaultdict(float)
         self.backward_peak_memory = defaultdict(float)
-        self.module_str = {}
+        self.module_obj = {}  # mapping from module name to the module itself
 
         def pre_hook_generator(name):
 
@@ -328,7 +331,7 @@ class LayerWiseMemoryProfiler(BaseProfiler):
             for name, m in it:
                 if isinstance(m, instances):
                     mname = f"{model_names[i]}'s {name}"
-                    self.module_str[mname] = str(m)
+                    self.module_obj[mname] = m
                     m.register_forward_pre_hook(pre_hook_generator(mname))
                     m.register_forward_hook(post_hook_generator(mname))
                     m.register_full_backward_pre_hook(
@@ -338,23 +341,28 @@ class LayerWiseMemoryProfiler(BaseProfiler):
                         backward_post_hook_generator(mname)
                     )
 
-    def export(self, depth=2, sort_by="backward_peak_memory", *args, **kwargs):
+    def export(
+        self,
+        depth=2,
+        sort_by="backward_peak_memory",
+        output: bool = True,
+        *args,
+        **kwargs
+    ):
         results = []
         for name in self.forward_peak_memory.keys():
-            forward_start_memory = self.forward_start_memory[name]
-            forward_end_memory = self.forward_end_memory[name]
-            forward_peak_memory = self.forward_peak_memory[name]
-            backward_start_memory = self.backward_start_memory[name]
-            backward_end_memory = self.backward_end_memory[name]
-            backward_peak_memory = self.backward_peak_memory[name]
-            forward_delta_memory = forward_peak_memory - forward_start_memory
-            backward_delta_memory = backward_peak_memory - backward_start_memory
+            f_start = self.forward_start_memory[name]
+            f_end = self.forward_end_memory[name]
+            f_peak = self.forward_peak_memory[name]
+            f_delta = f_peak - f_start
+            b_start = self.backward_start_memory[name]
+            b_end = self.backward_end_memory[name]
+            b_peak = self.backward_peak_memory[name]
+            b_delta = b_peak - b_start
 
             results.append((
-                name, forward_start_memory, forward_end_memory,
-                forward_peak_memory, forward_delta_memory,
-                backward_start_memory, backward_end_memory,
-                backward_peak_memory, backward_delta_memory
+                name, f_start, f_end, f_peak, f_delta, b_start, b_end, b_peak,
+                b_delta
             ))
 
         if sort_by is not None:
@@ -362,43 +370,45 @@ class LayerWiseMemoryProfiler(BaseProfiler):
                 results, key=lambda x: x[self.field_idx[sort_by]], reverse=True
             )
 
-        caller_str = _get_caller_info(depth)
-        header_str = (
-            f"=== Layer-wise Memory Stats ({time.ctime()}; {caller_str}) ==="
-        )
+        if output:
+            caller_str = _get_caller_info(depth)
+            header_str = (
+                f"=== Layer-wise Memory Stats ({time.ctime()}; {caller_str}) ==="
+            )
 
-        out_str = "=" * len(header_str) + "\n"
-        out_str += header_str + "\n"
-        out_str += "=" * len(header_str) + "\n"
-        for (
-            name, forward_start_memory, forward_end_memory, forward_peak_memory,
-            forward_delta_memory, backward_start_memory, backward_end_memory,
-            backward_peak_memory, backward_delta_memory
-        ) in results:
-            out_str += f"{name}:{self.module_str[name]}\n"
-            out_str += f" forward_start_memory: {forward_start_memory / MB:.2f} MB, "
-            out_str += f"forward_end_memory: {forward_end_memory / MB:.2f} MB, "
-            out_str += f"forward_peak_memory: {forward_peak_memory / MB:.2f} MB, "
-            out_str += f"forward_delta_memory: {forward_delta_memory / MB:.2f} MB, "
-            out_str += f"\n backward_start_memory: {backward_start_memory / MB:.2f} MB, "
-            out_str += f"backward_end_memory: {backward_end_memory / MB:.2f} MB, "
-            out_str += f"backward_peak_memory: {backward_peak_memory / MB:.2f} MB, "
-            out_str += f"backward_delta_memory: {backward_delta_memory / MB:.2f} MB\n"
-        out_str += "=" * len(header_str) + "\n"
-        out_str += "=" * len(header_str) + "\n"*3
+            out_str = "=" * len(header_str) + "\n"
+            out_str += header_str + "\n"
+            out_str += "=" * len(header_str) + "\n"
+            for (
+                name, f_start, f_end, f_peak, f_delta, b_start, b_end, b_peak,
+                b_delta
+            ) in results:
+                out_str += f"{name}:{str(self.module_obj[name])}\n"
+                out_str += f" forward_start_memory: {f_start / MB:.2f} MB, "
+                out_str += f"forward_end_memory: {f_end / MB:.2f} MB, "
+                out_str += f"forward_peak_memory: {f_peak / MB:.2f} MB, "
+                out_str += f"forward_delta_memory: {f_delta / MB:.2f} MB, "
+                out_str += f"\n backward_start_memory: {b_start / MB:.2f} MB, "
+                out_str += f"backward_end_memory: {b_end / MB:.2f} MB, "
+                out_str += f"backward_peak_memory: {b_peak / MB:.2f} MB, "
+                out_str += f"backward_delta_memory: {b_delta / MB:.2f} MB\n"
+            out_str += "=" * len(header_str) + "\n"
+            out_str += "=" * len(header_str) + "\n"*3
 
-        print(out_str)
-        with open(self.log_path, 'a') as f:
-            f.write(out_str)
+            print(out_str)
+            with open(self.log_path, 'a') as f:
+                f.write(out_str)
 
-        torch.save({
-            "forward_start_memory": self.forward_start_memory,
-            "forward_end_memory": self.forward_end_memory,
-            "forward_peak_memory": self.forward_peak_memory,
-            "backward_start_memory": self.backward_start_memory,
-            "backward_end_memory": self.backward_end_memory,
-            "backward_peak_memory": self.backward_peak_memory,
-        }, self.data_path)
+            torch.save({
+                "forward_start_memory": self.forward_start_memory,
+                "forward_end_memory": self.forward_end_memory,
+                "forward_peak_memory": self.forward_peak_memory,
+                "backward_start_memory": self.backward_start_memory,
+                "backward_end_memory": self.backward_end_memory,
+                "backward_peak_memory": self.backward_peak_memory,
+            }, self.data_path)
+
+        return results
 
 
 class LayerWiseFPCUDATimeProfiler(BaseProfiler):
@@ -445,7 +455,7 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
             os.remove(self.log_path)
 
         self.result = defaultdict(list)
-        self.module_str = {}
+        self.module_obj = {}
         self.start_events = {}
         self.pre_hooks = []
         self.post_hooks = []
@@ -486,7 +496,7 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
             for name, m in it:
                 if isinstance(m, instances):
                     mname = f"{model_names[i]}'s {name}"
-                    self.module_str[mname] = str(m)
+                    self.module_obj[mname] = m
                     pre_handle = m.register_forward_pre_hook(
                         pre_hook_generator(mname)
                     )
@@ -497,22 +507,26 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
                     self.pre_hooks.append(pre_handle)
                     self.post_hooks.append(post_handle)
 
-    def export(self, *args, **kwargs):
+    def export(self, output: bool = True, *args, **kwargs):
         table = []
         for name in self.result.keys():
             forward_time = self.result[name][self.warmup:]
-            avg_forward_time = sum(forward_time) / len(forward_time)
-            table.append((name, avg_forward_time))
+            avg_t = sum(forward_time) / len(forward_time)
+            table.append((name, avg_t))
 
         table = sorted(table, key=lambda x: x[1], reverse=True)
 
-        out_str = ""
-        for name, avg_forward_time in table:
-            out_str += f"{name}:{self.module_str[name]} => {avg_forward_time:.2f} ms\n\n"
+        if output:
+            out_str = ""
+            for name, avg_t in table:
+                out_str += f"{name}:{str(self.module_obj[name])} => "
+                out_str += f"{avg_t:.2f} ms\n\n"
 
-        print(out_str)
-        with open(self.log_path, "a") as f:
-            f.write(out_str)
+            print(out_str)
+            with open(self.log_path, "a") as f:
+                f.write(out_str)
+
+        return table
 
     def __del__(self):
         for handle in self.pre_hooks:
