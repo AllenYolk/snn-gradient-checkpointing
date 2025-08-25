@@ -273,6 +273,7 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         self.backward_start_memory = defaultdict(float)
         self.backward_end_memory = defaultdict(float)
         self.backward_peak_memory = defaultdict(float)
+        self.hooks = []
         self.module_obj = {}  # mapping from module name to the module itself
 
         def pre_hook_generator(name):
@@ -332,14 +333,15 @@ class LayerWiseMemoryProfiler(BaseProfiler):
                 if isinstance(m, instances):
                     mname = f"{model_names[i]}'s {name}"
                     self.module_obj[mname] = m
-                    m.register_forward_pre_hook(pre_hook_generator(mname))
-                    m.register_forward_hook(post_hook_generator(mname))
-                    m.register_full_backward_pre_hook(
+                    h1 = m.register_forward_pre_hook(pre_hook_generator(mname))
+                    h2 = m.register_forward_hook(post_hook_generator(mname))
+                    h3 = m.register_full_backward_pre_hook(
                         backward_pre_hook_generator(mname)
                     )
-                    m.register_full_backward_hook(
+                    h4 = m.register_full_backward_hook(
                         backward_post_hook_generator(mname)
                     )
+                    self.hooks += [h1, h2, h3, h4]
 
     def export(
         self,
@@ -410,6 +412,11 @@ class LayerWiseMemoryProfiler(BaseProfiler):
 
         return results
 
+    def __del__(self):
+        for handle in self.hooks:
+            handle.remove()
+        self.hooks = []
+
 
 class LayerWiseFPCUDATimeProfiler(BaseProfiler):
 
@@ -457,8 +464,7 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         self.result = defaultdict(list)
         self.module_obj = {}
         self.start_events = {}
-        self.pre_hooks = []
-        self.post_hooks = []
+        self.hooks = []
 
         def pre_hook_generator(name):
 
@@ -504,8 +510,7 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
                         post_hook_generator(mname)
                     )
                     self.start_events[mname] = None
-                    self.pre_hooks.append(pre_handle)
-                    self.post_hooks.append(post_handle)
+                    self.hooks += [pre_handle, post_handle]
 
     def export(self, output: bool = True, *args, **kwargs):
         table = []
@@ -529,12 +534,9 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         return table
 
     def __del__(self):
-        for handle in self.pre_hooks:
+        for handle in self.hooks:
             handle.remove()
-        for handle in self.post_hooks:
-            handle.remove()
-        self.pre_hooks = []
-        self.post_hooks = []
+        self.hooks = []
 
 
 class ProfilerList(list):

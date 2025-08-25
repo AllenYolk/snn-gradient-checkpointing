@@ -64,6 +64,7 @@ class CIFAR10DVSVGG(nn.Module):
             VGGBlock(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
             layer.AvgPool2d(2, step_mode="m"),
         )
+        self.features[0].disable_x_compressor = True
         self.dropout = layer.Dropout(dropout)
         d = int(48 / 2 / 2 / 2 / 2)
         self.classifier = nn.Linear(512 * d * d, 10)
@@ -140,8 +141,12 @@ def vgg_critical_block_checkpointing(
 def AutoGCCIFAR10DVSVGG(
     T, neuron_type, spike_compressor: str, dropout=0.25, **kwargs
 ):
-    net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs)
-    return memory_optimization(net, (VGGBlock,), spike_compressor, level=1)
+    net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs).to("cuda")
+    return memory_optimization(
+        net, (VGGBlock,),
+        dummy_input=torch.zeros(8, T, 2, 48, 48).to("cuda") + 0.9,
+        level=1
+    )
 
 
 class GCCIFAR10DVSVGG(nn.Module):

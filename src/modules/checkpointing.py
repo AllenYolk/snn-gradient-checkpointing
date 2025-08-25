@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Tuple, Union
+from typing import Optional, Callable, Tuple, Union, Dict
 import threading
 import contextlib
 import functools
@@ -6,9 +6,16 @@ import functools
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
+from spikingjelly.activation_based import functional
 
 from .amp import get_autocast_context, is_autocast_enabled
-from .compress import get_spike_compressor, BaseSpikeCompressor
+from .compress import *
+
+import sys
+
+sys.path.append("./src")
+
+from utils.profiler import *
 
 _thread_local = threading.local()
 
@@ -212,34 +219,133 @@ class GCContainer(nn.Sequential):
     def forward(self, x, *args):
         return input_compressed_gc(super().forward, self.x_compressor, x, *args)
 
+    def extra_repr(self) -> str:
+        return f"x_compressor={self.x_compressor.__class__.__name__},"
+
+
+def _probe_binary_inputs(
+    net: nn.Module,
+    instance: Union[type, Tuple[type]],
+    dummy_input: torch.Tensor,
+) -> Dict[nn.Module, bool]:
+    """Run dummy forward and record whether target modules receive binary inputs."""
+    is_binary = {}
+    hooks = []
+
+    def hook_fn(m, inputs: tuple, out):
+        x = inputs[0]  # assume the first input is the one to be checked
+        binary = torch.all((x == 0) | (x == 1)).item()
+        is_binary[m] = binary
+
+    # register hooks
+    for m in net.modules():
+        if isinstance(m, instance):
+            hooks.append(m.register_forward_hook(hook_fn))
+
+    # run forward
+    is_training = net.training
+    net.eval()
+    with torch.no_grad():
+        _ = net(dummy_input)
+    if is_training:
+        net.train()
+
+    # remove hooks
+    for h in hooks:
+        h.remove()
+
+    return is_binary
+
 
 def apply_gc(
-    net: nn.Module, instance: Union[type, Tuple[type]], x_compressor: str
-):
-    # use list() to make a snapshot so that we can modify the model
-    for name, child in list(net.named_children()):
-        if isinstance(child, instance):
-            setattr(
-                net, name,
-                GCContainer(get_spike_compressor(x_compressor), child)
-            )
-        elif not isinstance(child, GCContainer):
-            apply_gc(child, instance, x_compressor)
-        # skip the child if it is already a GCContainer
+    net: nn.Module,
+    instance: Union[type, Tuple[type]],
+    dummy_input: Optional[torch.Tensor] = None,
+    compress_x: bool = True
+) -> nn.Module:
+    is_binary_input = {}
+    if compress_x and dummy_input is not None:
+        is_binary_input = _probe_binary_inputs(net, instance, dummy_input)
+
+    def _replace(subnet: nn.Module):
+        for name, child in list(subnet.named_children()):
+            if isinstance(child, instance):
+                b = is_binary_input.get(child, False)
+                d = getattr(child, "disable_x_compressor", False)
+                x_compressor = (
+                    BitSpikeCompressor() if
+                    (b and not d) else NullSpikeCompressor()
+                )
+                setattr(subnet, name, GCContainer(x_compressor, child))
+            elif not isinstance(child, GCContainer):
+                _replace(child)
+
+    _replace(net)
     return net
+
+
+def _dummy_train_step(net: nn.Module, dummy_input: torch.Tensor):
+    net.train()
+    L = dummy_input.shape[-1]
+    dummy_encoder = nn.Sequential(nn.Linear(L, 1), nn.Linear(1, L)).to("cuda")
+    dummy_input = dummy_encoder(dummy_input)
+    out = net(dummy_input)
+    if isinstance(out, (tuple, list)):
+        # if model returns multiple tensors, sum all tensors that require grad
+        loss_terms = [t for t in out if torch.is_tensor(t) and t.requires_grad]
+        if not loss_terms:
+            raise RuntimeError(
+                "No tensor requiring grad found in model outputs."
+            )
+        loss = torch.stack([t.float().sum() for t in loss_terms]).sum()
+    elif torch.is_tensor(out):
+        loss = out.sum()
+    else:
+        raise RuntimeError("Model output is not a tensor/sequence of tensors.")
+    loss.backward()
+    functional.reset_net(net)
 
 
 def memory_optimization(
     net: nn.Module,
     instance: Union[type, Tuple[type]],
-    x_compressor: str,
+    dummy_input: torch.Tensor = None,
+    compress_x: bool = True,
     level: int = 0,
 ):
-    if level > 0:
-        net = apply_gc(net, instance, x_compressor)
+    if level > 0:  # layer-wise GC
+        net = apply_gc(net, instance, dummy_input, compress_x)
 
-    if level > 1:
-        raise NotImplementedError()
+    if level > 1:  # spatial split
+        prof = LayerWiseMemoryProfiler(
+            (net,),
+            model_names=("net",),
+            search_mode=("submodules",),
+            instances=(GCContainer,),
+        )
+
+        if dummy_input is None:
+            raise ValueError(
+                "dummy_input must be provided for memory profiling."
+            )
+        _dummy_train_step(net, dummy_input)
+
+        results = prof.export(sort_by="backward_peak_memory", output=False)
+        print(results)
+        del prof
+
+    if level > 2:  # temporal split
+        prof = LayerWiseMemoryProfiler(
+            (net,),
+            model_names=("net",),
+            search_mode=("submodules",),
+            instances=(GCContainer,),
+        )
+        # TODO: profile training memory cost
+        del prof
+
+    if level > 3:  # partly disable
+        raise NotImplementedError("Level > 3 is not implemented yet.")
 
     return net
 
