@@ -26,7 +26,7 @@ def _get_caller_info(depth=1):
     return caller_str
 
 
-def get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
+def _get_all_addresses_referenced_by_tensor(depth=float("inf"), verbose=False):
     id_to_name = {}
     current_frame = inspect.currentframe().f_back
 
@@ -98,6 +98,10 @@ class BaseProfiler(abc.ABC):
 
     @abc.abstractmethod
     def export(self):
+        pass
+
+    @abc.abstractmethod
+    def close(self):
         pass
 
 
@@ -209,6 +213,9 @@ class CategoryMemoryProfiler(BaseProfiler):
                 f.write(out_str)
 
         return memory_usage, total_mem
+
+    def close(self):
+        pass
 
 
 class LayerWiseMemoryProfiler(BaseProfiler):
@@ -344,12 +351,7 @@ class LayerWiseMemoryProfiler(BaseProfiler):
                     self.hooks += [h1, h2, h3, h4]
 
     def export(
-        self,
-        depth=2,
-        sort_by="backward_peak_memory",
-        output: bool = True,
-        *args,
-        **kwargs
+        self, depth=2, sort_by=None, output: bool = True, *args, **kwargs
     ):
         results = []
         for name in self.forward_peak_memory.keys():
@@ -371,6 +373,8 @@ class LayerWiseMemoryProfiler(BaseProfiler):
             results = sorted(
                 results, key=lambda x: x[self.field_idx[sort_by]], reverse=True
             )
+        else:
+            results = sorted(results, key=lambda x: max(x[1:]), reverse=True)
 
         if output:
             caller_str = _get_caller_info(depth)
@@ -412,10 +416,13 @@ class LayerWiseMemoryProfiler(BaseProfiler):
 
         return results
 
-    def __del__(self):
+    def close(self):
         for handle in self.hooks:
             handle.remove()
         self.hooks = []
+
+    def __del__(self):
+        self.close()
 
 
 class LayerWiseFPCUDATimeProfiler(BaseProfiler):
@@ -533,10 +540,13 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
 
         return table
 
-    def __del__(self):
+    def close(self):
         for handle in self.hooks:
             handle.remove()
         self.hooks = []
+
+    def __del__(self):
+        self.close()
 
 
 class ProfilerList(list):
@@ -549,3 +559,10 @@ class ProfilerList(list):
     def export(self, *args, **kwargs):
         for p in self:
             p.export(*args, **kwargs)
+
+    def close(self):
+        for p in self:
+            p.close()
+
+    def __del__(self):
+        self.close()

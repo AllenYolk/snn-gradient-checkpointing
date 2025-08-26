@@ -65,9 +65,10 @@ class CIFAR10DVSVGG(nn.Module):
             layer.AvgPool2d(2, step_mode="m"),
         )
         self.features[0].disable_x_compressor = True
-        self.dropout = layer.Dropout(dropout)
         d = int(48 / 2 / 2 / 2 / 2)
-        self.classifier = nn.Linear(512 * d * d, 10)
+        l = [nn.Dropout(dropout)] if dropout > 0 else []
+        l.append(nn.Linear(512 * d * d, 10))
+        self.classifier = nn.Sequential(*l)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -80,7 +81,6 @@ class CIFAR10DVSVGG(nn.Module):
         input = input.transpose(0, 1).contiguous()  # [T, N, C, H, W]
         x = self.features(input)
         x = torch.flatten(x, 2)  # [T, N, D]
-        x = self.dropout(x)
         x = self.classifier(x)
         return x
 
@@ -144,8 +144,8 @@ def AutoGCCIFAR10DVSVGG(
     net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs).to("cuda")
     return memory_optimization(
         net, (VGGBlock,),
-        dummy_input=torch.zeros(8, T, 2, 48, 48).to("cuda") + 0.9,
-        level=1
+        dummy_input=torch.zeros(32, T, 2, 48, 48).to("cuda") + 0.9,
+        level=4
     )
 
 
@@ -191,7 +191,7 @@ class GCCIFAR10DVSVGG(nn.Module):
             ),
             layer.AvgPool2d(2, step_mode="m"),
         )
-        self.dropout = layer.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
         d = int(48 / 2 / 2 / 2 / 2)
         self.classifier = nn.Linear(512 * d * d, 10)
 
@@ -252,7 +252,7 @@ class FGCCIFAR10DVSVGG(nn.Module):
             ),
             layer.AvgPool2d(2, step_mode="m"),
         )
-        self.dropout = layer.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
         d = int(48 / 2 / 2 / 2 / 2)
         self.classifier = nn.Linear(512 * d * d, 10)
 
@@ -323,7 +323,7 @@ class PGCCIFAR10DVSVGG(nn.Module):
             VGGBlock(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
             layer.AvgPool2d(2, step_mode="m"),
         )
-        self.dropout = layer.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
         d = int(48 / 2 / 2 / 2 / 2)
         self.classifier = nn.Linear(512 * d * d, 10)
 

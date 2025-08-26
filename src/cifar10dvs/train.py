@@ -58,7 +58,7 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             neuron_type=self.hparams.neuron_type,
             spike_compressor=self.hparams.spike_compressor,
             decay_lambda=self.hparams.decay_lambda,
-            k=4,  # for SlidingPSN
+            k=2,  # for SlidingPSN
         )
 
     def configure_criterion(self):
@@ -97,7 +97,7 @@ def main():
                 "class_path": "CSVLogger",
                 "init_args": {
                     "save_dir": "./logs",
-                    "name": "SHD"
+                    "name": "CIFAR10DVS"
                 }
             },
             "enable_model_summary": False,

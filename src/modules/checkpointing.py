@@ -2,11 +2,12 @@ from typing import Optional, Callable, Tuple, Union, Dict
 import threading
 import contextlib
 import functools
+import copy
 
 import torch
 import torch.nn as nn
 import torch.autograd as autograd
-from spikingjelly.activation_based import functional
+import torch.multiprocessing as mp
 
 from .amp import get_autocast_context, is_autocast_enabled
 from .compress import *
@@ -231,6 +232,8 @@ def _probe_binary_inputs(
     """Run dummy forward and record whether target modules receive binary inputs."""
     is_binary = {}
     hooks = []
+    net = net.cuda()
+    dummy_input = dummy_input.cuda()
 
     def hook_fn(m, inputs: tuple, out):
         x = inputs[0]  # assume the first input is the one to be checked
@@ -286,12 +289,14 @@ def apply_gc(
 
 def _dummy_train_step(net: nn.Module, dummy_input: torch.Tensor):
     net.train()
-    L = dummy_input.shape[-1]
-    dummy_encoder = nn.Sequential(nn.Linear(L, 1), nn.Linear(1, L)).to("cuda")
-    dummy_input = dummy_encoder(dummy_input)
+
+    dummy_input = dummy_input.clone().detach()
+    # compute input's grad to avoid backward_peak == backward_start @ the 1st layer
+    dummy_input.requires_grad = True
     out = net(dummy_input)
+
+    # loss calculation
     if isinstance(out, (tuple, list)):
-        # if model returns multiple tensors, sum all tensors that require grad
         loss_terms = [t for t in out if torch.is_tensor(t) and t.requires_grad]
         if not loss_terms:
             raise RuntimeError(
@@ -302,8 +307,52 @@ def _dummy_train_step(net: nn.Module, dummy_input: torch.Tensor):
         loss = out.sum()
     else:
         raise RuntimeError("Model output is not a tensor/sequence of tensors.")
+
     loss.backward()
-    functional.reset_net(net)
+
+
+def _train_memory_profile_worker(net, dummy_input, q):
+    """`net` and `dummy_input` should be a deep copy of the original model and
+    should be located on CPU, since they must be pickle-able.
+    """
+    net = net.cuda()
+    dummy_input = dummy_input.cuda()
+
+    prof = LayerWiseMemoryProfiler(
+        (net,),
+        model_names=("net",),
+        search_mode=("submodules",),
+        instances=(GCContainer,),
+    )
+    _dummy_train_step(net, dummy_input)
+    results = prof.export(output=False)
+    prof.close()
+
+    q.put(results)
+
+
+def _inference_time_profile_worker(net, dummy_input, q, N=50):
+    """`net` and `dummy_input` should be a deep copy of the original model and
+    should be located on CPU, since they must be pickle-able.
+    """
+    net = net.cuda()
+    dummy_input = dummy_input.cuda()
+
+    prof = LayerWiseFPCUDATimeProfiler(
+        (net,),
+        model_names=("net",),
+        search_mode=("submodules",),
+        instances=(GCContainer,),
+    )
+
+    net.eval()
+    with torch.no_grad():
+        for _ in range(N):
+            _ = net(dummy_input)
+    results = prof.export(output=False)
+    prof.close()
+
+    q.put(results)
 
 
 def memory_optimization(
@@ -313,39 +362,46 @@ def memory_optimization(
     compress_x: bool = True,
     level: int = 0,
 ):
-    if level > 0:  # layer-wise GC
+    module_obj = {}  # mapping from module name to the module itself
+    for n, m in net.named_modules():
+        mname = f"net's {n}"
+        if isinstance(m, instance):
+            module_obj[mname] = m
+
+    ctx = mp.get_context("spawn")
+
+    if level > 0:  # layer-wise GC with input spike compression
         net = apply_gc(net, instance, dummy_input, compress_x)
 
     if level > 1:  # spatial split
-        prof = LayerWiseMemoryProfiler(
-            (net,),
-            model_names=("net",),
-            search_mode=("submodules",),
-            instances=(GCContainer,),
-        )
-
         if dummy_input is None:
             raise ValueError(
                 "dummy_input must be provided for memory profiling."
             )
-        _dummy_train_step(net, dummy_input)
 
-        results = prof.export(sort_by="backward_peak_memory", output=False)
-        print(results)
-        del prof
-
-    if level > 2:  # temporal split
-        prof = LayerWiseMemoryProfiler(
-            (net,),
-            model_names=("net",),
-            search_mode=("submodules",),
-            instances=(GCContainer,),
+        q = ctx.Queue(maxsize=1)
+        p = ctx.Process(
+            target=_train_memory_profile_worker,
+            args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
         )
-        # TODO: profile training memory cost
-        del prof
+        p.start()
+        results = q.get()
+        p.join()
 
-    if level > 3:  # partly disable
-        raise NotImplementedError("Level > 3 is not implemented yet.")
+        print(list(module_obj.keys()))
+        print("Layer-wise GCContainer profiling results:", results)
+
+    if level > 3:
+        q = ctx.Queue(maxsize=1)
+        p = ctx.Process(
+            target=_inference_time_profile_worker,
+            args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+            kwargs={"N": 50},
+        )
+        p.start()
+        results = q.get()
+        p.join()
+        print("Layer-wise inference time profiling results:", results)
 
     return net
 
