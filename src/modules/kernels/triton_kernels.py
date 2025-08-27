@@ -1,7 +1,10 @@
+import multiprocessing as mp
+
+import torch
+
 try:
     import triton
     import triton.language as tl
-    import torch
 
     TRITON_AVAILABLE = True
 
@@ -11,11 +14,12 @@ try:
     }
     dc = torch.cuda.get_device_capability()
     if dc[0] < 8 or not hasattr(tl, "bfloat16"):
-        print(
-            "Triton kernel with bfloat16 is not supported on devices "
-            "with compute capability < 8.0. "
-            f"Your device's capability is: {dc}."
-        )
+        if mp.current_process().name == "MainProcess":
+            print(
+                "Triton kernel with bfloat16 is not supported on devices "
+                "with compute capability < 8.0. "
+                f"Your device's capability is: {dc}."
+            )
         TRITON_BFLOAT16_AVAILABLE = False
     else:
         TRITON_BFLOAT16_AVAILABLE = True
@@ -23,11 +27,12 @@ try:
 
     TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
     if float(f"{dc[0]}.{dc[1]}") < 8.9 or not hasattr(tl, "float8e4nv"):
-        print(
-            "Triton kernel with float8e4nv (float8_e4m3fn) is not supported on "
-            "devices with compute capability < 8.9. "
-            f"Your devices's capability is: {dc}."
-        )
+        if mp.current_process().name == "MainProcess":
+            print(
+                "Triton kernel with float8e4nv (float8_e4m3fn) is not supported on "
+                "devices with compute capability < 8.9. "
+                f"Your devices's capability is: {dc}."
+            )
         TRITON_FLOAT8E4NV_AVAILABLE = False
     else:
         TRITON_FLOAT8E4NV_AVAILABLE = True
@@ -292,9 +297,9 @@ try:
         return s_seq_decompressed.reshape(shape)
 
 except Exception as e:
-    import torch
     TRITON_AVAILABLE = False
     TRITON_BFLOAT16_AVAILABLE = False
     TRITON_FLOAT8E4NV_AVAILABLE = False
     TORCH_FLOAT8E4M3FN_AVAILABLE = hasattr(torch, "float8_e4m3fn")
-    print(f"triton is not available. {e}")
+    if mp.current_process().name == "MainProcess":
+        print(f"triton is not available. {e}")

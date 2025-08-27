@@ -11,10 +11,6 @@ import torch.utils.data as data
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
-if npu_available:
-    print("NPU is available.")
-else:
-    print("NPU is not available.")
 
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets

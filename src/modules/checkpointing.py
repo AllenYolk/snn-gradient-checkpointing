@@ -260,7 +260,7 @@ def _probe_binary_inputs(
     return is_binary
 
 
-def apply_gc(
+def _apply_gc(
     net: nn.Module,
     instance: Union[type, Tuple[type]],
     dummy_input: Optional[torch.Tensor] = None,
@@ -327,8 +327,52 @@ def _train_memory_profile_worker(net, dummy_input, q):
     _dummy_train_step(net, dummy_input)
     results = prof.export(output=False)
     prof.close()
-
     q.put(results)
+
+
+def _train_memory_profile(net, dummy_input, ctx):
+    q = ctx.Queue(maxsize=1)
+    p = ctx.Process(
+        target=_train_memory_profile_worker,
+        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+    )
+    p.start()
+    results = q.get()
+    p.join()
+    return results
+
+
+def _train_peak_memory_worker(net, dummy_input, q):
+    """Profile the peak training memory usage of the entire net.
+
+    `net` and `dummy_input` should be deep copies located on CPU,
+    since they must be pickle-able for multiprocessing.
+    """
+    net = net.cuda()
+    dummy_input = dummy_input.cuda()
+
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+
+    _dummy_train_step(net, dummy_input)
+
+    torch.cuda.synchronize()
+    peak_allocated = torch.cuda.max_memory_allocated()
+    peak_reserved = torch.cuda.max_memory_reserved()
+    q.put((peak_allocated, peak_reserved))
+
+
+def _train_peak_memory(net, dummy_input, ctx):
+    q = ctx.Queue(maxsize=1)
+    p = ctx.Process(
+        target=_train_peak_memory_worker,
+        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+    )
+    p.start()
+    results = q.get()
+    p.join()
+    return results
 
 
 def _inference_time_profile_worker(net, dummy_input, q, N=50):
@@ -355,23 +399,70 @@ def _inference_time_profile_worker(net, dummy_input, q, N=50):
     q.put(results)
 
 
+def _inference_time_profile(net, dummy_input, ctx):
+    q = ctx.Queue(maxsize=1)
+    p = ctx.Process(
+        target=_inference_time_profile_worker,
+        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+        kwargs={"N": 50},
+    )
+    p.start()
+    results = q.get()
+    p.join()
+    return results
+
+
+def _get_module_and_parent(
+    net: nn.Module, module_name: str
+) -> Tuple[nn.Module, nn.Module, str]:
+    """
+    Given a dotted module path (e.g., 'layer1.0.conv1', not including the 
+    top-level module name), return (target_module, parent_module, child_name).
+    
+    Example:
+        m, parent, child_name = get_module_and_parent(net, "layer1.0.conv1")
+        # parent.child_name == m
+    """
+    module_name = module_name.split(" ")[-1]
+    parts = module_name.split(".")
+    parent = net
+    for p in parts[:-1]:
+        parent = getattr(parent, p)
+    child_name = parts[-1]
+    module = getattr(parent, child_name)
+    return module, parent, child_name
+
+
+def _unwrap_gc_container(
+    block: nn.Module
+) -> Tuple[nn.Module, BaseSpikeCompressor]:
+    if isinstance(block, GCContainer):
+        x_compressor = block.x_compressor
+        if len(block) == 1:
+            return block[0], x_compressor
+        else:
+            return nn.Sequential(*block.children()), x_compressor
+    else:
+        return block, None
+
+
+def cprint(verbose, *args, **kwargs):
+    if verbose:
+        print(*args, **kwargs)
+
+
 def memory_optimization(
     net: nn.Module,
     instance: Union[type, Tuple[type]],
     dummy_input: torch.Tensor = None,
     compress_x: bool = True,
     level: int = 0,
+    verbose: bool = False,
 ):
-    module_obj = {}  # mapping from module name to the module itself
-    for n, m in net.named_modules():
-        mname = f"net's {n}"
-        if isinstance(m, instance):
-            module_obj[mname] = m
-
     ctx = mp.get_context("spawn")
 
     if level > 0:  # layer-wise GC with input spike compression
-        net = apply_gc(net, instance, dummy_input, compress_x)
+        net = _apply_gc(net, instance, dummy_input, compress_x)
 
     if level > 1:  # spatial split
         if dummy_input is None:
@@ -379,29 +470,36 @@ def memory_optimization(
                 "dummy_input must be provided for memory profiling."
             )
 
-        q = ctx.Queue(maxsize=1)
-        p = ctx.Process(
-            target=_train_memory_profile_worker,
-            args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
-        )
-        p.start()
-        results = q.get()
-        p.join()
+        results = _train_memory_profile(net, dummy_input, ctx)
+        cprint(verbose, "Layer-wise GCContainer profiling results:", results)
 
-        print(list(module_obj.keys()))
-        print("Layer-wise GCContainer profiling results:", results)
+    if level > 2:  # temporal split
+        pass
 
     if level > 3:
-        q = ctx.Queue(maxsize=1)
-        p = ctx.Process(
-            target=_inference_time_profile_worker,
-            args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
-            kwargs={"N": 50},
-        )
-        p.start()
-        results = q.get()
-        p.join()
-        print("Layer-wise inference time profiling results:", results)
+        cprint(verbose, "Level 4: greedily disable GCContainers")
+        peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+        results = _inference_time_profile(net, dummy_input, ctx)
+
+        for r in results:
+            cb_name = r[0]
+            cb, parent, child_name = _get_module_and_parent(
+                net,
+                cb_name.split(" ")[-1]
+            )
+
+            # try to unwrap the GCContainer
+            cb, x_compressor = _unwrap_gc_container(cb)
+            setattr(parent, child_name, cb)
+
+            # if the peak memory increases, revert; otherwise, keep the change
+            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+            if new_peak_allocated > peak_allocated:
+                cprint(verbose, f"{cb_name}: keep GCContainer")
+                setattr(parent, child_name, GCContainer(x_compressor, cb))
+            else:
+                cprint(verbose, f"{cb_name}: disable GCContainer")
+                peak_allocated = new_peak_allocated  # update the peak memory
 
     return net
 

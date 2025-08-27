@@ -145,7 +145,8 @@ def AutoGCCIFAR10DVSVGG(
     return memory_optimization(
         net, (VGGBlock,),
         dummy_input=torch.zeros(32, T, 2, 48, 48).to("cuda") + 0.9,
-        level=4
+        level=4,
+        verbose=True
     )
 
 

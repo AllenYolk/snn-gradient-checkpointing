@@ -1,13 +1,17 @@
+import multiprocessing as mp
+
 import torch
 
 try:
     from torch.amp import autocast, GradScaler
     USE_CUDA_DOT_AMP = False
-    print("Use torch.amp")
+    if mp.current_process().name == "MainProcess":
+        print("Use torch.amp")
 except Exception:
     from torch.cuda.amp import autocast, GradScaler
     USE_CUDA_DOT_AMP = True
-    print("torch.amp is not available. Use torch.cuda.amp instead.")
+    if mp.current_process().name == "MainProcess":
+        print("torch.amp is not available. Use torch.cuda.amp instead.")
 
 AUTOCAST_DTYPE = torch.float16
 CACHE_ENABLED = False

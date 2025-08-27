@@ -7,10 +7,6 @@ import torch
 from utils import use_torch_npu
 
 npu_available = use_torch_npu()
-if npu_available:
-    print("NPU is available.")
-else:
-    print("NPU is not available.")
 
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch import callbacks

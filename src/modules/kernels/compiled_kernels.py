@@ -1,4 +1,5 @@
 import functools
+import multiprocessing as mp
 
 import torch
 import torch.nn.functional as F
@@ -6,15 +7,16 @@ import torch.nn.functional as F
 TORCH_VERSION = torch.__version__.split('.')[0]
 
 DISABLE_COMPILE = int(TORCH_VERSION) < 2
-print(
-    f"TORCH_VERSION={torch.__version__}, "
-    f"DISABLE_COMPILE should be {DISABLE_COMPILE}"
-)
 DISABLE_COMPILE = True
-print(f"DISABLE_COMPILE is manually set to {DISABLE_COMPILE}. ")
-
 DEFAULT_BACKEND = "inductor"
-print(f"DEFAULT_BACKEND is manually set to {DEFAULT_BACKEND}. ")
+
+if mp.current_process().name == "MainProcess":
+    print(
+        f"TORCH_VERSION={torch.__version__}, "
+        f"DISABLE_COMPILE should be {DISABLE_COMPILE}"
+    )
+    print(f"DISABLE_COMPILE is manually set to {DISABLE_COMPILE}. ")
+    print(f"DEFAULT_BACKEND is manually set to {DEFAULT_BACKEND}. ")
 
 
 def _conditional_compile(

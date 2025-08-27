@@ -1,4 +1,5 @@
 from typing import Tuple
+import multiprocessing as mp
 import sys
 
 sys.path.insert(0, "./src")
@@ -17,7 +18,9 @@ try:
     DEFAULT_SJ_BACKEND = "cupy"
 except Exception:
     DEFAULT_SJ_BACKEND = "torch"
-print(f"Using {DEFAULT_SJ_BACKEND} backend for spikingjelly by default.")
+
+if mp.current_process().name == "MainProcess":
+    print(f"Using {DEFAULT_SJ_BACKEND} backend for spikingjelly by default.")
 
 
 def get_neuron(neuron_type: str, **kwargs):
