@@ -8,7 +8,6 @@ from utils import use_torch_npu
 
 npu_available = use_torch_npu()
 
-from lightning.pytorch import profilers
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch import callbacks
 
@@ -24,16 +23,21 @@ class SHDLightningModule(ClassificationLightningModule):
         self,
         network: str,
         spike_compressor: str,
+        T: int,
     ):
         super().__init__(
             num_classes=20,
             network=network,
             spike_compressor=spike_compressor,
+            T=T,
         )
 
     def configure_network(self):
         net_class = getattr(models, self.hparams.network)
-        return net_class(spike_compressor=self.hparams.spike_compressor)
+        return net_class(
+            spike_compressor=self.hparams.spike_compressor,
+            T=self.hparams.T,
+        )
 
     def configure_criterion(self):
         return torch.nn.CrossEntropyLoss()
@@ -83,6 +87,7 @@ def main():
             "enable_checkpointing": False,
         }
     )
+    assert cli.model.hparams.T * cli.datamodule.dt == 1000
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(

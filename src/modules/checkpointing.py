@@ -215,13 +215,64 @@ class GCContainer(nn.Sequential):
             *args: multiple nn.Module
         """
         super().__init__(*args)
-        self.x_compressor = x_compressor
+        self.x_compressor = (
+            NullSpikeCompressor() if x_compressor is None else x_compressor
+        )
 
     def forward(self, x, *args):
         return input_compressed_gc(super().forward, self.x_compressor, x, *args)
 
     def extra_repr(self) -> str:
         return f"x_compressor={self.x_compressor.__class__.__name__},"
+
+
+class TCGCContainer(GCContainer):
+    """Temporally Chunked GCContainer.
+
+    This container wraps exactly 1 layer and applies temporal chunking on its 
+    input to reduce memory consumption during training.
+
+    Usage constraints:
+    1. Only one layer (`len(self) == 1`) is allowed.
+    2. The forward function supports a single primary input `x_seq` that will be
+    chunked along dimension 0 (the sequence dimension), plus optional auxiliary 
+    inputs (*args) that are passed to the wrapped layer as-is.
+    3. The forward function returns a single tensor output (concatenated from 
+    chunks). 
+
+    Adaptation for custom layers:
+    1. Your layer must implement a proxy method `__tc_forward__` which has the
+    following signature: (x_chunk, *states, *args) -> (y_chunk, *updated_states)
+    2. Optionally, implement `__tc_init_states__` to initialize hidden states. It
+    should have the following signature: (x_seq) -> states, where `states` is a 
+    list or tuple of hidden states.
+    """
+
+    def __init__(
+        self,
+        x_compressor: BaseSpikeCompressor,
+        layer: nn.Module,
+        n_chunk: int = 1
+    ):
+        super().__init__(x_compressor, layer)  # exactly 1 layer!!!
+        self.n_chunk = n_chunk
+
+    def forward(self, x_seq: torch.Tensor, *args) -> torch.Tensor:
+        x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
+        states = self[0].__tc_init_states__(x_seq)
+        out_seq = []
+        for xc in x_seqs:
+            yc, *states = input_compressed_gc(
+                self[0].__tc_forward__, self.x_compressor, xc, *states, *args
+            )
+            out_seq.append(yc)
+        return torch.cat(out_seq, dim=0)
+
+    def extra_repr(self):
+        return (
+            f"x_compressor={self.x_compressor.__class__.__name__},"
+            f"n_chunk={self.n_chunk},"
+        )
 
 
 def _probe_binary_inputs(
@@ -232,8 +283,6 @@ def _probe_binary_inputs(
     """Run dummy forward and record whether target modules receive binary inputs."""
     is_binary = {}
     hooks = []
-    net = net.cuda()
-    dummy_input = dummy_input.cuda()
 
     def hook_fn(m, inputs: tuple, out):
         x = inputs[0]  # assume the first input is the one to be checked
@@ -266,6 +315,9 @@ def _apply_gc(
     dummy_input: Optional[torch.Tensor] = None,
     compress_x: bool = True
 ) -> nn.Module:
+    net = net.cuda()
+    dummy_input = dummy_input.cuda()
+
     is_binary_input = {}
     if compress_x and dummy_input is not None:
         is_binary_input = _probe_binary_inputs(net, instance, dummy_input)
@@ -284,6 +336,9 @@ def _apply_gc(
                 _replace(child)
 
     _replace(net)
+
+    net = net.cpu()
+    dummy_input = dummy_input.cpu()
     return net
 
 
@@ -433,17 +488,48 @@ def _get_module_and_parent(
     return module, parent, child_name
 
 
+def _spatially_split_gc_container(block: GCContainer):
+    assert isinstance(block, GCContainer)
+    assert len(block) == 1
+
+    x_compressor = block.x_compressor
+    b = block[0]
+    if hasattr(b, "__spatial_split__"):
+        blocks = b.__spatial_split__()
+        return nn.Sequential(
+            *[
+                GCContainer(
+                    x_compressor if i == 0 else NullSpikeCompressor(), sub
+                ) for i, sub in enumerate(blocks)
+            ]
+        )
+    else:  # not spatially split-able
+        return None
+
+
+def _temporally_split_gc_container(block: GCContainer, factor: int = 2):
+    assert isinstance(block, GCContainer)
+    assert len(block) == 1
+
+    x_compressor = block.x_compressor
+    b = block[0]
+    if hasattr(b, "__tc_init_states__") and hasattr(b, "__tc_forward__"):
+        n_chunk = getattr(b, "n_chunk", 1)
+        return TCGCContainer(x_compressor, b, n_chunk * factor)
+    else:  # not temporally split-able
+        return None
+
+
 def _unwrap_gc_container(
-    block: nn.Module
+    block: GCContainer
 ) -> Tuple[nn.Module, BaseSpikeCompressor]:
-    if isinstance(block, GCContainer):
-        x_compressor = block.x_compressor
-        if len(block) == 1:
-            return block[0], x_compressor
-        else:
-            return nn.Sequential(*block.children()), x_compressor
+    assert isinstance(block, GCContainer)
+
+    x_compressor = block.x_compressor
+    if len(block) == 1:
+        return block[0], x_compressor
     else:
-        return block, None
+        return nn.Sequential(*block.children()), x_compressor
 
 
 def cprint(verbose, *args, **kwargs):
@@ -458,10 +544,12 @@ def memory_optimization(
     compress_x: bool = True,
     level: int = 0,
     verbose: bool = False,
+    temporal_split_factor: int = 2,
 ):
     ctx = mp.get_context("spawn")
 
-    if level > 0:  # layer-wise GC with input spike compression
+    if level > 0:
+        cprint(verbose, "Level 1: layer-wise GC with input spike compression")
         net = _apply_gc(net, instance, dummy_input, compress_x)
 
     if level > 1:  # spatial split
@@ -470,15 +558,86 @@ def memory_optimization(
                 "dummy_input must be provided for memory profiling."
             )
 
-        results = _train_memory_profile(net, dummy_input, ctx)
-        cprint(verbose, "Layer-wise GCContainer profiling results:", results)
+        cprint(verbose, "Level 2: split GCContainers spatially")
+        peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+
+        while True:
+            results = _train_memory_profile(net, dummy_input, ctx)
+            if not results:
+                cprint(verbose, "\tNo more GCContainers to split.")
+                break
+            cb_name = results[0][0]  # GCContainer with the highest mem.
+            cb, parent, child_name = _get_module_and_parent(
+                net,
+                cb_name.split(" ")[-1]
+            )
+
+            # try to spatially split the GCContainer
+            # if not split-able, break
+            split_cb = _spatially_split_gc_container(cb)
+            if split_cb is None:
+                cprint(verbose, f"\t{cb_name}: can't be spatially split")
+                break
+            setattr(parent, child_name, split_cb)
+
+            # if the peak memory does not reduces, revert and break;
+            # otherwise, keep the change and continue
+            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+            if new_peak_allocated >= peak_allocated:
+                cprint(
+                    verbose, f"\t{cb_name}: no reduction in memory, revert "
+                    f"({peak_allocated} -> {new_peak_allocated})"
+                )
+                setattr(parent, child_name, cb)
+                break
+            else:
+                cprint(
+                    verbose, f"\t{cb_name}: successfully split "
+                    f"({peak_allocated} -> {new_peak_allocated})"
+                )
+                peak_allocated = new_peak_allocated  # update the peak memory
 
     if level > 2:  # temporal split
-        pass
+        cprint(verbose, "Level 3: split GCContainers temporally")
+
+        while True:
+            results = _train_memory_profile(net, dummy_input, ctx)
+            if not results:
+                cprint(verbose, "\tNo more GCContainers to split.")
+                break
+            cb_name = results[0][0]  # GCContainer with the highest mem.
+            cb, parent, child_name = _get_module_and_parent(
+                net,
+                cb_name.split(" ")[-1]
+            )
+
+            # try to temporally split the GCContainer
+            # if not split-able, break
+            split_cb = _temporally_split_gc_container(cb, temporal_split_factor)
+            if split_cb is None:
+                cprint(verbose, f"\t{cb_name}: can't be temporally split")
+                break
+            setattr(parent, child_name, split_cb)
+
+            # if the peak memory does not reduces, revert and break;
+            # otherwise, keep the change and continue
+            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+            if new_peak_allocated >= peak_allocated:
+                cprint(
+                    verbose, f"\t{cb_name}: no reduction in memory, revert "
+                    f"({peak_allocated} -> {new_peak_allocated})"
+                )
+                setattr(parent, child_name, cb)
+                break
+            else:
+                cprint(
+                    verbose, f"\t{cb_name}: successfully split "
+                    f"({peak_allocated} -> {new_peak_allocated})"
+                )
+                peak_allocated = new_peak_allocated  # update the peak memory
 
     if level > 3:
         cprint(verbose, "Level 4: greedily disable GCContainers")
-        peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
         results = _inference_time_profile(net, dummy_input, ctx)
 
         for r in results:
@@ -489,16 +648,22 @@ def memory_optimization(
             )
 
             # try to unwrap the GCContainer
-            cb, x_compressor = _unwrap_gc_container(cb)
-            setattr(parent, child_name, cb)
+            ucb, x_compressor = _unwrap_gc_container(cb)
+            setattr(parent, child_name, ucb)
 
             # if the peak memory increases, revert; otherwise, keep the change
             new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
             if new_peak_allocated > peak_allocated:
-                cprint(verbose, f"{cb_name}: keep GCContainer")
-                setattr(parent, child_name, GCContainer(x_compressor, cb))
+                cprint(
+                    verbose, f"\t{cb_name}: keep GCContainer "
+                    f"({peak_allocated} -> {new_peak_allocated})"
+                )
+                setattr(parent, child_name, cb)
             else:
-                cprint(verbose, f"{cb_name}: disable GCContainer")
+                cprint(
+                    verbose, f"\t{cb_name}: disable GCContainer "
+                    f"({peak_allocated} -> {new_peak_allocated})"
+                )
                 peak_allocated = new_peak_allocated  # update the peak memory
 
     return net

@@ -12,6 +12,48 @@ from modules.bn import TEBNProjection, BatchNorm2d_
 from modules.checkpointing import GCContainer, memory_optimization
 
 
+class VGGProjBN(nn.Module):
+
+    def __init__(
+        self,
+        in_plane,
+        out_plane,
+        kernel_size,
+        stride,
+        padding,
+        preceding_avg_pool=False
+    ):
+        super().__init__()
+        proj_bn = []
+        if preceding_avg_pool:
+            proj_bn.append(nn.AvgPool2d(2))
+        proj_bn += [
+            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+            BatchNorm2d_(out_plane),
+        ]
+        self.proj_bn = layer.SeqToANNContainer(*proj_bn)
+
+    def forward(self, x_seq):
+        return self.proj_bn(x_seq)
+
+
+class VGGNeuron(nn.Module):
+
+    def __init__(self, neuron_type, T, **kwargs):
+        super().__init__()
+        kwargs["T"] = T
+        if not neuron_type.endswith("PSN"):
+            self.neuron = nn.Sequential(
+                TEBNProjection(T),
+                get_neuron(neuron_type, **kwargs),
+            )
+        else:
+            self.neuron = get_neuron(neuron_type, **kwargs)
+
+    def forward(self, x_seq):
+        return self.neuron(x_seq)
+
+
 class VGGBlock(nn.Module):
 
     def __init__(
@@ -27,25 +69,17 @@ class VGGBlock(nn.Module):
         **kwargs
     ):
         super().__init__()
-        kwargs["T"] = T
-        l = []
-        if preceding_avg_pool:
-            l.append(nn.AvgPool2d(2))
-        l += [
-            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            BatchNorm2d_(out_plane),
-        ]
-        self.proj_bn = layer.SeqToANNContainer(*l)
-        if neuron_type != "PSN":
-            self.neuron = nn.Sequential(
-                TEBNProjection(T),
-                get_neuron(neuron_type, **kwargs),
-            )
-        else:
-            self.neuron = get_neuron(neuron_type, **kwargs)
+        self.proj_bn = VGGProjBN(
+            in_plane, out_plane, kernel_size, stride, padding,
+            preceding_avg_pool
+        )
+        self.neuron = VGGNeuron(neuron_type, T, **kwargs)
 
     def forward(self, x_seq):
         return self.neuron(self.proj_bn(x_seq))
+
+    def __spatial_split__(self):
+        return self.proj_bn, self.neuron
 
 
 class CIFAR10DVSVGG(nn.Module):
@@ -141,10 +175,10 @@ def vgg_critical_block_checkpointing(
 def AutoGCCIFAR10DVSVGG(
     T, neuron_type, spike_compressor: str, dropout=0.25, **kwargs
 ):
-    net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs).to("cuda")
+    net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs)
     return memory_optimization(
         net, (VGGBlock,),
-        dummy_input=torch.zeros(32, T, 2, 48, 48).to("cuda") + 0.9,
+        dummy_input=torch.zeros(32, T, 2, 48, 48) + 0.9,
         level=4,
         verbose=True
     )

@@ -1,7 +1,7 @@
 seed_everything: 2024
 
 trainer:
-  deterministic: True
+  deterministic: False
   max_epochs: 100
   precision: 32
   num_sanity_val_steps: 0
@@ -10,6 +10,7 @@ trainer:
 model:
   network: PLIFSFNN
   spike_compressor: NullSpikeCompressor
+  T: 100
 
 
 data:

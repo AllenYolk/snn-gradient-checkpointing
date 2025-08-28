@@ -9,6 +9,7 @@ from spikingjelly.activation_based import surrogate
 
 from modules.checkpointing import BaseGCBlock, BaseTCGCBlock
 from modules.checkpointing import InputCompressedGC
+from modules.checkpointing import memory_optimization
 from modules.compress import get_spike_compressor
 
 
@@ -58,6 +59,17 @@ class LinearPLIF(nn.Module):
             s, v = plif_update(x, v, self._beta, self.vth)
             s_seq[t] = s
         return s_seq
+
+    def __tc_init_states__(self, x_seq):
+        return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
+
+    def __tc_forward__(self, xc, v):
+        Tc = xc.shape[0]
+        xc = self.dense(xc)
+        sc = torch.empty_like(xc)
+        for t in range(Tc):
+            sc[t], v = plif_update(xc[t], v, self._beta, self.vth)
+        return sc, v
 
 
 class LinearPLIFCheckpointing(BaseGCBlock):
@@ -210,7 +222,7 @@ class LinearOutputPLIF(nn.Module):
         x_seq = self.dense(x_seq)
 
         v = torch.zeros_like(x_seq[0])
-        v_seq = torch.rand_like(x_seq)
+        v_seq = torch.empty_like(x_seq)
         for t in range(T):
             x = x_seq[t]
             v = output_plif_update(x, v, self._beta)
@@ -251,7 +263,7 @@ class LinearOutputPLIFCheckpointing(nn.Module):
         x_seq = F.linear(x_seq, weight, bias)
 
         v = torch.zeros_like(x_seq[0])
-        v_seq = torch.rand_like(x_seq)
+        v_seq = torch.empty_like(x_seq)
         for t in range(T):
             x = x_seq[t]
             v = output_plif_update(x, v, _beta)
@@ -460,11 +472,12 @@ class PLIFSFNN(nn.Module):
 
     def __init__(self, *args, **kwargs):
         super().__init__()
-        H = 512
+        H = 1024
         self.dense_1 = LinearPLIF(700, H, vth=1.)
         self.dense_2 = LinearPLIF(H, H, vth=1.)
-        self.dense_3 = LinearPLIF(H, H, vth=1.)
-        self.dense_out = LinearOutputPLIF(H, 20)
+        self.dense_3 = LinearPLIF(H, H // 2, vth=1.)
+        self.dense_out = LinearOutputPLIF(H // 2, 20)
+        self.dense_1.disable_x_compressor = True
         nn.init.xavier_normal_(self.dense_out.dense.weight)
         nn.init.constant_(self.dense_out.dense.bias, 0)
 
@@ -483,7 +496,7 @@ class GCPLIFSFNN(nn.Module):
 
     def __init__(self, spike_compressor: str, *args, **kwargs):
         super().__init__()
-        H = 512
+        H = 1024
         self.dense_1 = LinearPLIFCheckpointing(
             700, H, vth=1., spike_compressor="NullSpikeCompressor"
         )
@@ -491,10 +504,10 @@ class GCPLIFSFNN(nn.Module):
             H, H, vth=1., spike_compressor=spike_compressor
         )
         self.dense_3 = LinearPLIFCheckpointing(
-            H, H, vth=1., spike_compressor=spike_compressor
+            H, H // 2, vth=1., spike_compressor=spike_compressor
         )
         self.dense_out = LinearOutputPLIFCheckpointing(
-            H, 20, spike_compressor=spike_compressor
+            H // 2, 20, spike_compressor=spike_compressor
         )
         nn.init.xavier_normal_(self.dense_out.dense.weight)
         nn.init.constant_(self.dense_out.dense.bias, 0)
@@ -510,11 +523,23 @@ class GCPLIFSFNN(nn.Module):
         return torch.sum(logits[10:], dim=0)  # [N, 20]; discard 1st 10 steps
 
 
+def AutoGCPLIFSFNN(spike_compressor: str, T: int, *args, **kwargs):
+    net = PLIFSFNN(*args, **kwargs)
+    return memory_optimization(
+        net,
+        instance=(LinearPLIF, LinearOutputPLIF),
+        dummy_input=torch.zeros(128, T, 700),
+        level=4,
+        verbose=True,
+        temporal_split_factor=5,
+    )
+
+
 class TCGCPLIFSFNN(nn.Module):
 
     def __init__(self, spike_compressor: str, *args, **kwargs):
         super().__init__()
-        H = 512
+        H = 1024
         self.dense_1 = LinearPLIFTCCheckpointing(
             700, H, vth=1., spike_compressor="NullSpikeCompressor", n_chunk=25
         )
@@ -522,38 +547,11 @@ class TCGCPLIFSFNN(nn.Module):
             H, H, vth=1., spike_compressor=spike_compressor, n_chunk=10
         )
         self.dense_3 = LinearPLIFTCCheckpointing(
-            H, H, vth=1., spike_compressor=spike_compressor, n_chunk=25
+            H, H // 2, vth=1., spike_compressor=spike_compressor, n_chunk=25
         )
         self.dense_out = LinearOutputPLIFCheckpointing(
-            H, 20, spike_compressor=spike_compressor
+            H // 2, 20, spike_compressor=spike_compressor
         )
-        nn.init.xavier_normal_(self.dense_out.dense.weight)
-        nn.init.constant_(self.dense_out.dense.bias, 0)
-
-    def forward(self, x_seq):
-        x_seq = x_seq.transpose(0, 1)  # [T, N, C]
-        x_seq = self.dense_1(x_seq)
-        x_seq = self.dense_2(x_seq)
-        x_seq = self.dense_3(x_seq)
-        x_seq = self.dense_out(x_seq)  # [T, N, 20]
-
-        logits = F.softmax(x_seq, dim=-1)  # [T, N, 20]
-        return torch.sum(logits[10:], dim=0)  # [N, 20]; discard 1st 10 steps
-
-
-class PGCPLIFSFNN(nn.Module):
-
-    def __init__(self, spike_compressor: str, *args, **kwargs):
-        super().__init__()
-        H = 512
-        self.dense_1 = LinearPLIFCheckpointing(
-            700, H, vth=1., spike_compressor="NullSpikeCompressor"
-        )
-        self.dense_2 = LinearPLIFCheckpointing(
-            H, H, vth=1., spike_compressor=spike_compressor
-        )
-        self.dense_3 = LinearPLIF(H, H, vth=1.)
-        self.dense_out = LinearOutputPLIF(H, 20)
         nn.init.xavier_normal_(self.dense_out.dense.weight)
         nn.init.constant_(self.dense_out.dense.bias, 0)
 
