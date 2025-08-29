@@ -157,7 +157,7 @@ def main():
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(
-            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
+            filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
             mode="max"

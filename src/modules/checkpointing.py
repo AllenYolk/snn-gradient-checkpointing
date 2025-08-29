@@ -242,7 +242,9 @@ class TCGCContainer(GCContainer):
 
     Adaptation for custom layers:
     1. Your layer must implement a proxy method `__tc_forward__` which has the
-    following signature: (x_chunk, *states, *args) -> (y_chunk, *updated_states)
+    following signature: (x_chunk, *states, *args) -> (y_chunk, *updated_states).
+    Notice that `__tc_forward__` should always return a tuple rather than a single
+    tensor even if there's no hidden states!!!
     2. Optionally, implement `__tc_init_states__` to initialize hidden states. It
     should have the following signature: (x_seq) -> states, where `states` is a 
     list or tuple of hidden states.
@@ -514,7 +516,7 @@ def _temporally_split_gc_container(block: GCContainer, factor: int = 2):
     x_compressor = block.x_compressor
     b = block[0]
     if hasattr(b, "__tc_init_states__") and hasattr(b, "__tc_forward__"):
-        n_chunk = getattr(b, "n_chunk", 1)
+        n_chunk = getattr(block, "n_chunk", 1)
         return TCGCContainer(x_compressor, b, n_chunk * factor)
     else:  # not temporally split-able
         return None
@@ -546,6 +548,48 @@ def memory_optimization(
     verbose: bool = False,
     temporal_split_factor: int = 2,
 ):
+    """Memory optimization using gradient checkpointing and spike compression.
+
+    This function progressively transforms the given network by wrapping 
+    specified layers in `GCContainer`s and applying several optimization
+    strategies (in increasing order of aggressiveness):
+    - Level 0: No optimization.
+    - Level 1: Wrap matching modules in `GCContainer` for layer-wise 
+      gradient checkpointing (GC), with optional input compression.
+    - Level 2: Recursively split heavy `GCContainer`s into multiple 
+      sub-containers along the spatial (layer-wise) dimension, if supported.
+    - Level 3: Further split heavy `GCContainer`s along the temporal 
+      dimension (chunking the time axis), if supported.
+    - Level 4: Greedily unwrap some `GCContainer`s to reduce training time cost
+      if doing so does not increase the memory footprint.
+
+    Args:
+        net (nn.Module): the model to be optimized.
+        instance (type or tuple of types): module classes to wrap.
+        dummy_input (Tensor, optional): input for memory profiling, required 
+            if level > 1.
+        compress_x (bool): whether to apply input spike compression.
+        level (int): optimization level:
+            0 - no optimization
+            1 - layer-wise GC
+            2 - add spatial splitting
+            3 - add temporal splitting
+            4 - greedily disable GC
+        verbose (bool): whether to print logs.
+        temporal_split_factor (int): factor to increase the number of chunks 
+            when splitting temporally.
+
+    Returns:
+        nn.Module: the optimized model.
+
+    Notes:
+        To support spatial splitting (level 2), modules must implement:
+            __spatial_split__() -> List[nn.Module]
+
+        To support temporal splitting (level 3), modules must implement:
+            __tc_init_states__(x: Tensor) -> List[Tensor]
+            __tc_forward__(x_chunk: Tensor, *states, *args) -> (y_chunk, *states)
+    """
     ctx = mp.get_context("spawn")
 
     if level > 0:

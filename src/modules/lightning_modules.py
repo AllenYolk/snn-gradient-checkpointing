@@ -70,7 +70,7 @@ class ClassificationLightningModule(LightningModule):
         train_acc = self.train_acc.compute()
         train_loss = self.train_loss.compute()
         self.log("train_loss", train_loss, on_epoch=True, sync_dist=True)
-        self.log("train_acc", train_acc, on_epoch=True, sync_dist=True)
+        self.log("train_acc", train_acc * 100, on_epoch=True, sync_dist=True)
         self.train_acc.reset()
         self.train_loss.reset()
 
@@ -96,7 +96,7 @@ class ClassificationLightningModule(LightningModule):
     def on_validation_epoch_end(self):
         val_acc = self.val_acc.compute()
         val_loss = self.val_loss.compute()
-        self.log("val_acc", val_acc, on_epoch=True, sync_dist=True)
+        self.log("val_acc", val_acc * 100, on_epoch=True, sync_dist=True)
         self.log("val_loss", val_loss, on_epoch=True, sync_dist=True)
         self.val_acc.reset()
         self.val_loss.reset()

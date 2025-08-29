@@ -22,21 +22,30 @@ class SHDLightningModule(ClassificationLightningModule):
     def __init__(
         self,
         network: str,
-        spike_compressor: str,
         T: int,
+        compress_x: bool,
+        level: int,
+        temporal_split_factor: int,
     ):
         super().__init__(
             num_classes=20,
             network=network,
-            spike_compressor=spike_compressor,
             T=T,
+            compress_x=compress_x,
+            level=level,
+            temporal_split_factor=temporal_split_factor,
         )
 
     def configure_network(self):
-        net_class = getattr(models, self.hparams.network)
+        network = self.hparams.network
+        if not network.startswith("GC"):
+            network = "GC" + network
+        net_class = getattr(models, network)
         return net_class(
-            spike_compressor=self.hparams.spike_compressor,
             T=self.hparams.T,
+            compress_x=self.hparams.compress_x,
+            level=self.hparams.level,
+            temporal_split_factor=self.hparams.temporal_split_factor,
         )
 
     def configure_criterion(self):
@@ -91,7 +100,7 @@ def main():
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(
-            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
+            filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
             mode="max"

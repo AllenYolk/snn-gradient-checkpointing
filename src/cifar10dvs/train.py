@@ -22,10 +22,10 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
-        network: str,
         T: int,
         neuron_type: str,
-        spike_compressor: str,
+        compress_x: bool,
+        level: int,
         decay_lambda: float,
         learning_rate: float,
         momentum: float,
@@ -35,10 +35,10 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
     ):
         super().__init__(
             num_classes=10,
-            network=network,
             T=T,
             neuron_type=neuron_type,
-            spike_compressor=spike_compressor,
+            compress_x=compress_x,
+            level=level,
             decay_lambda=decay_lambda,
             learning_rate=learning_rate,
             momentum=momentum,
@@ -49,10 +49,11 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
         )
 
     def configure_network(self):
-        return getattr(models, self.hparams.network)(
-            T=self.hparams.T,  # for PSN and tebn
+        return models.GCCIFAR10DVSVGG(
+            T=self.hparams.T,
             neuron_type=self.hparams.neuron_type,
-            spike_compressor=self.hparams.spike_compressor,
+            compress_x=self.hparams.compress_x,
+            level=self.hparams.level,
             decay_lambda=self.hparams.decay_lambda,
             k=2,  # for SlidingPSN
         )
@@ -104,15 +105,9 @@ def main():
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(
-            filename="best-{epoch}-{train_acc:.4f}-{valid_acc:.4f}",
+            filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
-        ),
-        callbacks.ModelCheckpoint(
-            filename="lastest-{epoch}",
-            save_top_k=1,
-            monitor="epoch",
             mode="max"
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),

@@ -8,9 +8,11 @@ trainer:
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
 
 model:
-  network: PLIFSFNN
-  spike_compressor: NullSpikeCompressor
+  network: GCPLIFSFNN
   T: 100
+  compress_x: True
+  level: 0
+  temporal_split_factor: 5
 
 
 data:
