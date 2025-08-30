@@ -243,6 +243,8 @@ class PeakMemoryTillNowCallback(callbacks.Callback):
 
     def on_fit_start(self, trainer, pl_module):
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
             mem_stats = torch.cuda.memory_stats()
             peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
@@ -257,6 +259,7 @@ class PeakMemoryTillNowCallback(callbacks.Callback):
 
     def on_train_epoch_end(self, trainer, pl_module):
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
             mem_stats = torch.cuda.memory_stats()
             peak_allocated = mem_stats["allocated_bytes.all.peak"] / (1024**2)
             peak_reserved = mem_stats["reserved_bytes.all.peak"] / (1024**2)

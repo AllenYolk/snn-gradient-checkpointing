@@ -12,48 +12,6 @@ from modules.bn import TEBNProjection, BatchNorm2d_
 from modules.checkpointing import memory_optimization
 
 
-class VGGProjBN(nn.Module):
-
-    def __init__(
-        self,
-        in_plane,
-        out_plane,
-        kernel_size,
-        stride,
-        padding,
-        preceding_avg_pool=False
-    ):
-        super().__init__()
-        proj_bn = []
-        if preceding_avg_pool:
-            proj_bn.append(nn.AvgPool2d(2))
-        proj_bn += [
-            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
-            BatchNorm2d_(out_plane),
-        ]
-        self.proj_bn = layer.SeqToANNContainer(*proj_bn)
-
-    def forward(self, x_seq):
-        return self.proj_bn(x_seq)
-
-
-class VGGNeuron(nn.Module):
-
-    def __init__(self, neuron_type, T, **kwargs):
-        super().__init__()
-        kwargs["T"] = T
-        if not neuron_type.endswith("PSN"):
-            self.neuron = nn.Sequential(
-                TEBNProjection(T),
-                get_neuron(neuron_type, **kwargs),
-            )
-        else:
-            self.neuron = get_neuron(neuron_type, **kwargs)
-
-    def forward(self, x_seq):
-        return self.neuron(x_seq)
-
-
 class VGGBlock(nn.Module):
 
     def __init__(
@@ -69,11 +27,23 @@ class VGGBlock(nn.Module):
         **kwargs
     ):
         super().__init__()
-        self.proj_bn = VGGProjBN(
-            in_plane, out_plane, kernel_size, stride, padding,
-            preceding_avg_pool
-        )
-        self.neuron = VGGNeuron(neuron_type, T, **kwargs)
+        proj_bn = []
+        if preceding_avg_pool:
+            proj_bn.append(nn.AvgPool2d(2))
+        proj_bn += [
+            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+            BatchNorm2d_(out_plane),
+        ]
+        self.proj_bn = layer.SeqToANNContainer(*proj_bn)  # not split-able
+
+        kwargs["T"] = T
+        if not neuron_type.endswith("PSN"):
+            self.neuron = nn.Sequential(
+                TEBNProjection(T),
+                get_neuron(neuron_type, **kwargs),
+            )  # not split-able
+        else:
+            self.neuron = get_neuron(neuron_type, **kwargs)  # not split-able
 
     def forward(self, x_seq):
         return self.neuron(self.proj_bn(x_seq))

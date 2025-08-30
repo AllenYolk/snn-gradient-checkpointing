@@ -39,15 +39,6 @@ try:
         if TORCH_FLOAT8E4M3FN_AVAILABLE:
             type_dict[torch.float8_e4m3fn] = tl.float8e4nv
 
-    @triton.autotune(
-        configs=[
-            triton.Config({"BLOCK_NCL": f * w * 32}, num_warps=w)
-            for f in [2, 4]
-            for w in [2, 4, 8]
-        ],
-        key=["T", "dtype"],
-        restore_value=["s_seq_ptr", "h_seq_ptr"],
-    )
     @triton.jit
     def _handwritten_lif_forward_triton(
         x_seq_ptr,
@@ -82,15 +73,6 @@ try:
             tl.store(s_ptrs, s, mask=mask_x)
             tl.store(h_ptrs, h, mask=mask_x)
 
-    @triton.autotune(
-        configs=[
-            triton.Config({"BLOCK_NCL": f * w * 32}, num_warps=w)
-            for f in [2, 4]
-            for w in [2, 4, 8]
-        ],
-        key=["T", "detach_reset", "dtype"],
-        restore_value=["grad_x_seq_ptr"],
-    )
     @triton.jit
     def _handwritten_lif_backward_triton(
         grad_s_seq_ptr,
@@ -156,6 +138,7 @@ try:
                 x_seq.stride(0),
                 decay_lambda,
                 type_dict[dtype],
+                BLOCK_NCL=512,
             )
         return s_seq, h_seq
 
@@ -186,6 +169,7 @@ try:
                 detach_reset,
                 torch.pi,
                 type_dict[dtype],
+                BLOCK_NCL=512,
             )
         return grad_x_seq
 

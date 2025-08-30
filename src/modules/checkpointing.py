@@ -346,6 +346,7 @@ def _apply_gc(
 
 def _dummy_train_step(net: nn.Module, dummy_input: torch.Tensor):
     net.train()
+    net.zero_grad(set_to_none=True)
 
     dummy_input = dummy_input.clone().detach()
     # compute input's grad to avoid backward_peak == backward_start @ the 1st layer
@@ -374,6 +375,13 @@ def _train_memory_profile_worker(net, dummy_input, q):
     """
     net = net.cuda()
     dummy_input = dummy_input.cuda()
+
+    # Warmup to trigger Triton autotune & JIT compilation in this subprocess.
+    # Without this, the peak memory of the 1st and last layers will be strange!
+    _dummy_train_step(net, dummy_input)
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
 
     prof = LayerWiseMemoryProfiler(
         (net,),
@@ -408,9 +416,12 @@ def _train_peak_memory_worker(net, dummy_input, q):
     net = net.cuda()
     dummy_input = dummy_input.cuda()
 
+    # Warmup to trigger Triton autotune & JIT compilation in this subprocess.
+    # Without this, the peak memory of the 1st and last layers will be strange!
+    _dummy_train_step(net, dummy_input)
+    torch.cuda.synchronize()
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-    torch.cuda.synchronize()
 
     _dummy_train_step(net, dummy_input)
 

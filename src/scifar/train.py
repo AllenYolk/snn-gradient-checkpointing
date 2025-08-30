@@ -22,11 +22,11 @@ class SCIFARLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
-        num_classes: int,
-        network: str,
         channels: int,
         neuron_type: str,
-        spike_compressor: str,
+        num_classes: int,
+        compress_x: bool,
+        level: int,
         decay_lambda: float,
         learning_rate: float,
         momentum: float,
@@ -34,10 +34,10 @@ class SCIFARLightningModule(ClassificationLightningModule):
     ):
         super().__init__(
             num_classes=num_classes,
-            network=network,
             channels=channels,
             neuron_type=neuron_type,
-            spike_compressor=spike_compressor,
+            compress_x=compress_x,
+            level=level,
             decay_lambda=decay_lambda,
             learning_rate=learning_rate,
             momentum=momentum,
@@ -45,11 +45,12 @@ class SCIFARLightningModule(ClassificationLightningModule):
         )
 
     def configure_network(self):
-        return getattr(models, self.hparams.network)(
+        return models.GCSequentialCIFARNet(
             channels=self.hparams.channels,
             neuron_type=self.hparams.neuron_type,
-            spike_compressor=self.hparams.spike_compressor,
             num_classes=self.hparams.num_classes,
+            compress_x=self.hparams.compress_x,
+            level=self.hparams.level,
             decay_lambda=self.hparams.decay_lambda,
             T=32,  # for PSN
             k=8,  # for SlidingPSN
@@ -91,18 +92,13 @@ def main():
             "enable_checkpointing": False,
         }
     )
+    assert cli.model.hparams.num_classes == cli.datamodule.num_classes
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
         callbacks.ModelCheckpoint(
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
-        ),
-        callbacks.ModelCheckpoint(
-            filename="lastest-{epoch}",
-            save_top_k=1,
-            monitor="epoch",
             mode="max"
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),

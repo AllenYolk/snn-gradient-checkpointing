@@ -4,307 +4,71 @@ sys.path.append("./src")
 
 import torch
 import torch.nn as nn
-from spikingjelly.activation_based import layer, functional
+from spikingjelly.activation_based import layer
 
-from modules.blocks import get_block, neuron_type_to_str
 from modules.neuron import get_neuron
 from modules.compress import *
+from modules.checkpointing import memory_optimization
+from modules.bn import BatchNorm1d_
 
 
-class FGCSequentialCIFARNet(nn.Module):
+class SeqToANNContainer(layer.SeqToANNContainer):
+    """Stateless layer container that supports temporal chunkingt"""
 
-    def __init__(
-        self,
-        channels: int,
-        neuron_type: str,
-        spike_compressor: str,
-        num_classes=100,
-        **kwargs
-    ):
-        """A Conv1d-based network for Sequential CIFAR-10/100 classification.
+    def __tc_init_states__(self, x_seq):
+        return []
 
-        Args:
-            channels (int)
-            neuron_type (str)
-            spike_compressor (str)
-            num_classes (int, optional): Defaults to 100.
-            **kwargs: Additional arguments for `get_neuron(...)`. See 
-                `src/models/neuron.py` for details.
-        """
-        super().__init__()
-        neuron_str = neuron_type_to_str(neuron_type)
-
-        conv = []
-        for i in range(2):
-            for j in range(3):
-                if len(conv) == 0:
-                    in_channels = 3
-                else:
-                    in_channels = channels
-
-                if i == 0 and j == 0:
-                    conv_block = [
-                        get_block(
-                            block_type=f"Conv1dBN{neuron_str}",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                "NullSpikeCompressor"
-                            ),
-                        )
-                    ]
-                elif i == 0 and j == 2:  # critical layer
-                    conv_block = [
-                        get_block(
-                            f"Conv1d",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            spike_compressor=get_spike_compressor(
-                                "BitSpikeCompressor"
-                            ),
-                        ),
-                        get_block(
-                            f"BN{neuron_str}",
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                        )
-                    ]
-                elif j == 0:
-                    conv_block = [
-                        get_block(
-                            block_type=f"AvgPool1dConv1dBN{neuron_str}",
-                            pool=nn.AvgPool1d(2, 2),
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                spike_compressor
-                            ),
-                        )
-                    ]
-                else:
-                    conv_block = [
-                        get_block(
-                            block_type=f"Conv1dBN{neuron_str}",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                spike_compressor
-                            ),
-                        )
-                    ]
-                conv += conv_block
-
-        self.conv = nn.Sequential(*conv)
-        self.fc = get_block(
-            block_type=f"AvgPool1dFlattenLinear{neuron_str}",
-            pool=nn.AvgPool1d(2, 2),
-            proj=nn.Linear(channels * 8, channels * 8 // 4),
-            neuron=get_neuron(neuron_type, **kwargs),
-            spike_compressor=get_spike_compressor(spike_compressor)
-        )
-        self.decode = nn.Linear(channels * 8 // 4, num_classes)
-
-    def forward(self, x: torch.Tensor):
-        x = x.permute(3, 0, 1, 2)
-        # x.shape = [T, N, Cin, L]
-        y = self.conv(x)
-        y = self.fc(y)
-        y = y.mean(dim=0)  # [N, C]
-        y = self.decode(y)
-        return y
+    def __tc_forward__(self, xc):
+        return (self.forward(xc),)
 
 
-class PGCSequentialCIFARNet(nn.Module):
+class ConvBNNeuron(nn.Module):
 
     def __init__(
         self,
-        channels: int,
-        neuron_type: str,
-        spike_compressor: str,
-        num_classes=100,
+        in_channels,
+        out_channels,
+        neuron_type,
+        preceding_avg_pool: bool = False,
         **kwargs
     ):
-        """A Conv1d-based network for Sequential CIFAR-10/100 classification.
-
-        Args:
-            channels (int)
-            neuron_type (str)
-            spike_compressor (str)
-            num_classes (int, optional): Defaults to 100.
-            **kwargs: Additional arguments for `get_neuron(...)`. See 
-                `src/models/neuron.py` for details.
-        """
         super().__init__()
-        neuron_str = neuron_type_to_str(neuron_type)
+        conv = [nn.AvgPool1d(2, 2)] if preceding_avg_pool else []
+        conv += [
+            nn.Conv1d(
+                in_channels, out_channels, kernel_size=3, padding=1, bias=True
+            )
+        ]
+        self.conv = SeqToANNContainer(*conv)
 
-        conv = []
-        for i in range(2):
-            for j in range(3):
-                if len(conv) == 0:
-                    in_channels = 3
-                else:
-                    in_channels = channels
-
-                if i == 0 and j == 0:
-                    conv_block = [
-                        get_block(
-                            block_type=f"Conv1dBN{neuron_str}",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                "NullSpikeCompressor"
-                            ),
-                        )
-                    ]
-                elif i == 0 and j == 2:  # critical layer
-                    conv_block = [
-                        get_block(
-                            f"Conv1d",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            spike_compressor=get_spike_compressor(
-                                "BitSpikeCompressor"
-                            ),
-                        ),
-                        nn.Sequential(
-                            layer.BatchNorm1d(channels),
-                            get_neuron(neuron_type, **kwargs),
-                        ),
-                    ] if neuron_str == "LIF" else [
-                        get_block(
-                            f"Conv1d",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            spike_compressor=get_spike_compressor(
-                                "BitSpikeCompressor"
-                            ),
-                        ),
-                        get_block(
-                            f"BN{neuron_str}",
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                        )
-                    ]
-
-                elif i == 1 and j == 0:
-                    conv_block = [
-                        get_block(
-                            block_type=f"AvgPool1dConv1dBN{neuron_str}",
-                            pool=nn.AvgPool1d(2, 2),
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                spike_compressor
-                            ),
-                        )
-                    ]
-                elif i == 1 and (j == 1 or j == 2):  # the last two conv blocks
-                    conv_block = [
-                        nn.Sequential(
-                            layer.SeqToANNContainer(
-                                nn.Conv1d(
-                                    in_channels,
-                                    channels,
-                                    kernel_size=3,
-                                    padding=1,
-                                    bias=True,
-                                ),
-                                nn.BatchNorm1d(channels),
-                            ),
-                            get_neuron(neuron_type, **kwargs),
-                        )
-                    ]
-                else:  # i == 0 and j == 1
-                    conv_block = [
-                        get_block(
-                            block_type=f"Conv1dBN{neuron_str}",
-                            proj=nn.Conv1d(
-                                in_channels,
-                                channels,
-                                kernel_size=3,
-                                padding=1,
-                                bias=True
-                            ),
-                            bn=nn.BatchNorm1d(channels),
-                            neuron=get_neuron(neuron_type, **kwargs),
-                            spike_compressor=get_spike_compressor(
-                                spike_compressor
-                            ),
-                        )
-                    ]
-                conv += conv_block
-
-        self.conv = nn.Sequential(*conv)
-        self.fc = nn.Sequential(
-            layer.SeqToANNContainer(
-                nn.AvgPool1d(2, 2),
-                nn.Flatten(start_dim=-2),
-                nn.Linear(channels * 8, channels * 8 // 4),
-            ),
+        self.bn_neuron = nn.Sequential(
+            SeqToANNContainer(BatchNorm1d_(out_channels)),
             get_neuron(neuron_type, **kwargs),
         )
-        self.decode = nn.Linear(channels * 8 // 4, num_classes)
 
-        functional.set_step_mode(self, "m")
+    def forward(self, x_seq):
+        return self.bn_neuron(self.conv(x_seq))
 
-    def forward(self, x: torch.Tensor):
-        x = x.permute(3, 0, 1, 2)
-        # x.shape = [T, N, Cin, L]
-        y = self.conv(x)
-        y = self.fc(y)
-        y = y.mean(dim=0)  # [N, C]
-        y = self.decode(y)
-        return y
+    def __spatial_split__(self):
+        return self.conv, self.bn_neuron
+
+
+class AvgPoolFlattenLinearNeuron(nn.Module):
+
+    def __init__(self, channels: int, neuron_type, **kwargs):
+        super().__init__()
+        self.fc = SeqToANNContainer(
+            nn.AvgPool1d(2, 2),
+            nn.Flatten(start_dim=-2),
+            nn.Linear(channels * 8, channels * 8 // 4),
+        )
+        self.neuron = get_neuron(neuron_type, **kwargs)
+
+    def forward(self, x_seq):
+        return self.neuron(self.fc(x_seq))
+
+    def __spatial_split__(self):
+        return self.fc, self.neuron
 
 
 class SequentialCIFARNet(nn.Module):
@@ -324,44 +88,52 @@ class SequentialCIFARNet(nn.Module):
         super().__init__()
 
         conv = []
-        for _ in range(2):
-            for _ in range(3):
+        for i in range(2):
+            for j in range(3):
                 if len(conv) == 0:
                     in_channels = 3
                 else:
                     in_channels = channels
 
-                conv_block = nn.Sequential(
-                    layer.Conv1d(
-                        in_channels,
-                        channels,
-                        kernel_size=3,
-                        padding=1,
-                        bias=True
-                    ),
-                    layer.BatchNorm1d(channels),
-                    get_neuron(neuron_type, **kwargs),
+                conv_block = ConvBNNeuron(
+                    in_channels,
+                    channels,
+                    neuron_type,
+                    preceding_avg_pool=(j == 0 and i != 0),
+                    **kwargs,
                 )
                 conv.append(conv_block)
-            conv.append(layer.AvgPool1d(2, 2))
 
         self.conv = nn.Sequential(*conv)
+        self.conv[0].disable_x_compressor = True
 
-        self.fc = nn.Sequential(
-            layer.Linear(channels * 8, channels * 8 // 4),
-            get_neuron(neuron_type, **kwargs),
-        )
-
+        self.fc = AvgPoolFlattenLinearNeuron(channels, neuron_type, **kwargs)
         self.decode = nn.Linear(channels * 8 // 4, num_classes)
 
-        functional.set_step_mode(self, "m")
-
     def forward(self, x: torch.Tensor):
+        # x.shape = [N, C, H, W]
         x = x.permute(3, 0, 1, 2)
         # x.shape = [T, N, Cin, L]
         y = self.conv(x)
-        y = y.flatten(start_dim=-2)  # [T, N, C*L]
         y = self.fc(y)  # [T, N, C']
         y = y.mean(dim=0)  # [N, C']
         y = self.decode(y)
         return y
+
+
+def GCSequentialCIFARNet(
+    channels: int,
+    neuron_type: str,
+    num_classes=100,
+    compress_x: bool = True,
+    level: int = 0,
+    **kwargs
+):
+    net = SequentialCIFARNet(channels, neuron_type, num_classes, **kwargs)
+    return memory_optimization(
+        net, (ConvBNNeuron, AvgPoolFlattenLinearNeuron),
+        dummy_input=torch.zeros(128, 3, 32, 32) + 0.9,
+        compress_x=compress_x,
+        level=level,
+        verbose=True
+    )

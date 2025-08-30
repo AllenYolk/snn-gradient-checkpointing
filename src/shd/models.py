@@ -28,8 +28,8 @@ class Linear(nn.Linear):
     def __tc_init_states__(self, *args, **kwargs):
         return []  # empty; no states
 
-    def __tc_forward__(self, x_seq):
-        return (super().forward(x_seq),)
+    def __tc_forward__(self, xc):
+        return (super().forward(xc),)
 
 
 class PLIF(nn.Module):

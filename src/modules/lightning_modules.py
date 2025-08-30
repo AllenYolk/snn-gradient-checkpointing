@@ -10,7 +10,6 @@ class ClassificationLightningModule(LightningModule):
         self,
         num_classes: int,
         y_with_T: bool = False,  # for computing accuracy
-        label_as_prob: bool = False,  # for computing accuracy
         **kwargs
     ):
         super().__init__()
@@ -19,7 +18,6 @@ class ClassificationLightningModule(LightningModule):
         })
         self.save_hyperparameters(kwargs)
         self.y_with_T = y_with_T
-        self.label_as_prob = label_as_prob
 
         self.train_acc = Accuracy(
             task="multiclass", num_classes=self.hparams.num_classes
@@ -58,7 +56,7 @@ class ClassificationLightningModule(LightningModule):
         batch_loss = self.criterion(y, label)  # must properly handle the sizes!
         if self.y_with_T:
             y = y.mean(dim=0)
-        if self.label_as_prob:
+        if label.ndim > 1:
             label = label.argmax(dim=1)
         self.train_acc.update(y, label)
         self.train_loss.update(batch_loss.data)
@@ -87,7 +85,7 @@ class ClassificationLightningModule(LightningModule):
         batch_loss = self.criterion(y, label)  # must properly handle the sizes!
         if self.y_with_T:
             y = y.mean(dim=0)
-        if self.label_as_prob:
+        if label.ndim > 1:
             label = label.argmax(dim=1)
         self.val_acc.update(y, label)
         self.val_loss.update(batch_loss.data)

@@ -1,19 +1,19 @@
 seed_everything: 2024
 
 trainer:
-  deterministic: True
+  deterministic: False
   max_epochs: 300
   precision: 32
   num_sanity_val_steps: 0
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
 
 model:
-  num_classes: 10
-  network: SequentialCIFARNet
-  neuron_type: SJLIF
-  spike_compressor: NullSpikeCompressor
-  decay_lambda: 0.5
   channels: 128
+  neuron_type: SJLIF
+  num_classes: 10
+  compress_x: True
+  level: 0
+  decay_lambda: 0.5
   learning_rate: 0.1
   momentum: 0.9
   lomo: False
