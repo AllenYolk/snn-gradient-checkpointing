@@ -286,9 +286,9 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         def pre_hook_generator(name):
 
             def pre_hook(module, input):
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
-                torch.cuda.synchronize()
                 self.forward_start_memory[name] = torch.cuda.memory_allocated()
                 self.forward_peak_memory[name] = 0
 
@@ -309,9 +309,9 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         def backward_pre_hook_generator(name):
 
             def backward_pre_hook(module, grad_output):
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
-                torch.cuda.synchronize()
                 self.backward_start_memory[name] = torch.cuda.memory_allocated()
                 self.backward_peak_memory[name] = 0
 

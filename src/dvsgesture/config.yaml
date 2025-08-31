@@ -8,10 +8,10 @@ trainer:
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
 
 model:
-  T: 16
-  network: SEWResNet
   neuron_type: SJLIF
-  spike_compressor: NullSpikeCompressor
+  compress_x: True
+  level: 0
+  T: 16
 
 
 data:

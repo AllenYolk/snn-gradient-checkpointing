@@ -3,6 +3,7 @@ import threading
 import contextlib
 import functools
 import copy
+import time
 
 import torch
 import torch.nn as nn
@@ -10,6 +11,7 @@ import torch.autograd as autograd
 import torch.multiprocessing as mp
 
 from .amp import get_autocast_context, is_autocast_enabled
+from . import compress
 from .compress import *
 
 import sys
@@ -328,11 +330,15 @@ def _apply_gc(
         for name, child in list(subnet.named_children()):
             if isinstance(child, instance):
                 b = is_binary_input.get(child, False)
-                d = getattr(child, "disable_x_compressor", False)
-                x_compressor = (
-                    BitSpikeCompressor() if
-                    (b and not d) else NullSpikeCompressor()
-                )
+                t = getattr(child, "x_compressor", None)
+                if t is None:
+                    x_compressor = (
+                        BitSpikeCompressor() if b else NullSpikeCompressor()
+                    )
+                else:  # manually specified
+                    x_compressor = (
+                        getattr(compress, t)() if isinstance(t, str) else t
+                    )
                 setattr(subnet, name, GCContainer(x_compressor, child))
             elif not isinstance(child, GCContainer):
                 _replace(child)
@@ -601,6 +607,7 @@ def memory_optimization(
             __tc_init_states__(x: Tensor) -> List[Tensor]
             __tc_forward__(x_chunk: Tensor, *states, *args) -> (y_chunk, *states)
     """
+    st = time.time()
     ctx = mp.get_context("spawn")
 
     if level > 0:
@@ -721,6 +728,8 @@ def memory_optimization(
                 )
                 peak_allocated = new_peak_allocated  # update the peak memory
 
+    et = time.time()
+    cprint(verbose, f"Total time: {et - st:.2f}s")
     return net
 
 

@@ -105,7 +105,7 @@ class SequentialCIFARNet(nn.Module):
                 conv.append(conv_block)
 
         self.conv = nn.Sequential(*conv)
-        self.conv[0].disable_x_compressor = True
+        self.conv[0].x_compressor = "NullSpikeCompressor"
 
         self.fc = AvgPoolFlattenLinearNeuron(channels, neuron_type, **kwargs)
         self.decode = nn.Linear(channels * 8 // 4, num_classes)

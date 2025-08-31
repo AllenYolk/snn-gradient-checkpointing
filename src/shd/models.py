@@ -333,7 +333,7 @@ class PLIFSFNN(nn.Module):
         self.dense_2 = LinearPLIF(H, H, vth=1.)
         self.dense_3 = LinearPLIF(H, H // 2, vth=1.)
         self.dense_out = LinearOutputPLIF(H // 2, 20)
-        self.dense_1.disable_x_compressor = True
+        self.dense_1.x_compressor = "NullSpikeCompressor"
         nn.init.xavier_normal_(self.dense_out.dense.weight)
         nn.init.constant_(self.dense_out.dense.bias, 0)
 
@@ -372,7 +372,7 @@ class DHLIFSFNN(nn.Module):
         self.dense_2 = LinearDHLIF(H, H, vth=1.)
         self.dense_3 = LinearDHLIF(H, H // 2, vth=1.)
         self.dense_out = LinearOutputPLIF(H // 2, 20)
-        self.dense_1.disable_x_compressor = True
+        self.dense_1.x_compressor = "NullSpikeCompressor"
         nn.init.xavier_normal_(self.dense_out.dense.weight)
         nn.init.constant_(self.dense_out.dense.bias, 0)
 

@@ -1,3 +1,4 @@
+# should run on g2
 import sys
 
 sys.path.append("./src")
@@ -22,24 +23,25 @@ class DVSGestureLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
-        T: int,
-        network: str,
         neuron_type: str,
-        spike_compressor: str,
+        compress_x: bool,
+        level: int,
+        T: int,
     ):
         super().__init__(
             num_classes=11,
-            T=T,
-            network=network,
             neuron_type=neuron_type,
-            spike_compressor=spike_compressor,
+            compress_x=compress_x,
+            level=level,
+            T=T,
         )
 
     def configure_network(self):
-        return getattr(models, self.hparams.network)(
+        return models.GCSEWResNet(
             neuron_type=self.hparams.neuron_type,
+            compress_x=self.hparams.compress_x,
+            level=self.hparams.level,
             T=self.hparams.T,
-            spike_compressor=self.hparams.spike_compressor,
             decay_lambda=0.5,
             detach_reset=True,
             k=4,

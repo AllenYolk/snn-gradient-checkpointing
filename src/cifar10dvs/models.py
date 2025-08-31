@@ -68,7 +68,7 @@ class CIFAR10DVSVGG(nn.Module):
             VGGBlock(512, 512, 3, 1, 1, T, neuron_type, False, **kwargs),
             layer.AvgPool2d(2, step_mode="m"),
         )
-        self.features[0].disable_x_compressor = True
+        self.features[0].x_compressor = "NullSpikeCompressor"
         d = int(48 / 2 / 2 / 2 / 2)
         l = [nn.Dropout(dropout)] if dropout > 0 else []
         l.append(nn.Linear(512 * d * d, 10))
