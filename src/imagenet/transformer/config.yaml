@@ -8,10 +8,11 @@ trainer:
   default_root_dir: ./ # training logs will be saved at `./lightning_logs`
 
 model:
-  network: Spikformer
+  network: GCSpikformer
   neuron_type: SJLIF
+  compress_x: True
+  level: 0
   T: 4
-  spike_compressor: NullSpikeCompressor
   learning_rate: 0.001
   l2_factor: 5e-2
   smoothing: 0.1

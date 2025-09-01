@@ -29,8 +29,9 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
         self,
         network: str,
         neuron_type: str,
+        compress_x: bool,
+        level: int,
         T: int,
-        spike_compressor: str,
         learning_rate: float,
         l2_factor: float,
         smoothing: float,
@@ -40,8 +41,9 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
             num_classes=1000,
             network=network,
             neuron_type=neuron_type,
+            compress_x=compress_x,
+            level=level,
             T=T,
-            spike_compressor=spike_compressor,
             learning_rate=learning_rate,
             l2_factor=l2_factor,
             smoothing=smoothing,
@@ -53,8 +55,9 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
     def configure_network(self):
         return getattr(models, self.hparams.network)(
             neuron_type=self.hparams.neuron_type,
+            compress_x=self.hparams.compress_x,
+            level=self.hparams.level,
             T=self.hparams.T,
-            spike_compressor=self.hparams.spike_compressor,
             decay_lambda=0.5,
             detach_reset=True,
             k=4,  # for SlidingPSN
@@ -160,12 +163,6 @@ def main():
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
-        ),
-        callbacks.ModelCheckpoint(
-            filename="lastest-{epoch}",
-            save_top_k=1,
-            monitor="epoch",
             mode="max"
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),

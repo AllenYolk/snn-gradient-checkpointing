@@ -331,14 +331,17 @@ def _apply_gc(
             if isinstance(child, instance):
                 b = is_binary_input.get(child, False)
                 t = getattr(child, "x_compressor", None)
-                if t is None:
-                    x_compressor = (
-                        BitSpikeCompressor() if b else NullSpikeCompressor()
-                    )
-                else:  # manually specified
-                    x_compressor = (
-                        getattr(compress, t)() if isinstance(t, str) else t
-                    )
+                if compress_x:
+                    if t is None:  # auto-detect
+                        x_compressor = (
+                            BitSpikeCompressor() if b else NullSpikeCompressor()
+                        )
+                    else:  # manually specified
+                        x_compressor = (
+                            getattr(compress, t)() if isinstance(t, str) else t
+                        )
+                else:  # disable compression
+                    x_compressor = NullSpikeCompressor()
                 setattr(subnet, name, GCContainer(x_compressor, child))
             elif not isinstance(child, GCContainer):
                 _replace(child)
