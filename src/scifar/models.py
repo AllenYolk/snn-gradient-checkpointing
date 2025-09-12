@@ -13,7 +13,7 @@ from modules.bn import BatchNorm1d_
 
 
 class SeqToANNContainer(layer.SeqToANNContainer):
-    """Stateless layer container that supports temporal chunkingt"""
+    """Stateless layer container that supports temporal chunking"""
 
     def __tc_init_states__(self, x_seq):
         return []

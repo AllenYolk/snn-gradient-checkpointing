@@ -10,7 +10,7 @@ from modules.bn import BatchNorm2d_
 from modules.checkpointing import memory_optimization
 
 from .spikformer import Conv1dBNNeuron, Conv2dBNNeuron
-from .spikformer import MLP, SSA, SeqToANNContainer
+from .spikformer import MLP, SSA, SSACore, SeqToANNContainer
 
 
 class QKACore(nn.Module):
@@ -113,7 +113,7 @@ class Conv2dBNMaxPoolNeuron(nn.Module):
         neuron_type, **kwargs
     ):
         super().__init__()
-        self.conv_bn = SeqToANNContainer(
+        self.conv_bn_pool = SeqToANNContainer(
             nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -125,14 +125,14 @@ class Conv2dBNMaxPoolNeuron(nn.Module):
             BatchNorm2d_(out_channels),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
         )
-        self.neuron_pool = get_neuron(neuron_type, **kwargs)
+        self.neuron = get_neuron(neuron_type, **kwargs)
 
     def forward(self, x):
-        x = self.conv_bn(x)
-        return self.neuron_pool(x)
+        x = self.conv_bn_pool(x)
+        return self.neuron(x)
 
     def __spatial_split__(self):
-        return self.conv_bn, self.neuron_pool
+        return self.conv_bn_pool, self.neuron
 
 
 class PatchEmbedInit(nn.Module):
@@ -403,7 +403,10 @@ def GCQKFormer(neuron_type, compress_x, level, **kwargs):
     net = QKFormer(neuron_type, **kwargs)
     return memory_optimization(
         net,
-        (Conv1dBNNeuron, Conv2dBNNeuron, Conv2dBNMaxPoolNeuron, QKACore),
+        (
+            Conv1dBNNeuron, Conv2dBNNeuron, Conv2dBNMaxPoolNeuron, QKACore,
+            SSACore
+        ),
         dummy_input=torch.zeros(32, 3, 224, 224) + 0.9,
         compress_x=compress_x,
         level=level,

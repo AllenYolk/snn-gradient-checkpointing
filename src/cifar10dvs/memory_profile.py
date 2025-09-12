@@ -17,17 +17,15 @@ from utils.lightning_callbacks import *
 from data_module import CIFAR10DVSDataModule
 from utils.profiler import *
 
-PROFILE_LOG_DIR = "./profile_logs"
-
 
 class CIFAR10DVSLightningModule(ClassificationLightningModule):
 
     def __init__(
         self,
-        network: str,
         T: int,
         neuron_type: str,
-        spike_compressor: str,
+        compress_x: bool,
+        level: int,
         decay_lambda: float,
         learning_rate: float,
         momentum: float,
@@ -37,10 +35,10 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
     ):
         super().__init__(
             num_classes=10,
-            network=network,
             T=T,
             neuron_type=neuron_type,
-            spike_compressor=spike_compressor,
+            compress_x=compress_x,
+            level=level,
             decay_lambda=decay_lambda,
             learning_rate=learning_rate,
             momentum=momentum,
@@ -61,12 +59,13 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
         self.profiled_optimizer = optimizer  # to access optimizer for profiling easily
 
     def configure_network(self):
-        return getattr(models, self.hparams.network)(
-            T=self.hparams.T,  # for PSN and tebn
+        return models.GCCIFAR10DVSVGG(
+            T=self.hparams.T,
             neuron_type=self.hparams.neuron_type,
-            spike_compressor=self.hparams.spike_compressor,
+            compress_x=self.hparams.compress_x,
+            level=self.hparams.level,
             decay_lambda=self.hparams.decay_lambda,
-            k=4,  # for SlidingPSN
+            k=2,  # for SlidingPSN
         )
 
     def configure_criterion(self):
@@ -80,10 +79,34 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             )
 
     def configure_optimizers(self):
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.profiled_optimizer, T_max=self.trainer.max_epochs
+        optimizer = torch.optim.SGD(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            momentum=self.hparams.momentum,
+            weight_decay=self.hparams.l2_factor
         )
-        return ([self.profiled_optimizer], [lr_scheduler])
+        if self.hparams.lomo:
+            optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
+
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs
+        )
+        return ([optimizer], [lr_scheduler])
+
+    def training_step(self, batch, batch_idx):
+        x, label = batch[0].float(), batch[1]
+        x.requires_grad = True  # so that the BP peak memory of the 1st layer can be properly recorded
+        y = self(x)
+        batch_loss = self.criterion(y, label)  # must properly handle the sizes!
+        if self.y_with_T:
+            y = y.mean(dim=0)
+        if label.ndim > 1:
+            label = label.argmax(dim=1)
+        self.train_acc.update(y, label)
+        self.train_loss.update(batch_loss.data)
+        self.log("train_loss", self.train_loss.compute(), prog_bar=True)
+        self.log("train_acc", self.train_acc.compute() * 100, prog_bar=True)
+        return batch_loss
 
 
 def main():
@@ -92,40 +115,43 @@ def main():
         CIFAR10DVSDataModule,
         run=False,
         trainer_defaults={
-            "max_steps": 5,
-            "enable_progress_bar": False
+            "logger": {
+                "class_path": "CSVLogger",
+                "init_args": {
+                    "save_dir": "./logs",
+                    "name": "CIFAR10DVS"
+                }
+            },
+            "enable_model_summary": False,
+            "enable_checkpointing": False,
+            "max_steps": 3,
+            "enable_progress_bar": False,
         }
     )
     if cli.trainer.is_global_zero:
         print(cli.model)
 
     args = cli.config.model
-    run_name = (
-        f"{args.neuron_type}_{args.network}_{args.spike_compressor}_"
-        f"T{args.T}_lomo{args.lomo}_amp{cli.trainer.precision}_loss{args.loss}"
-    )
-    log_path = Path(PROFILE_LOG_DIR) / f"CIFAR10DVS"
+    run_name = f"{args.neuron_type}_{args.level}"
+    if not args.compress_x:
+        run_name += "_no-compress"
+    log_path = Path("profile_logs") / f"CIFAR10DVS"
     if not log_path.exists():
         log_path.mkdir(parents=True)
     mem_data_path = log_path / (run_name+".prof.pt")
     profile_log_path = log_path / (run_name+".prof.txt")
 
     net = cli.model.net
-    optimizer = cli.model.profiled_optimizer
-    profiler = ProfilerList(
-        CategoryMemoryProfiler(net, optimizer, log_path=profile_log_path),
-        LayerWiseMemoryProfiler(
-            (net.features, net.dropout, net.classifier),
-            model_names=("feature_extractor", "dropout", "classifier"),
-            search_mode=("direct_children", "self", "self"),
-            instances=(torch.nn.Module,),
-            log_path=profile_log_path,
-            data_path=mem_data_path,
-        ),
+    profiler = LayerWiseMemoryProfiler(
+        (net.features, net.classifier),
+        model_names=("feature_extractor", "classifier"),
+        search_mode=("direct_children", "direct_children"),
+        instances=(torch.nn.Module,),
+        log_path=profile_log_path,
+        data_path=mem_data_path,
     )
-
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
-    profiler.export(sort_by="backward_peak_memory")
+    profiler.export(output=True)
 
 
 if __name__ == '__main__':

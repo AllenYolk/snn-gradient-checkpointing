@@ -101,9 +101,6 @@ class NeuronMaxPool(nn.Module):
     def forward(self, x_seq):
         return self.pool(self.neuron(x_seq))
 
-    def __spatial_split__(self):
-        return self.neuron, self.pool
-
     def __tc_init_states__(self, x_seq):
         return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
 
