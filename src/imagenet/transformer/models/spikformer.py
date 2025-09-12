@@ -1,4 +1,3 @@
-from types import MethodType
 import sys
 
 sys.path.append("./src")
@@ -425,7 +424,7 @@ class Spikformer(nn.Module):
         return x  # [B, num_classes]
 
 
-def GCSpikeformer(neuron_type, compress_x, level, **kwargs):
+def GCSpikformer(neuron_type, compress_x, level, **kwargs):
     net = Spikformer(neuron_type, **kwargs)
     return memory_optimization(
         net,
