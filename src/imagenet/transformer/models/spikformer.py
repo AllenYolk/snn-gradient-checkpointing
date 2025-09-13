@@ -104,7 +104,7 @@ class NeuronMaxPool(nn.Module):
         return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
 
     def __tc_forward__(self, xc, v):
-        sc, v = self.neuron.rnn_forward(xc, v)
+        sc, v = self.neuron.__tc_forward__(xc, v)
         yc = self.pool(sc)
         return yc, v
 

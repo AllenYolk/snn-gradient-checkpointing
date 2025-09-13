@@ -330,15 +330,16 @@ def _apply_gc(
         for name, child in list(subnet.named_children()):
             if isinstance(child, instance):
                 b = is_binary_input.get(child, False)
-                t = getattr(child, "x_compressor", None)
+                spec = getattr(child, "x_compressor", None)
                 if compress_x:
-                    if t is None:  # auto-detect
+                    if spec is None:  # auto-detect
                         x_compressor = (
                             BitSpikeCompressor() if b else NullSpikeCompressor()
                         )
                     else:  # manually specified
                         x_compressor = (
-                            getattr(compress, t)() if isinstance(t, str) else t
+                            getattr(compress, spec)()
+                            if isinstance(spec, str) else spec
                         )
                 else:  # disable compression
                     x_compressor = NullSpikeCompressor()
@@ -510,7 +511,7 @@ def _get_module_and_parent(
     return module, parent, child_name
 
 
-def _spatially_split_gc_container(block: GCContainer):
+def _spatially_split_gc_container(block: GCContainer, compress_x: bool = True):
     assert isinstance(block, GCContainer)
     assert len(block) == 1
 
@@ -518,13 +519,21 @@ def _spatially_split_gc_container(block: GCContainer):
     b = block[0]
     if hasattr(b, "__spatial_split__"):
         blocks = b.__spatial_split__()
-        return nn.Sequential(
-            *[
-                GCContainer(
-                    x_compressor if i == 0 else NullSpikeCompressor(), sub
-                ) for i, sub in enumerate(blocks)
-            ]
-        )
+        l = []
+        for i, sub in enumerate(blocks):
+            spec = getattr(sub, "x_compressor", None)
+            if compress_x:
+                if spec is None:
+                    c = x_compressor if i == 0 else NullSpikeCompressor()
+                else:
+                    c = (
+                        getattr(compress, spec)()
+                        if isinstance(spec, str) else spec
+                    )
+            else:  # disable compression
+                c = NullSpikeCompressor()
+            l.append(GCContainer(c, sub))
+        return nn.Sequential(*l)
     else:  # not spatially split-able
         return None
 

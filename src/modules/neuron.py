@@ -99,7 +99,10 @@ class SJLIF(neuron.LIFNode):
         functional.reset_net(self)  #! reset internal states before forwarding
         return self.multi_step_forward(x_seq)
 
-    def rnn_forward(self, x_seq, v):
+    def __tc_init_states__(self, x_seq):
+        return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
+
+    def __tc_forward__(self, x_seq, v):
         return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
 
 
@@ -141,7 +144,10 @@ class AutogradLIF(nn.Module):
             v = v * (1.-s)
         return s_seq
 
-    def rnn_forward(self, x_seq, v):
+    def __tc_init_states__(self, x_seq):
+        return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
+
+    def __tc_forward__(self, x_seq, v):
         return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
 
 
@@ -257,11 +263,14 @@ class HandWrittenLIF(nn.Module):
     def forward(self, x_seq):
         return self.core(x_seq, self.decay_lambda, self.detach_reset)
 
-    def rnn_forward(self, x_seq, v) -> Tuple[torch.Tensor, torch.Tensor]:
-        return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
-
     def extra_repr(self):
         return (
             f"decay_lambda={self.decay_lambda}, "
             f"detach_reset={self.detach_reset}, "
         )
+
+    def __tc_init_states__(self, x_seq):
+        return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
+
+    def __tc_forward__(self, x_seq, v) -> Tuple[torch.Tensor, torch.Tensor]:
+        return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)

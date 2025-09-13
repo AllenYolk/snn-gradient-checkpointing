@@ -50,11 +50,13 @@ class NeuronConv2dBN(nn.Module):
             ),
             BatchNorm2d_(out_channels),
         )
+        self.x_compressor = "NullSpikeCompressor"
 
     def forward(self, x_seq):
         return self.conv(self.neuron(x_seq))
 
     def __spatial_split__(self):
+        self.conv.x_compressor = "BitSpikeCompressor"
         return self.neuron, self.conv
 
 
@@ -100,11 +102,13 @@ class NeuronConv2dConv2dBN(nn.Module):
             ),
             BatchNorm2d_(out_channels2),
         )
+        self.x_compressor = "NullSpikeCompressor"
 
     def forward(self, x_seq):
         return self.conv(self.neuron(x_seq))
 
     def __spatial_split__(self):
+        self.conv.x_compressor = "BitSpikeCompressor"
         return self.neuron, self.conv
 
 
@@ -322,10 +326,12 @@ class MS_MLP(nn.Module):
 
 class HA3DCore(nn.Module):
 
-    def __init__(self, num_heads, dim):
+    def __init__(self, num_heads, dim, neuron_type, **kwargs):
         super().__init__()
         self.num_heads = num_heads
         self.dim = dim
+        self.bn = SeqToANNContainer(BatchNorm2d_(dim))
+        self.neuron = get_neuron(neuron_type, **kwargs)
 
     def forward(self, qkv):
         q, k, v = qkv[0], qkv[1], qkv[2]
@@ -367,25 +373,7 @@ class HA3DCore(nn.Module):
             .permute(1, 0, 4, 2, 3)  # [T, B, C, H, W]
             .contiguous()
         )
-        return x
-
-
-class BNNeuronRepConvBN(nn.Module):
-
-    def __init__(self, in_channel, out_channel, neuron_type="SJLIF", **kwargs):
-        super().__init__()
-        self.bn = SeqToANNContainer(BatchNorm2d_(in_channel))
-        self.neuron = get_neuron(neuron_type, **kwargs)
-        self.conv = SeqToANNContainer(
-            RepConv(in_channel, out_channel),
-            BatchNorm2d_(out_channel),
-        )
-
-    def forward(self, x_seq):
-        return self.conv(self.neuron(self.bn(x_seq)))
-
-    def __spatial_split__(self):
-        return self.bn, self.neuron, self.conv
+        return self.neuron(self.bn(x))
 
 
 class MS_Attention_3D_RepConv(nn.Module):
@@ -402,8 +390,11 @@ class MS_Attention_3D_RepConv(nn.Module):
         self.q_conv_lif = RepConvBNNeuron(dim, dim, neuron_type, **kwargs)
         self.k_conv_lif = RepConvBNNeuron(dim, dim, neuron_type, **kwargs)
         self.v_conv_lif = RepConvBNNeuron(dim, dim, neuron_type, **kwargs)
-        self.attn = HA3DCore(num_heads, dim)
-        self.tail = BNNeuronRepConvBN(dim, dim, neuron_type, **kwargs)
+        self.attn = HA3DCore(num_heads, dim, neuron_type, **kwargs)
+        self.tail = SeqToANNContainer(
+            RepConv(dim, dim),
+            BatchNorm2d_(dim),
+        )
 
     def forward(self, x):
         x = self.head_lif(x)
@@ -452,23 +443,29 @@ class MS_DownSampling(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.encode_conv_bn = layer.SeqToANNContainer(
-            nn.Conv2d(
+        if first_layer:
+            self.proj = NeuronConv2dBN(
                 in_channels,
                 embed_dims,
                 kernel_size=kernel_size,
                 stride=stride,
                 padding=padding,
-            ), BatchNorm2d_(embed_dims)
-        )
-        if not first_layer:
-            self.encode_lif = get_neuron(neuron_type, **kwargs)
+                neuron_type=neuron_type,
+                **kwargs
+            )
+        else:
+            self.proj = SeqToANNContainer(
+                nn.Conv2d(
+                    in_channels,
+                    embed_dims,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=padding,
+                ), BatchNorm2d_(embed_dims)
+            )
 
     def forward(self, x):
-        if hasattr(self, "encode_lif"):
-            x = self.encode_lif(x)
-        x = self.encode_conv_bn(x)
-        return x
+        return self.proj(x)
 
 
 class Spiking_vit_MetaFormer(nn.Module):
@@ -664,7 +661,7 @@ def GCMetaSpikformer(neuron_type, compress_x, level, **kwargs):
         net,
         (
             NeuronConv2dBN, NeuronConv2dConv2dBN, RepConvBNNeuron, HA3DCore,
-            BNNeuronRepConvBN
+            SeqToANNContainer
         ),
         dummy_input=torch.zeros(4, 3, 224, 224) + 0.9,
         compress_x=compress_x,
