@@ -193,6 +193,7 @@ class PreConv(nn.Module):
     def __init__(self, C_in, planes, T, neuron_type, **kwargs):
         super().__init__()
         self.T = T
+        kwargs["T"] = T
         self.conv_bn = nn.Sequential(
             nn.Conv2d(
                 C_in,
