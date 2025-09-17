@@ -9,6 +9,7 @@ import hashlib
 import lightning as L
 import torch
 from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import Subset
 from torchvision import datasets
 import torchvision.transforms as transforms
 from timm.data import create_transform
@@ -28,6 +29,7 @@ class ImageNetDataModule(L.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         for_model: str = "transformer",
+        dummy: bool = False
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -37,6 +39,7 @@ class ImageNetDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.for_model = for_model
+        self.dummy = dummy
 
         # We want to make batch_per_training_epoch available once the datamodule
         # is constructed. To do so, the datasets should be set up in advance,
@@ -138,11 +141,15 @@ class ImageNetDataModule(L.LightningDataModule):
             self.dataset_train = self._load_dataset(
                 self.train_dir, self.cache_dataset, True, self.for_model
             )
+            if self.dummy:
+                self.dataset_train = Subset(self.dataset_train, range(400))
         if self.dataset_val is None:
             print("Loading validation data")
             self.dataset_val = self._load_dataset(
                 self.val_dir, self.cache_dataset, False, self.for_model
             )
+            if self.dummy:
+                self.dataset_val = Subset(self.dataset_val, range(100))
         print(
             f"dataset_train:{len(self.dataset_train)}, "
             f"dataset_val:{len(self.dataset_val)}"

@@ -1,11 +1,13 @@
 from typing import Dict, List
 from pathlib import Path
+import os
 
 import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.init as init
 from torch.utils import data
+import torch.distributed as dist
 import torchvision.ops.boxes as box_ops
 
 
@@ -189,3 +191,45 @@ def move_state_dict_to_cpu(path):
 
 def tensor_size(x: torch.Tensor):  # in bytes
     return x.element_size() * x.numel()
+
+
+def resolve_device() -> str:
+    """Resolve the logical device for the current process.
+
+    Priority:
+      1) If no cuda available -> cpu
+      2) LOCAL_RANK / SLURM_LOCALID / OMPI_COMM_WORLD_LOCAL_RANK env 
+      3) If torch.distributed initialized -> use rank % ngpus
+      4) torch.cuda.current_device()
+      5) fallback to cuda
+    """
+    if not torch.cuda.is_available():
+        return "cpu"
+
+    # common env vars
+    for k in (
+        "LOCAL_RANK", "SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
+        "MV2_COMM_WORLD_LOCAL_RANK"
+    ):
+        v = os.environ.get(k)
+        if v is not None:
+            try:
+                return f"cuda:{int(v)}"
+            except Exception:
+                pass
+
+    # if dist inited, use rank % n_gpus
+    try:
+        if dist.is_available() and dist.is_initialized():
+            rank = dist.get_rank()
+            n_gpu = torch.cuda.device_count()
+            if n_gpu > 0:
+                return f"cuda:{rank % n_gpu}"
+    except Exception:
+        pass
+
+    # fallback to current_device (logical ID after CUDA_VISIBLE_DEVICES)
+    try:
+        return f"cuda:{torch.cuda.current_device()}"
+    except Exception:
+        return "cuda"

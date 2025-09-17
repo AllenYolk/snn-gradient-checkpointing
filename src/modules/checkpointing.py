@@ -19,6 +19,7 @@ import sys
 sys.path.append("./src")
 
 from utils.profiler import *
+from utils.misc import resolve_device
 
 _thread_local = threading.local()
 
@@ -317,10 +318,11 @@ def _apply_gc(
     net: nn.Module,
     instance: Union[type, Tuple[type]],
     dummy_input: Optional[torch.Tensor] = None,
-    compress_x: bool = True
+    compress_x: bool = True,
+    device: str = "cuda"
 ) -> nn.Module:
-    net = net.cuda()
-    dummy_input = dummy_input.cuda()
+    net = net.to(device)
+    dummy_input = dummy_input.to(device)
 
     is_binary_input = {}
     if compress_x and dummy_input is not None:
@@ -379,12 +381,12 @@ def _dummy_train_step(net: nn.Module, dummy_input: torch.Tensor):
     loss.backward()
 
 
-def _train_memory_profile_worker(net, dummy_input, q):
+def _train_memory_profile_worker(net, dummy_input, q, device):
     """`net` and `dummy_input` should be a deep copy of the original model and
     should be located on CPU, since they must be pickle-able.
     """
-    net = net.cuda()
-    dummy_input = dummy_input.cuda()
+    net = net.to(device)
+    dummy_input = dummy_input.to(device)
 
     # Warmup to trigger Triton autotune & JIT compilation in this subprocess.
     # Without this, the peak memory of the 1st and last layers will be strange!
@@ -405,11 +407,11 @@ def _train_memory_profile_worker(net, dummy_input, q):
     q.put(results)
 
 
-def _train_memory_profile(net, dummy_input, ctx):
+def _train_memory_profile(net, dummy_input, ctx, device):
     q = ctx.Queue(maxsize=1)
     p = ctx.Process(
         target=_train_memory_profile_worker,
-        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q, device),
     )
     p.start()
     results = q.get()
@@ -417,14 +419,14 @@ def _train_memory_profile(net, dummy_input, ctx):
     return results
 
 
-def _train_peak_memory_worker(net, dummy_input, q):
+def _train_peak_memory_worker(net, dummy_input, q, device):
     """Profile the peak training memory usage of the entire net.
 
     `net` and `dummy_input` should be deep copies located on CPU,
     since they must be pickle-able for multiprocessing.
     """
-    net = net.cuda()
-    dummy_input = dummy_input.cuda()
+    net = net.to(device)
+    dummy_input = dummy_input.to(device)
 
     # Warmup to trigger Triton autotune & JIT compilation in this subprocess.
     # Without this, the peak memory of the 1st and last layers will be strange!
@@ -441,11 +443,11 @@ def _train_peak_memory_worker(net, dummy_input, q):
     q.put((peak_allocated, peak_reserved))
 
 
-def _train_peak_memory(net, dummy_input, ctx):
+def _train_peak_memory(net, dummy_input, ctx, device):
     q = ctx.Queue(maxsize=1)
     p = ctx.Process(
         target=_train_peak_memory_worker,
-        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q, device),
     )
     p.start()
     results = q.get()
@@ -453,12 +455,12 @@ def _train_peak_memory(net, dummy_input, ctx):
     return results
 
 
-def _inference_time_profile_worker(net, dummy_input, q, N=50):
+def _inference_time_profile_worker(net, dummy_input, q, device, N=50):
     """`net` and `dummy_input` should be a deep copy of the original model and
     should be located on CPU, since they must be pickle-able.
     """
-    net = net.cuda()
-    dummy_input = dummy_input.cuda()
+    net = net.to(device)
+    dummy_input = dummy_input.to(device)
 
     prof = LayerWiseFPCUDATimeProfiler(
         (net,),
@@ -477,11 +479,11 @@ def _inference_time_profile_worker(net, dummy_input, q, N=50):
     q.put(results)
 
 
-def _inference_time_profile(net, dummy_input, ctx):
+def _inference_time_profile(net, dummy_input, ctx, device):
     q = ctx.Queue(maxsize=1)
     p = ctx.Process(
         target=_inference_time_profile_worker,
-        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q),
+        args=(copy.deepcopy(net).cpu(), dummy_input.cpu(), q, device),
         kwargs={"N": 50},
     )
     p.start()
@@ -621,10 +623,12 @@ def memory_optimization(
     """
     st = time.time()
     ctx = mp.get_context("spawn")
+    device = resolve_device()
+    cprint(verbose, f"Optimizing memory on device {device}")
 
     if level > 0:
         cprint(verbose, "Level 1: layer-wise GC with input spike compression")
-        net = _apply_gc(net, instance, dummy_input, compress_x)
+        net = _apply_gc(net, instance, dummy_input, compress_x, device)
 
     if level > 1:  # spatial split
         if dummy_input is None:
@@ -633,10 +637,10 @@ def memory_optimization(
             )
 
         cprint(verbose, "Level 2: split GCContainers spatially")
-        peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+        peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx, device)
 
         while True:
-            results = _train_memory_profile(net, dummy_input, ctx)
+            results = _train_memory_profile(net, dummy_input, ctx, device)
             if not results:
                 cprint(verbose, "\tNo more GCContainers to split.")
                 break
@@ -656,7 +660,9 @@ def memory_optimization(
 
             # if the peak memory does not reduces, revert and break;
             # otherwise, keep the change and continue
-            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+            new_peak_allocated, _ = _train_peak_memory(
+                net, dummy_input, ctx, device
+            )
             if new_peak_allocated >= peak_allocated:
                 cprint(
                     verbose, f"\t{cb_name}: no reduction in memory, revert "
@@ -675,7 +681,7 @@ def memory_optimization(
         cprint(verbose, "Level 3: split GCContainers temporally")
 
         while True:
-            results = _train_memory_profile(net, dummy_input, ctx)
+            results = _train_memory_profile(net, dummy_input, ctx, device)
             if not results:
                 cprint(verbose, "\tNo more GCContainers to split.")
                 break
@@ -695,7 +701,9 @@ def memory_optimization(
 
             # if the peak memory does not reduces, revert and break;
             # otherwise, keep the change and continue
-            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+            new_peak_allocated, _ = _train_peak_memory(
+                net, dummy_input, ctx, device
+            )
             if new_peak_allocated >= peak_allocated:
                 cprint(
                     verbose, f"\t{cb_name}: no reduction in memory, revert "
@@ -712,7 +720,7 @@ def memory_optimization(
 
     if level > 3:
         cprint(verbose, "Level 4: greedily disable GCContainers")
-        results = _inference_time_profile(net, dummy_input, ctx)
+        results = _inference_time_profile(net, dummy_input, ctx, device)
 
         for r in results:
             cb_name = r[0]
@@ -726,7 +734,9 @@ def memory_optimization(
             setattr(parent, child_name, ucb)
 
             # if the peak memory increases, revert; otherwise, keep the change
-            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx)
+            new_peak_allocated, _ = _train_peak_memory(
+                net, dummy_input, ctx, device
+            )
             if new_peak_allocated > peak_allocated:
                 cprint(
                     verbose, f"\t{cb_name}: keep GCContainer "
