@@ -240,8 +240,10 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         instances: Tuple[nn.Module] = (nn.Module,),
         log_path='layer_memory.prof.txt',
         data_path='layer_memory.prof.pt',
+        device: str = "cuda",
     ):
         super().__init__(models)
+        self.device = device
 
         if model_names is None:
             model_names = tuple([f"net{i}" for i in range(len(models))])
@@ -286,10 +288,12 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         def pre_hook_generator(name):
 
             def pre_hook(module, input):
-                torch.cuda.synchronize()
+                torch.cuda.synchronize(self.device)
                 torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
-                self.forward_start_memory[name] = torch.cuda.memory_allocated()
+                torch.cuda.reset_peak_memory_stats(self.device)
+                self.forward_start_memory[name] = torch.cuda.memory_allocated(
+                    self.device
+                )
                 self.forward_peak_memory[name] = 0
 
             return pre_hook
@@ -297,22 +301,26 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         def post_hook_generator(name):
 
             def post_hook(module, input, output):
-                torch.cuda.synchronize()
+                torch.cuda.synchronize(self.device)
                 self.forward_peak_memory[name] = max(
-                    torch.cuda.max_memory_allocated(),
+                    torch.cuda.max_memory_allocated(self.device),
                     self.forward_peak_memory[name]
                 )
-                self.forward_end_memory[name] = torch.cuda.memory_allocated()
+                self.forward_end_memory[name] = torch.cuda.memory_allocated(
+                    self.device
+                )
 
             return post_hook
 
         def backward_pre_hook_generator(name):
 
             def backward_pre_hook(module, grad_output):
-                torch.cuda.synchronize()
+                torch.cuda.synchronize(self.device)
                 torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
-                self.backward_start_memory[name] = torch.cuda.memory_allocated()
+                torch.cuda.reset_peak_memory_stats(self.device)
+                self.backward_start_memory[name] = torch.cuda.memory_allocated(
+                    self.device
+                )
                 self.backward_peak_memory[name] = 0
 
             return backward_pre_hook
@@ -320,12 +328,14 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         def backward_post_hook_generator(name):
 
             def backward_post_hook(module, grad_input, grad_output):
-                torch.cuda.synchronize()
+                torch.cuda.synchronize(self.device)
                 self.backward_peak_memory[name] = max(
-                    torch.cuda.max_memory_allocated(),
+                    torch.cuda.max_memory_allocated(self.device),
                     self.backward_peak_memory[name]
                 )
-                self.backward_end_memory[name] = torch.cuda.memory_allocated()
+                self.backward_end_memory[name] = torch.cuda.memory_allocated(
+                    self.device
+                )
 
             return backward_post_hook
 

@@ -391,15 +391,16 @@ def _train_memory_profile_worker(net, dummy_input, q, device):
     # Warmup to trigger Triton autotune & JIT compilation in this subprocess.
     # Without this, the peak memory of the 1st and last layers will be strange!
     _dummy_train_step(net, dummy_input)
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(device)
     torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.reset_peak_memory_stats(device)
 
     prof = LayerWiseMemoryProfiler(
         (net,),
         model_names=("net",),
         search_mode=("submodules",),
         instances=(GCContainer,),
+        device=device,
     )
     _dummy_train_step(net, dummy_input)
     results = prof.export(output=False)
@@ -431,15 +432,15 @@ def _train_peak_memory_worker(net, dummy_input, q, device):
     # Warmup to trigger Triton autotune & JIT compilation in this subprocess.
     # Without this, the peak memory of the 1st and last layers will be strange!
     _dummy_train_step(net, dummy_input)
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(device)
     torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.reset_peak_memory_stats(device)
 
     _dummy_train_step(net, dummy_input)
 
-    torch.cuda.synchronize()
-    peak_allocated = torch.cuda.max_memory_allocated()
-    peak_reserved = torch.cuda.max_memory_reserved()
+    torch.cuda.synchronize(device)
+    peak_allocated = torch.cuda.max_memory_allocated(device)
+    peak_reserved = torch.cuda.max_memory_reserved(device)
     q.put((peak_allocated, peak_reserved))
 
 
