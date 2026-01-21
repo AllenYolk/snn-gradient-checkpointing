@@ -9,7 +9,7 @@ from spikingjelly.activation_based import layer
 from modules.neuron import get_neuron
 from modules.compress import *
 from modules.bn import TEBNProjection, BatchNorm2d_
-from modules.checkpointing import memory_optimization
+from modules.checkpointing import memory_optimization, first_l_memory_optimization
 
 
 class VGGBlock(nn.Module):
@@ -99,4 +99,18 @@ def GCCIFAR10DVSVGG(
         compress_x=compress_x,
         level=level,
         verbose=True
+    )
+
+
+def FLGCCIFAR10DVSVGG(
+    T, neuron_type, compress_x: bool, level: int = 1, dropout=0.25, **kwargs
+):
+    net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs)
+    return first_l_memory_optimization(
+        net,
+        (VGGBlock,),
+        dummy_input=torch.zeros(32, T, 2, 48, 48) + 0.9,
+        compress_x=compress_x,
+        L=level,
+        verbose=True,
     )

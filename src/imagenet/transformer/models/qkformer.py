@@ -134,6 +134,14 @@ class Conv2dBNMaxPoolNeuron(nn.Module):
     def __spatial_split__(self):
         return self.conv_bn_pool, self.neuron
 
+    def __tc_init_states__(self, x_seq):
+        return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]
+
+    def __tc_forward__(self, xc, v):
+        xc = self.conv_bn_pool(xc)
+        sc, v = self.neuron.__tc_forward__(xc, v)
+        return sc, v
+
 
 class PatchEmbedInit(nn.Module):
 

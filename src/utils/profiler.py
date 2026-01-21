@@ -444,7 +444,7 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         search_mode: Tuple[str] = ("direct_children",),
         instances: Tuple[nn.Module] = (nn.Module,),
         warmup: int = 10,
-        log_path='layer_time.prof.txt',
+        log_path='layer_time_fp.prof.txt',
     ):
         super().__init__(models)
 
@@ -516,6 +516,9 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
                 it = model.named_modules()
             elif search_mode[i] == "direct_children":
                 it = model.named_children()
+            else:
+                raise ValueError
+
             for name, m in it:
                 if isinstance(m, instances):
                     mname = f"{model_names[i]}'s {name}"
@@ -541,7 +544,131 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         if output:
             out_str = ""
             for name, avg_t in table:
-                out_str += f"{name}:{str(self.module_obj[name])} => "
+                out_str += f"{name}:{str(self.module_obj[name])} forward => "
+                out_str += f"{avg_t:.2f} ms\n\n"
+
+            print(out_str)
+            with open(self.log_path, "a") as f:
+                f.write(out_str)
+
+        return table
+
+    def close(self):
+        for handle in self.hooks:
+            handle.remove()
+        self.hooks = []
+
+    def __del__(self):
+        self.close()
+
+
+class LayerWiseBPCUDATimeProfiler(BaseProfiler):
+
+    def __init__(
+        self,
+        models: Tuple[nn.Module],
+        model_names: Tuple[str] = None,
+        search_mode: Tuple[str] = ("direct_children",),
+        instances: Tuple[nn.Module] = (nn.Module,),
+        warmup: int = 10,
+        log_path='layer_time_bp.prof.txt',
+    ):
+        super().__init__(models)
+
+        if model_names is None:
+            model_names = tuple([f"net{i}" for i in range(len(models))])
+        if not isinstance(model_names, (tuple, list)):
+            raise ValueError("model_names should be a tuple of strings")
+        if len(model_names) != len(models):
+            raise ValueError(
+                "model_names should have the same length as models"
+            )
+
+        if isinstance(search_mode, str):
+            search_mode = (search_mode,)
+        elif not isinstance(search_mode, tuple):
+            search_mode = tuple(search_mode)
+        if len(search_mode) != len(self.models):
+            raise ValueError(
+                "search_mode should have the same length as models"
+            )
+
+        if isinstance(instances, nn.Module):
+            instances = (instances,)
+        elif not isinstance(instances, tuple):
+            instances = tuple(instances)
+        self.instances = instances
+
+        self.warmup = warmup
+        self.log_path = Path(log_path)
+        if self.log_path.exists():
+            os.remove(self.log_path)
+
+        self.result = defaultdict(list)
+        self.module_obj = {}
+        self.start_events = {}
+        self.hooks = []
+
+        def bp_pre_hook_generator(name):
+
+            def pre_hook(module, grad_input):
+                start_event = torch.cuda.Event(enable_timing=True)
+                torch.cuda.synchronize()
+                start_event.record()
+                self.start_events[name] = start_event
+
+            return pre_hook
+
+        def bp_post_hook_generator(name):
+
+            def post_hook(module, grad_input, grad_output):
+                end_event = torch.cuda.Event(enable_timing=True)
+                end_event.record()
+                torch.cuda.synchronize()
+                start_event = self.start_events.get(name, None)
+                if start_event is not None:
+                    elapsed_time = start_event.elapsed_time(end_event)
+                    self.result[name].append(elapsed_time)
+                    self.start_events[name] = None
+
+            return post_hook
+
+        for i, model in enumerate(self.models):
+            if search_mode[i] == "self":
+                it = (("self", model),)
+            elif search_mode[i] == "submodules":
+                it = model.named_modules()
+            elif search_mode[i] == "direct_children":
+                it = model.named_children()
+            else:
+                raise ValueError
+
+            for name, m in it:
+                if isinstance(m, instances):
+                    mname = f"{model_names[i]}'s {name}"
+                    self.module_obj[mname] = m
+                    h_pre = m.register_full_backward_pre_hook(
+                        bp_pre_hook_generator(mname)
+                    )
+                    h_post = m.register_full_backward_hook(
+                        bp_post_hook_generator(mname)
+                    )
+                    self.start_events[mname] = None
+                    self.hooks += [h_pre, h_post]
+
+    def export(self, output: bool = True):
+        table = []
+        for name in self.result.keys():
+            bp_times = self.result[name][self.warmup:]
+            avg_t = sum(bp_times) / len(bp_times)
+            table.append((name, avg_t))
+
+        table = sorted(table, key=lambda x: x[1], reverse=True)
+
+        if output:
+            out_str = ""
+            for name, avg_t in table:
+                out_str += f"{name}:{self.module_obj[name]} backward => "
                 out_str += f"{avg_t:.2f} ms\n\n"
 
             print(out_str)

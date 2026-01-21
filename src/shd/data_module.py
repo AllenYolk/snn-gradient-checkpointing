@@ -31,14 +31,12 @@ def generate_dataset(file_path, output_dir, dt=1e-3):
         labels = fileh["labels"]
 
         print("Number of samples: ", len(times))
-        X = []
-        y = []
         for i in tqdm(range(len(times))):
             x_tmp = binary_image_readout(times[i], units[i], dt=dt)
             y_tmp = labels[i]
-            output_file_name = f"ID:{i}_{y_tmp}.npy"
+            output_file_name = f"ID:{i}_{y_tmp}.npz"
             output_file_name = Path(output_dir) / output_file_name
-            np.save(output_file_name, x_tmp)
+            np.savez_compressed(output_file_name, x=x_tmp)
         print("Done!")
 
 
@@ -53,7 +51,7 @@ class MyDataset(data.Dataset):
 
     def __getitem__(self, index):
         p = str(self.data_paths[index])
-        x = torch.from_numpy(np.load(p)).to(torch.float32)
+        x = torch.from_numpy(np.load(p)["x"]).to(torch.float32)
         y_ = p.split('_')[-1]
         y_ = int(y_.split('.')[0])
         y = torch.tensor(int(y_))
@@ -91,8 +89,8 @@ class SHDDataModule(L.LightningDataModule):
             generate_dataset(self.test_h5, self.test_dir, dt=self.dt / 1000)
 
     def setup(self, stage: str):
-        train_files = list(self.train_dir.glob("*.npy"))
-        test_files = list(self.test_dir.glob("*.npy"))
+        train_files = list(self.train_dir.glob("*.npz"))
+        test_files = list(self.test_dir.glob("*.npz"))
         self.train_set = MyDataset(train_files)
         self.test_set = MyDataset(test_files)
 

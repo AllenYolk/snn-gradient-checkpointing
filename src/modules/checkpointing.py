@@ -337,6 +337,7 @@ def _apply_gc(
                     if spec is None:  # auto-detect
                         x_compressor = (
                             BitSpikeCompressor() if b else NullSpikeCompressor()
+                            # NvcompSpikeCompressor() if b else NullSpikeCompressor()
                         )
                     else:  # manually specified
                         x_compressor = (
@@ -499,7 +500,7 @@ def _get_module_and_parent(
     """
     Given a dotted module path (e.g., 'layer1.0.conv1', not including the 
     top-level module name), return (target_module, parent_module, child_name).
-    
+
     Example:
         m, parent, child_name = get_module_and_parent(net, "layer1.0.conv1")
         # parent.child_name == m
@@ -756,54 +757,75 @@ def memory_optimization(
     return net
 
 
-class BaseTCGCBlock(nn.Module):
+def _apply_gc_first_l(
+    net: nn.Module,
+    L: int,
+    instance: Union[type, Tuple[type]],
+    dummy_input: Optional[torch.Tensor] = None,
+    compress_x: bool = True,
+    device: str = "cuda"
+) -> nn.Module:
+    net = net.to(device)
+    dummy_input = dummy_input.to(device)
 
-    def __init__(self, n_chunk: int):
-        super().__init__()
-        self.n_chunk = n_chunk
+    is_binary_input = {}
+    if compress_x and dummy_input is not None:
+        is_binary_input = _probe_binary_inputs(net, instance, dummy_input)
 
-    @staticmethod
-    def conventional_forward(*args, **kwargs):
-        # RNN-style forward
-        raise NotImplementedError(
-            "The temporally chunked conventional forward function is not implemented."
+    l = [0]
+
+    def _replace(subnet: nn.Module):
+        for name, child in list(subnet.named_children()):
+            if isinstance(child, instance) and l[0] < L:
+                b = is_binary_input.get(child, False)
+                spec = getattr(child, "x_compressor", None)
+                if compress_x:
+                    if spec is None:  # auto-detect
+                        x_compressor = (
+                            BitSpikeCompressor() if b else NullSpikeCompressor()
+                            # NvcompSpikeCompressor() if b else NullSpikeCompressor()
+                        )
+                    else:  # manually specified
+                        x_compressor = (
+                            getattr(compress, spec)()
+                            if isinstance(spec, str) else spec
+                        )
+                else:  # disable compression
+                    x_compressor = NullSpikeCompressor()
+                setattr(subnet, name, GCContainer(x_compressor, child))
+                l[0] += 1
+            elif not isinstance(child, GCContainer):
+                _replace(child)
+
+    _replace(net)
+
+    net = net.cpu()
+    dummy_input = dummy_input.cpu()
+    return net
+
+
+def first_l_memory_optimization(
+    net: nn.Module,
+    instance: Union[type, Tuple[type]],
+    dummy_input: torch.Tensor = None,
+    compress_x: bool = True,
+    L: int = 0,
+    verbose: bool = False,
+):
+    st = time.time()
+    ctx = mp.get_context("spawn")
+    device = resolve_device()
+    cprint(verbose, f"Optimizing memory on device {device}")
+
+    if L > 0:
+        cprint(
+            verbose,
+            "layer-wise GC with input spike compression applied on the first L layer"
+        )
+        net = _apply_gc_first_l(
+            net, L, instance, dummy_input, compress_x, device
         )
 
-    def forward(self, x_seq: torch.Tensor):
-        # 1. temporally chunk x_seqs = torch.chunk(x_seq, self.n_chunk, dim=0)
-        # 2. state initialization
-        # 3. chunked forward
-        # 4. stack chunked outputs
-        raise NotImplementedError("The forward function is not implemented.")
-
-    def extra_repr(self) -> str:
-        if hasattr(self, "spike_compressor"):
-            return (
-                f"n_chunk={self.n_chunk},"
-                f"spike_compressor={self.spike_compressor.__class__.__name__}"
-            )
-        else:
-            return f"n_chunk={self.n_chunk}"
-
-
-class BaseGCBlock(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-
-    @staticmethod
-    def conventional_forward(*args, **kwargs):
-        raise NotImplementedError(
-            "The conventional forward function is not implemented."
-        )
-
-    def forward(self, x_seq: torch.Tensor):
-        raise NotImplementedError("The forward function is not implemented.")
-
-    def extra_repr(self) -> str:
-        if hasattr(self, "spike_compressor"):
-            return (
-                f"spike_compressor={self.spike_compressor.__class__.__name__}"
-            )
-        else:
-            return ""
+    et = time.time()
+    cprint(verbose, f"Total time: {et - st:.2f}s")
+    return net
