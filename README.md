@@ -1,5 +1,7 @@
 # snn-gradient-checkpointing
 
+![method](./assets/method.png)
+
 The official implementation of [Towards Lossless Memory-efficient Training of Spiking Neural Networks via Gradient Checkpointing and Spike Compression](https://openreview.net/forum?id=nrBJ0Uvj7c) (ICLR 2026) by Yifan Huang, Wei Fang, Zecheng Hao, Zhengyu Ma and Yonghong Tian.
 
 This work is an extension and augmentation of [SpikingJelly](https://github.com/fangwei123456/spikingjelly), conceived and developed by SpikingJelly's developer group. The `memory_optimization` API and its tutorial will soon be available in the latest version of SpikingJelly.
@@ -90,6 +92,10 @@ Usage of these scripts are similar to the above.
 ## Use the Pipeline for Your Own SNN
 
 The `memory_optimization` API will soon be available in the latest version of [SpikingJelly](https://github.com/fangwei123456/spikingjelly). Read the docs and tutorials for more details.
+
+<p align="center">
+    <img src="./assets/sj-logo.png" alt="spikingjelly" width="160" />
+</p>
 
 ## Q&A
 
