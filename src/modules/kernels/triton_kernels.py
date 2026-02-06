@@ -40,7 +40,7 @@ try:
             type_dict[torch.float8_e4m3fn] = tl.float8e4nv
 
     @triton.jit
-    def _handwritten_lif_forward_triton(
+    def _melif_forward_triton(
         x_seq_ptr,
         s_seq_ptr,
         h_seq_ptr,
@@ -52,21 +52,21 @@ try:
         BLOCK_NCL: tl.constexpr,
     ):
         pid_ncl = tl.program_id(0)
-        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl * BLOCK_NCL
         mask_x = x_offsets_per_time_step < NCL
 
         v = tl.zeros([BLOCK_NCL], dtype=dtype)
         decay_lambda = tl.full([1], decay_lambda, dtype=dtype)
-        one = tl.full([1], 1., dtype=dtype)
+        one = tl.full([1], 1.0, dtype=dtype)
 
         for t in tl.static_range(0, T, 1):
-            x_offsets = t*T_stride + x_offsets_per_time_step
+            x_offsets = t * T_stride + x_offsets_per_time_step
             x_ptrs = x_seq_ptr + x_offsets
-            x = tl.load(x_ptrs, mask=mask_x, other=0.)
+            x = tl.load(x_ptrs, mask=mask_x, other=0.0)
 
-            h = decay_lambda*v + x
-            s = (h >= 1.).to(dtype)
-            v = h * (one-s)
+            h = decay_lambda * v + x
+            s = (h >= 1.0).to(dtype)
+            v = h * (one - s)
 
             s_ptrs = s_seq_ptr + x_offsets
             h_ptrs = h_seq_ptr + x_offsets
@@ -74,7 +74,7 @@ try:
             tl.store(h_ptrs, h, mask=mask_x)
 
     @triton.jit
-    def _handwritten_lif_backward_triton(
+    def _melif_backward_triton(
         grad_s_seq_ptr,
         h_seq_ptr,
         grad_x_seq_ptr,
@@ -88,36 +88,36 @@ try:
         BLOCK_NCL: tl.constexpr,
     ):
         pid_ncl = tl.program_id(0)
-        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl*BLOCK_NCL
+        x_offsets_per_time_step = tl.arange(0, BLOCK_NCL) + pid_ncl * BLOCK_NCL
         mask_x = x_offsets_per_time_step < NCL
 
         grad_v = tl.zeros([BLOCK_NCL], dtype=dtype)
         pi = tl.full([1], pi, dtype=dtype)
-        one = tl.full([1], 1., dtype=dtype)
+        one = tl.full([1], 1.0, dtype=dtype)
         decay_lambda = tl.full([1], decay_lambda, dtype=dtype)
         for t in tl.static_range(T - 1, -1, -1):
-            x_offsets = t*T_stride + x_offsets_per_time_step
+            x_offsets = t * T_stride + x_offsets_per_time_step
             grad_s_ptrs = grad_s_seq_ptr + x_offsets
-            grad_s = tl.load(grad_s_ptrs, mask=mask_x, other=0.)
+            grad_s = tl.load(grad_s_ptrs, mask=mask_x, other=0.0)
             h_ptrs = h_seq_ptr + x_offsets
-            h = tl.load(h_ptrs, mask=mask_x, other=0.)
-            s = (h >= 1.).to(dtype)
+            h = tl.load(h_ptrs, mask=mask_x, other=0.0)
+            s = (h >= 1.0).to(dtype)
 
-            sg = pi * (h-one)
-            sg = (one / (one + sg*sg)).to(dtype)
+            sg = pi * (h - one)
+            sg = (one / (one + sg * sg)).to(dtype)
             if detach_reset:
-                grad_v = grad_s*sg + grad_v * (one-s)
+                grad_v = grad_s * sg + grad_v * (one - s)
             else:
-                grad_v = (grad_s - grad_v*h) * sg + grad_v * (one-s)
+                grad_v = (grad_s - grad_v * h) * sg + grad_v * (one - s)
 
             grad_x_ptrs = grad_x_seq_ptr + x_offsets
             tl.store(grad_x_ptrs, grad_v, mask=mask_x)
             grad_v = grad_v * decay_lambda
 
-    def handwritten_lif_forward_triton(x_seq, decay_lambda):
+    def melif_forward_triton(x_seq, decay_lambda):
         T = x_seq.shape[0]
         NCL = x_seq[0].numel()
-        grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
+        grid = lambda meta: (triton.cdiv(NCL, meta["BLOCK_NCL"]),)
         s_seq = torch.empty_like(x_seq)
         h_seq = torch.empty_like(x_seq)
 
@@ -129,7 +129,7 @@ try:
             )
 
         with torch.cuda.device(x_seq.device):
-            _handwritten_lif_forward_triton[grid](
+            _melif_forward_triton[grid](
                 x_seq,
                 s_seq,
                 h_seq,
@@ -142,12 +142,10 @@ try:
             )
         return s_seq, h_seq
 
-    def handwritten_lif_backward_triton(
-        grad_s_seq, h_seq, decay_lambda, detach_reset
-    ):
+    def melif_backward_triton(grad_s_seq, h_seq, decay_lambda, detach_reset):
         T = grad_s_seq.shape[0]
         NCL = grad_s_seq[0].numel()
-        grid = lambda meta: (triton.cdiv(NCL, meta['BLOCK_NCL']),)
+        grid = lambda meta: (triton.cdiv(NCL, meta["BLOCK_NCL"]),)
         grad_x_seq = torch.empty_like(grad_s_seq)
 
         dtype = grad_s_seq.dtype
@@ -158,7 +156,7 @@ try:
             )
 
         with torch.cuda.device(grad_s_seq.device):
-            _handwritten_lif_backward_triton[grid](
+            _melif_backward_triton[grid](
                 grad_s_seq,
                 h_seq,
                 grad_x_seq,
@@ -186,24 +184,25 @@ try:
         BLOCK_SIZE: tl.constexpr,
     ):
         pid = tl.program_id(0)
-        store_offsets = pid*BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        store_offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         store_mask = store_offsets < n_compressed_elements
 
-        s_seq_compressed = tl.zeros([
-            BLOCK_SIZE,
-        ], dtype=tl.uint8)
+        s_seq_compressed = tl.zeros(
+            [
+                BLOCK_SIZE,
+            ],
+            dtype=tl.uint8,
+        )
 
         for i in tl.static_range(8):
-            load_offsets = i + store_offsets*8
+            load_offsets = i + store_offsets * 8
             load_mask = load_offsets < n_elements
-            s_seq = tl.load(s_seq_ptr + load_offsets, mask=load_mask, other=0.)
+            s_seq = tl.load(s_seq_ptr + load_offsets, mask=load_mask, other=0.0)
             s_seq = s_seq.to(tl.uint8)
             s_seq_compressed = s_seq_compressed | (s_seq << i)
 
         tl.store(
-            s_seq_compressed_ptr + store_offsets,
-            s_seq_compressed,
-            mask=store_mask
+            s_seq_compressed_ptr + store_offsets, s_seq_compressed, mask=store_mask
         )
 
     @triton.jit
@@ -215,7 +214,7 @@ try:
         BLOCK_SIZE: tl.constexpr,  # must be dividable by 8
     ):
         pid = tl.program_id(0)
-        load_offsets = pid*BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        load_offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         load_mask = load_offsets < n_compressed_elements
 
         s_seq_compressed = tl.load(
@@ -225,7 +224,7 @@ try:
         )
 
         for i in tl.static_range(8):
-            store_offsets = i + load_offsets*8
+            store_offsets = i + load_offsets * 8
             store_mask = store_offsets < n_decompressed_elements
             tl.store(
                 s_seq_decompressed_ptr + store_offsets,
@@ -237,13 +236,11 @@ try:
         # s_seq: float32, ndim=1
         s_seq = s_seq.reshape(-1)
         n_elements = s_seq.numel()
-        n_compressed_elements = (n_elements+7) // 8
+        n_compressed_elements = (n_elements + 7) // 8
         s_seq_compressed = torch.zeros(
             n_compressed_elements, dtype=torch.uint8, device=s_seq.device
         )
-        grid = lambda meta: (
-            triton.cdiv(n_compressed_elements, meta['BLOCK_SIZE']),
-        )
+        grid = lambda meta: (triton.cdiv(n_compressed_elements, meta["BLOCK_SIZE"]),)
 
         with torch.cuda.device(s_seq.device):
             _bit_spike_compress_triton[grid](
@@ -251,7 +248,7 @@ try:
                 s_seq_compressed,
                 n_elements,
                 n_compressed_elements,
-                BLOCK_SIZE=block_size
+                BLOCK_SIZE=block_size,
             )
         return s_seq_compressed
 
@@ -262,13 +259,9 @@ try:
         n_compressed_elements = s_seq_compressed.numel()
         n_decompressed_elements = shape.numel()
         s_seq_decompressed = torch.zeros(
-            n_decompressed_elements,
-            dtype=torch.uint8,
-            device=s_seq_compressed.device
+            n_decompressed_elements, dtype=torch.uint8, device=s_seq_compressed.device
         )
-        grid = lambda meta: (
-            triton.cdiv(n_compressed_elements, meta['BLOCK_SIZE']),
-        )
+        grid = lambda meta: (triton.cdiv(n_compressed_elements, meta["BLOCK_SIZE"]),)
 
         with torch.cuda.device(s_seq_compressed.device):
             _bit_spike_decompress_triton[grid](
@@ -276,7 +269,7 @@ try:
                 s_seq_decompressed,
                 n_compressed_elements,
                 n_decompressed_elements,
-                BLOCK_SIZE=block_size
+                BLOCK_SIZE=block_size,
             )
         return s_seq_decompressed.reshape(shape)
 

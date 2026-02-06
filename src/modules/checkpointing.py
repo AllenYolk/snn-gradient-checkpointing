@@ -55,9 +55,7 @@ class InputCompressedGC(autograd.Function):
     """
 
     @staticmethod
-    def forward(
-        ctx, forward_function, x_compressor: BaseSpikeCompressor, x_seq, *args
-    ):
+    def forward(ctx, forward_function, x_compressor: BaseSpikeCompressor, x_seq, *args):
         ctx.forward_function = forward_function
         ctx.x_compressor = x_compressor
         ctx.x_seq_shape = x_seq.shape
@@ -106,19 +104,19 @@ class InputCompressedGC(autograd.Function):
                 x_seq_compressed, *tensor_args = ctx.saved_tensors
             else:
                 tensor_args = ctx.saved_tensors  # tensors in (*args,)
-            tensor_args_indices = ctx.tensor_args_indices  # idx of the tensors in (*args,)
+            tensor_args_indices = (
+                ctx.tensor_args_indices
+            )  # idx of the tensors in (*args,)
             x_seq_shape = ctx.x_seq_shape
 
             with torch.set_grad_enabled(True):
                 with get_autocast_context(ctx.is_autocast_enabled):
-                    x_seq = ctx.x_compressor.decompress(
-                        x_seq_compressed, x_seq_shape
-                    )
+                    x_seq = ctx.x_compressor.decompress(x_seq_compressed, x_seq_shape)
                     x_seq = x_seq.detach().requires_grad_(True)
                     for i, idx in enumerate(tensor_args_indices):
                         rg = (
-                            ctx.needs_input_grad[idx + 3] and
-                            tensor_args[i].requires_grad
+                            ctx.needs_input_grad[idx + 3]
+                            and tensor_args[i].requires_grad
                         )
                         args[idx] = tensor_args[i].detach().requires_grad_(rg)
 
@@ -147,17 +145,14 @@ def input_compressed_gc(
 ):
     if torch.is_grad_enabled():
         x_seq.requires_grad_(True)  # make sure the retval requires grad
-        return InputCompressedGC.apply(
-            forward_function, x_compressor, x_seq, *args
-        )
+        return InputCompressedGC.apply(forward_function, x_compressor, x_seq, *args)
     else:
         # If gradients are not enabled, call the forward function directly
         return forward_function(x_seq, *args)
 
 
 def to_gc_function(
-    x_compressor: BaseSpikeCompressor,
-    forward_function: Optional[Callable] = None
+    x_compressor: BaseSpikeCompressor, forward_function: Optional[Callable] = None
 ):
     """Convert a forward function to a GC-blocked forward function.
 
@@ -185,12 +180,9 @@ def to_gc_function(
     if forward_function is None:  # as a decorator
 
         def decorator_function(forward_function):
-
             @functools.wraps(forward_function)
             def wrapped_forward_function(x_seq, *args):
-                return input_compressed_gc(
-                    forward_function, x_compressor, x_seq, *args
-                )
+                return input_compressed_gc(forward_function, x_compressor, x_seq, *args)
 
             return wrapped_forward_function
 
@@ -200,9 +192,7 @@ def to_gc_function(
 
         @functools.wraps(forward_function)
         def wrapped_forward_function(x_seq, *args):
-            return input_compressed_gc(
-                forward_function, x_compressor, x_seq, *args
-            )
+            return input_compressed_gc(forward_function, x_compressor, x_seq, *args)
 
         return wrapped_forward_function
 
@@ -232,16 +222,16 @@ class GCContainer(nn.Sequential):
 class TCGCContainer(GCContainer):
     """Temporally Chunked GCContainer.
 
-    This container wraps exactly 1 layer and applies temporal chunking on its 
+    This container wraps exactly 1 layer and applies temporal chunking on its
     input to reduce memory consumption during training.
 
     Usage constraints:
     1. Only one layer (`len(self) == 1`) is allowed.
     2. The forward function supports a single primary input `x_seq` that will be
-    chunked along dimension 0 (the sequence dimension), plus optional auxiliary 
+    chunked along dimension 0 (the sequence dimension), plus optional auxiliary
     inputs (*args) that are passed to the wrapped layer as-is.
-    3. The forward function returns a single tensor output (concatenated from 
-    chunks). 
+    3. The forward function returns a single tensor output (concatenated from
+    chunks).
 
     Adaptation for custom layers:
     1. Your layer must implement a proxy method `__tc_forward__` which has the
@@ -249,15 +239,12 @@ class TCGCContainer(GCContainer):
     Notice that `__tc_forward__` should always return a tuple rather than a single
     tensor even if there's no hidden states!!!
     2. Optionally, implement `__tc_init_states__` to initialize hidden states. It
-    should have the following signature: (x_seq) -> states, where `states` is a 
+    should have the following signature: (x_seq) -> states, where `states` is a
     list or tuple of hidden states.
     """
 
     def __init__(
-        self,
-        x_compressor: BaseSpikeCompressor,
-        layer: nn.Module,
-        n_chunk: int = 1
+        self, x_compressor: BaseSpikeCompressor, layer: nn.Module, n_chunk: int = 1
     ):
         super().__init__(x_compressor, layer)  # exactly 1 layer!!!
         self.n_chunk = n_chunk
@@ -319,7 +306,7 @@ def _apply_gc(
     instance: Union[type, Tuple[type]],
     dummy_input: Optional[torch.Tensor] = None,
     compress_x: bool = True,
-    device: str = "cuda"
+    device: str = "cuda",
 ) -> nn.Module:
     net = net.to(device)
     dummy_input = dummy_input.to(device)
@@ -341,8 +328,7 @@ def _apply_gc(
                         )
                     else:  # manually specified
                         x_compressor = (
-                            getattr(compress, spec)()
-                            if isinstance(spec, str) else spec
+                            getattr(compress, spec)() if isinstance(spec, str) else spec
                         )
                 else:  # disable compression
                     x_compressor = NullSpikeCompressor()
@@ -370,9 +356,7 @@ def _dummy_train_step(net: nn.Module, dummy_input: torch.Tensor):
     if isinstance(out, (tuple, list)):
         loss_terms = [t for t in out if torch.is_tensor(t) and t.requires_grad]
         if not loss_terms:
-            raise RuntimeError(
-                "No tensor requiring grad found in model outputs."
-            )
+            raise RuntimeError("No tensor requiring grad found in model outputs.")
         loss = torch.stack([t.float().sum() for t in loss_terms]).sum()
     elif torch.is_tensor(out):
         loss = out.sum()
@@ -498,7 +482,7 @@ def _get_module_and_parent(
     net: nn.Module, module_name: str
 ) -> Tuple[nn.Module, nn.Module, str]:
     """
-    Given a dotted module path (e.g., 'layer1.0.conv1', not including the 
+    Given a dotted module path (e.g., 'layer1.0.conv1', not including the
     top-level module name), return (target_module, parent_module, child_name).
 
     Example:
@@ -530,10 +514,7 @@ def _spatially_split_gc_container(block: GCContainer, compress_x: bool = True):
                 if spec is None:
                     c = x_compressor if i == 0 else NullSpikeCompressor()
                 else:
-                    c = (
-                        getattr(compress, spec)()
-                        if isinstance(spec, str) else spec
-                    )
+                    c = getattr(compress, spec)() if isinstance(spec, str) else spec
             else:  # disable compression
                 c = NullSpikeCompressor()
             l.append(GCContainer(c, sub))
@@ -555,9 +536,7 @@ def _temporally_split_gc_container(block: GCContainer, factor: int = 2):
         return None
 
 
-def _unwrap_gc_container(
-    block: GCContainer
-) -> Tuple[nn.Module, BaseSpikeCompressor]:
+def _unwrap_gc_container(block: GCContainer) -> Tuple[nn.Module, BaseSpikeCompressor]:
     assert isinstance(block, GCContainer)
 
     x_compressor = block.x_compressor
@@ -583,15 +562,15 @@ def memory_optimization(
 ):
     """Memory optimization using gradient checkpointing and spike compression.
 
-    This function progressively transforms the given network by wrapping 
+    This function progressively transforms the given network by wrapping
     specified layers in `GCContainer`s and applying several optimization
     strategies (in increasing order of aggressiveness):
     - Level 0: No optimization.
-    - Level 1: Wrap matching modules in `GCContainer` for layer-wise 
+    - Level 1: Wrap matching modules in `GCContainer` for layer-wise
       gradient checkpointing (GC), with optional input compression.
-    - Level 2: Recursively split heavy `GCContainer`s into multiple 
+    - Level 2: Recursively split heavy `GCContainer`s into multiple
       sub-containers along the spatial (layer-wise) dimension, if supported.
-    - Level 3: Further split heavy `GCContainer`s along the temporal 
+    - Level 3: Further split heavy `GCContainer`s along the temporal
       dimension (chunking the time axis), if supported.
     - Level 4: Greedily unwrap some `GCContainer`s to reduce training time cost
       if doing so does not increase the memory footprint.
@@ -599,7 +578,7 @@ def memory_optimization(
     Args:
         net (nn.Module): the model to be optimized.
         instance (type or tuple of types): module classes to wrap.
-        dummy_input (Tensor, optional): input for memory profiling, required 
+        dummy_input (Tensor, optional): input for memory profiling, required
             if level > 1.
         compress_x (bool): whether to apply input spike compression.
         level (int): optimization level:
@@ -609,7 +588,7 @@ def memory_optimization(
             3 - add temporal splitting
             4 - greedily disable GC
         verbose (bool): whether to print logs.
-        temporal_split_factor (int): factor to increase the number of chunks 
+        temporal_split_factor (int): factor to increase the number of chunks
             when splitting temporally.
 
     Returns:
@@ -634,9 +613,7 @@ def memory_optimization(
 
     if level > 1:  # spatial split
         if dummy_input is None:
-            raise ValueError(
-                "dummy_input must be provided for memory profiling."
-            )
+            raise ValueError("dummy_input must be provided for memory profiling.")
 
         cprint(verbose, "Level 2: split GCContainers spatially")
         peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx, device)
@@ -647,10 +624,7 @@ def memory_optimization(
                 cprint(verbose, "\tNo more GCContainers to split.")
                 break
             cb_name = results[0][0]  # GCContainer with the highest mem.
-            cb, parent, child_name = _get_module_and_parent(
-                net,
-                cb_name.split(" ")[-1]
-            )
+            cb, parent, child_name = _get_module_and_parent(net, cb_name.split(" ")[-1])
 
             # try to spatially split the GCContainer
             # if not split-able, break
@@ -662,20 +636,20 @@ def memory_optimization(
 
             # if the peak memory does not reduces, revert and break;
             # otherwise, keep the change and continue
-            new_peak_allocated, _ = _train_peak_memory(
-                net, dummy_input, ctx, device
-            )
+            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx, device)
             if new_peak_allocated >= peak_allocated:
                 cprint(
-                    verbose, f"\t{cb_name}: no reduction in memory, revert "
-                    f"({peak_allocated} -> {new_peak_allocated})"
+                    verbose,
+                    f"\t{cb_name}: no reduction in memory, revert "
+                    f"({peak_allocated} -> {new_peak_allocated})",
                 )
                 setattr(parent, child_name, cb)
                 break
             else:
                 cprint(
-                    verbose, f"\t{cb_name}: successfully split "
-                    f"({peak_allocated} -> {new_peak_allocated})"
+                    verbose,
+                    f"\t{cb_name}: successfully split "
+                    f"({peak_allocated} -> {new_peak_allocated})",
                 )
                 peak_allocated = new_peak_allocated  # update the peak memory
 
@@ -688,10 +662,7 @@ def memory_optimization(
                 cprint(verbose, "\tNo more GCContainers to split.")
                 break
             cb_name = results[0][0]  # GCContainer with the highest mem.
-            cb, parent, child_name = _get_module_and_parent(
-                net,
-                cb_name.split(" ")[-1]
-            )
+            cb, parent, child_name = _get_module_and_parent(net, cb_name.split(" ")[-1])
 
             # try to temporally split the GCContainer
             # if not split-able, break
@@ -703,20 +674,20 @@ def memory_optimization(
 
             # if the peak memory does not reduces, revert and break;
             # otherwise, keep the change and continue
-            new_peak_allocated, _ = _train_peak_memory(
-                net, dummy_input, ctx, device
-            )
+            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx, device)
             if new_peak_allocated >= peak_allocated:
                 cprint(
-                    verbose, f"\t{cb_name}: no reduction in memory, revert "
-                    f"({peak_allocated} -> {new_peak_allocated})"
+                    verbose,
+                    f"\t{cb_name}: no reduction in memory, revert "
+                    f"({peak_allocated} -> {new_peak_allocated})",
                 )
                 setattr(parent, child_name, cb)
                 break
             else:
                 cprint(
-                    verbose, f"\t{cb_name}: successfully split "
-                    f"({peak_allocated} -> {new_peak_allocated})"
+                    verbose,
+                    f"\t{cb_name}: successfully split "
+                    f"({peak_allocated} -> {new_peak_allocated})",
                 )
                 peak_allocated = new_peak_allocated  # update the peak memory
 
@@ -726,29 +697,26 @@ def memory_optimization(
 
         for r in results:
             cb_name = r[0]
-            cb, parent, child_name = _get_module_and_parent(
-                net,
-                cb_name.split(" ")[-1]
-            )
+            cb, parent, child_name = _get_module_and_parent(net, cb_name.split(" ")[-1])
 
             # try to unwrap the GCContainer
             ucb, x_compressor = _unwrap_gc_container(cb)
             setattr(parent, child_name, ucb)
 
             # if the peak memory increases, revert; otherwise, keep the change
-            new_peak_allocated, _ = _train_peak_memory(
-                net, dummy_input, ctx, device
-            )
+            new_peak_allocated, _ = _train_peak_memory(net, dummy_input, ctx, device)
             if new_peak_allocated > peak_allocated:
                 cprint(
-                    verbose, f"\t{cb_name}: keep GCContainer "
-                    f"({peak_allocated} -> {new_peak_allocated})"
+                    verbose,
+                    f"\t{cb_name}: keep GCContainer "
+                    f"({peak_allocated} -> {new_peak_allocated})",
                 )
                 setattr(parent, child_name, cb)
             else:
                 cprint(
-                    verbose, f"\t{cb_name}: disable GCContainer "
-                    f"({peak_allocated} -> {new_peak_allocated})"
+                    verbose,
+                    f"\t{cb_name}: disable GCContainer "
+                    f"({peak_allocated} -> {new_peak_allocated})",
                 )
                 peak_allocated = new_peak_allocated  # update the peak memory
 
@@ -763,7 +731,7 @@ def _apply_gc_first_l(
     instance: Union[type, Tuple[type]],
     dummy_input: Optional[torch.Tensor] = None,
     compress_x: bool = True,
-    device: str = "cuda"
+    device: str = "cuda",
 ) -> nn.Module:
     net = net.to(device)
     dummy_input = dummy_input.to(device)
@@ -787,8 +755,7 @@ def _apply_gc_first_l(
                         )
                     else:  # manually specified
                         x_compressor = (
-                            getattr(compress, spec)()
-                            if isinstance(spec, str) else spec
+                            getattr(compress, spec)() if isinstance(spec, str) else spec
                         )
                 else:  # disable compression
                     x_compressor = NullSpikeCompressor()
@@ -820,11 +787,9 @@ def first_l_memory_optimization(
     if L > 0:
         cprint(
             verbose,
-            "layer-wise GC with input spike compression applied on the first L layer"
+            "layer-wise GC with input spike compression applied on the first L layer",
         )
-        net = _apply_gc_first_l(
-            net, L, instance, dummy_input, compress_x, device
-        )
+        net = _apply_gc_first_l(net, L, instance, dummy_input, compress_x, device)
 
     et = time.time()
     cprint(verbose, f"Total time: {et - st:.2f}s")

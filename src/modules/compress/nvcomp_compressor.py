@@ -30,9 +30,7 @@ try:
 
     # ===================== functional interface ======================
     def nvcomp_compress(
-        x: torch.Tensor,
-        algorithm: str = DEFAULT_NVCOMP_CODEC_ALGORITHM,
-        **kwargs
+        x: torch.Tensor, algorithm: str = DEFAULT_NVCOMP_CODEC_ALGORITHM, **kwargs
     ):
         x_size_byte = x.numel() * x.element_size()
         x = torch.tensor((), device=x.device, dtype=torch.uint8).set_(
@@ -41,10 +39,7 @@ try:
             (x_size_byte,),
         )
 
-        if (
-            x_size_byte > NVCOMP_CHUNK_SIZE_BYTES and
-            NVCOMP_NEED_CHUNK[algorithm]
-        ):
+        if x_size_byte > NVCOMP_CHUNK_SIZE_BYTES and NVCOMP_NEED_CHUNK[algorithm]:
             x = torch.split(x, NVCOMP_CHUNK_SIZE_BYTES)
             x = [nvcomp.as_array(chunk) for chunk in x]
         else:
@@ -64,7 +59,7 @@ try:
         target_shape,
         target_dtype=torch.float32,
         algorithm: str = DEFAULT_NVCOMP_CODEC_ALGORITHM,
-        **kwargs
+        **kwargs,
     ):
         additional_kwargs = DEFAULT_NVCOMP_CODEC_KWARGS
         additional_kwargs.update(kwargs)
@@ -90,12 +85,11 @@ try:
 
     # ===================== class interface ======================
     class NvcompCompressor:
-
         def __init__(
             self,
             algorithm: str = DEFAULT_NVCOMP_CODEC_ALGORITHM,
             compressed_dtype=torch.uint8,
-            **kwargs  # additional arguments for nvcomp.Codec
+            **kwargs,  # additional arguments for nvcomp.Codec
         ):
             self.algorithm = algorithm
             self.compressed_dtype = compressed_dtype
@@ -117,8 +111,8 @@ try:
             )
 
             if (
-                x_size_byte > NVCOMP_CHUNK_SIZE_BYTES and
-                NVCOMP_NEED_CHUNK[self.algorithm]
+                x_size_byte > NVCOMP_CHUNK_SIZE_BYTES
+                and NVCOMP_NEED_CHUNK[self.algorithm]
             ):
                 y = torch.split(y, NVCOMP_CHUNK_SIZE_BYTES)
                 y = [nvcomp.as_array(chunk) for chunk in y]

@@ -1,0 +1,92 @@
+[project]
+name = "snn-gradient-checkpointing"
+version = "0.1.0"
+description = "The official implementation of 'Towards Lossless Memory-efficient Training of Spiking Neural Networks via Gradient Checkpointing and Spike Compression' (ICLR 2026)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "spikingjelly",
+    "lightning",
+    "jsonargparse[signatures]>=4.27.7",
+    "timm",
+]
+
+# PyTorch integration: https://uv.doczh.com/guides/integration/pytorch/#_2
+[project.optional-dependencies]
+cu118 = [
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "torchaudio==2.7.1",
+    "triton==3.3.1",
+]
+cu126 = [
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "torchaudio==2.7.1",
+    "triton==3.3.1",
+    "nvidia-nvcomp-cu12",
+]
+cu128 = [
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "torchaudio==2.7.1",
+    "triton==3.3.1",
+    "nvidia-nvcomp-cu12",
+]
+cpu = [
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "torchaudio==2.7.1",
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cu118" },
+        { extra = "cu126" },
+        { extra = "cu128" },
+        { extra = "cpu" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu118", extra = "cu118" },
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu128", extra = "cu128" },
+    { index = "pytorch-cpu", extra = "cpu" },
+]
+torchvision = [
+    { index = "pytorch-cu118", extra = "cu118" },
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu128", extra = "cu128" },
+    { index = "pytorch-cpu", extra = "cpu" },
+]
+torchaudio = [
+    { index = "pytorch-cu118", extra = "cu118" },
+    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu128", extra = "cu128" },
+    { index = "pytorch-cpu", extra = "cpu" },
+]
+# spikingjelly = { git = "https://github.com/fangwei123456/spikingjelly.git", branch = "master" }
+spikingjelly = { git = "https://openi.pcl.ac.cn/OpenI/spikingjelly.git", branch = "master" }
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://pypi.org/simple"
+explicit = true

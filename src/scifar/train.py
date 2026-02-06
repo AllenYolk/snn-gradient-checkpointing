@@ -19,7 +19,6 @@ from data_module import SCIFARDataModule
 
 
 class SCIFARLightningModule(ClassificationLightningModule):
-
     def __init__(
         self,
         channels: int,
@@ -41,7 +40,7 @@ class SCIFARLightningModule(ClassificationLightningModule):
             decay_lambda=decay_lambda,
             learning_rate=learning_rate,
             momentum=momentum,
-            lomo=lomo
+            lomo=lomo,
         )
 
     def configure_network(self):
@@ -83,14 +82,11 @@ def main():
         trainer_defaults={
             "logger": {
                 "class_path": "CSVLogger",
-                "init_args": {
-                    "save_dir": "./logs",
-                    "name": "SCIFAR"
-                }
+                "init_args": {"save_dir": "./logs", "name": "SCIFAR"},
             },
             "enable_model_summary": False,
             "enable_checkpointing": False,
-        }
+        },
     )
     assert cli.model.hparams.num_classes == cli.datamodule.num_classes
     cli.trainer.callbacks += [
@@ -99,7 +95,7 @@ def main():
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
+            mode="max",
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),
         SamplePerSecondCallback(),
@@ -110,5 +106,5 @@ def main():
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

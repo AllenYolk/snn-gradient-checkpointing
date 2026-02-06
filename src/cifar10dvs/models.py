@@ -13,7 +13,6 @@ from modules.checkpointing import memory_optimization, first_l_memory_optimizati
 
 
 class VGGBlock(nn.Module):
-
     def __init__(
         self,
         in_plane,
@@ -24,7 +23,7 @@ class VGGBlock(nn.Module):
         T,
         neuron_type,
         preceding_avg_pool=False,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         proj_bn = []
@@ -53,7 +52,6 @@ class VGGBlock(nn.Module):
 
 
 class CIFAR10DVSVGG(nn.Module):
-
     def __init__(self, T, neuron_type, dropout=0.25, **kwargs):
         super().__init__()
 
@@ -76,9 +74,7 @@ class CIFAR10DVSVGG(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(
-                    m.weight, mode='fan_out', nonlinearity='relu'
-                )
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
 
     def forward(self, input):
         # input.shape = [N, T, C, H, W]
@@ -94,11 +90,12 @@ def GCCIFAR10DVSVGG(
 ):
     net = CIFAR10DVSVGG(T, neuron_type, dropout, **kwargs)
     return memory_optimization(
-        net, (VGGBlock,),
+        net,
+        (VGGBlock,),
         dummy_input=torch.zeros(32, T, 2, 48, 48) + 0.9,
         compress_x=compress_x,
         level=level,
-        verbose=True
+        verbose=True,
     )
 
 

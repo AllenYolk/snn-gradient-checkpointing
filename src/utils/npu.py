@@ -9,6 +9,7 @@ def use_torch_npu():
     """
     try:
         import torch_npu
+
         npu_available = torch_npu.npu.is_available()
     except:
         npu_available = False

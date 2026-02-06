@@ -4,11 +4,13 @@ import torch
 
 try:
     from torch.amp import autocast, GradScaler
+
     USE_CUDA_DOT_AMP = False
     if mp.current_process().name == "MainProcess":
         print("Use torch.amp")
 except Exception:
     from torch.cuda.amp import autocast, GradScaler
+
     USE_CUDA_DOT_AMP = True
     if mp.current_process().name == "MainProcess":
         print("torch.amp is not available. Use torch.cuda.amp instead.")
@@ -18,8 +20,7 @@ CACHE_ENABLED = False
 
 
 def get_autocast_context(enabled: bool):
-    """A wrapper for torch.amp.autocast or torch.cuda.amp.autocast context.
-    """
+    """A wrapper for torch.amp.autocast or torch.cuda.amp.autocast context."""
     autocast_params = {
         "enabled": enabled,
         "dtype": AUTOCAST_DTYPE,
@@ -35,7 +36,4 @@ def is_autocast_enabled():
     if USE_CUDA_DOT_AMP:
         return torch.is_autocast_enabled()
     else:
-        return (
-            torch.is_autocast_enabled("cpu") or
-            torch.is_autocast_enabled("cuda")
-        )
+        return torch.is_autocast_enabled("cpu") or torch.is_autocast_enabled("cuda")

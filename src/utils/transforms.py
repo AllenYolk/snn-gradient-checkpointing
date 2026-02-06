@@ -1,5 +1,4 @@
-"""Transformations shared by multiple datasets.
-"""
+"""Transformations shared by multiple datasets."""
 
 import random
 import numbers
@@ -17,7 +16,6 @@ from .misc import get_one_hot
 
 
 class TransformedDatasetWrapper(torch.utils.data.Dataset):
-
     def __init__(self, dataset, transform=None):
         self.transform = transform
         self.dataset = dataset
@@ -56,10 +54,12 @@ class RandomMixup(nn.Module):
         num_classes: int,
         p: float = 0.5,
         alpha: float = 1.0,
-        inplace: bool = False
+        inplace: bool = False,
     ) -> None:
         super().__init__()
-        assert num_classes > 0, "Please provide a valid positive value for the num_classes."
+        assert num_classes > 0, (
+            "Please provide a valid positive value for the num_classes."
+        )
         assert alpha > 0, "Alpha param can't be zero."
 
         self.num_classes = num_classes
@@ -67,8 +67,9 @@ class RandomMixup(nn.Module):
         self.alpha = alpha
         self.inplace = inplace
 
-    def forward(self, batch: torch.Tensor,
-                target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, batch: torch.Tensor, target: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             batch (Tensor): Float tensor of size (B, C, H, W)
@@ -82,13 +83,9 @@ class RandomMixup(nn.Module):
         if target.ndim != 1:
             raise ValueError(f"Target ndim should be 1. Got {target.ndim}")
         if not batch.is_floating_point():
-            raise TypeError(
-                f"Batch dtype should be a float tensor. Got {batch.dtype}."
-            )
+            raise TypeError(f"Batch dtype should be a float tensor. Got {batch.dtype}.")
         if target.dtype != torch.int64:
-            raise TypeError(
-                f"Target dtype should be torch.int64. Got {target.dtype}"
-            )
+            raise TypeError(f"Target dtype should be torch.int64. Got {target.dtype}")
 
         if not self.inplace:
             batch = batch.clone()
@@ -147,10 +144,12 @@ class RandomCutmix(nn.Module):
         num_classes: int,
         p: float = 0.5,
         alpha: float = 1.0,
-        inplace: bool = False
+        inplace: bool = False,
     ) -> None:
         super().__init__()
-        assert num_classes > 0, "Please provide a valid positive value for the num_classes."
+        assert num_classes > 0, (
+            "Please provide a valid positive value for the num_classes."
+        )
         assert alpha > 0, "Alpha param can't be zero."
 
         self.num_classes = num_classes
@@ -158,8 +157,9 @@ class RandomCutmix(nn.Module):
         self.alpha = alpha
         self.inplace = inplace
 
-    def forward(self, batch: torch.Tensor,
-                target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, batch: torch.Tensor, target: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             batch (Tensor): Float tensor of size (B, C, H, W)
@@ -173,13 +173,9 @@ class RandomCutmix(nn.Module):
         if target.ndim != 1:
             raise ValueError(f"Target ndim should be 1. Got {target.ndim}")
         if not batch.is_floating_point():
-            raise TypeError(
-                f"Batch dtype should be a float tensor. Got {batch.dtype}."
-            )
+            raise TypeError(f"Batch dtype should be a float tensor. Got {batch.dtype}.")
         if target.dtype != torch.int64:
-            raise TypeError(
-                f"Target dtype should be torch.int64. Got {target.dtype}"
-            )
+            raise TypeError(f"Target dtype should be torch.int64. Got {target.dtype}")
 
         if not self.inplace:
             batch = batch.clone()
@@ -214,7 +210,7 @@ class RandomCutmix(nn.Module):
         y2 = int(torch.clamp(r_y + r_h_half, max=H))
 
         batch[:, :, y1:y2, x1:x2] = batch_rolled[:, :, y1:y2, x1:x2]
-        lambda_param = float(1.0 - (x2-x1) * (y2-y1) / (W*H))
+        lambda_param = float(1.0 - (x2 - x1) * (y2 - y1) / (W * H))
 
         target_rolled.mul_(1.0 - lambda_param)
         target.mul_(lambda_param).add_(target_rolled)
@@ -243,7 +239,7 @@ class Cutout:
     Args:
         n_holes (int): Number of patches to cut out of each image.
         length (int): The length (in pixels) of each square patch.
-        max_length (int): If not None, randomly sample the length of the square 
+        max_length (int): If not None, randomly sample the length of the square
             patch. If None, use the argument `length` instead.
     """
 
@@ -272,12 +268,12 @@ class Cutout:
             if self.max_length is not None:
                 length = np.random.randint(1, self.max_length)
 
-            y1 = np.clip(y - length//2, 0, h)
-            y2 = np.clip(y + length//2, 0, h)
-            x1 = np.clip(x - length//2, 0, w)
-            x2 = np.clip(x + length//2, 0, w)
+            y1 = np.clip(y - length // 2, 0, h)
+            y2 = np.clip(y + length // 2, 0, h)
+            x1 = np.clip(x - length // 2, 0, w)
+            x2 = np.clip(x + length // 2, 0, w)
 
-            mask[y1:y2, x1:x2] = 0.
+            mask[y1:y2, x1:x2] = 0.0
 
         mask = torch.from_numpy(mask)
         mask = mask.expand_as(img)
@@ -293,21 +289,18 @@ class Cutout:
 
 
 class ToTensor:
-
     def __call__(self, imgmap):
         totensor = transforms.ToTensor()
         return [totensor(i) for i in imgmap]
 
 
 class ToPILImage:
-
     def __call__(self, imgmap):
         topilimage = transforms.ToPILImage()
         return [topilimage(i) for i in imgmap]
 
 
 class Padding:
-
     def __init__(self, pad):
         self.pad = pad
 
@@ -316,7 +309,6 @@ class Padding:
 
 
 class Resize:
-
     def __init__(self, size):
         self.size = size
 
@@ -326,7 +318,6 @@ class Resize:
 
 
 class Normalize:
-
     def __init__(self, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
         self.mean = mean
         self.std = std
@@ -337,12 +328,11 @@ class Normalize:
 
 
 class RandomHorizontalFlip:
-
     def __init__(self, consistent=True, command=None):
         self.consistent = consistent
-        if command == 'left':
+        if command == "left":
             self.threshold = 0
-        elif command == 'right':
+        elif command == "right":
             self.threshold = 1
         else:
             self.threshold = 0.5
@@ -365,7 +355,6 @@ class RandomHorizontalFlip:
 
 
 class RandomCrop:
-
     def __init__(self, size, consistent=True):
         if isinstance(size, numbers.Number):
             self.size = (int(size), int(size))
@@ -393,7 +382,7 @@ class RandomCrop:
                         result.append(i.crop((x1, y1, x1 + tw, y1 + th)))
                     return result
             elif flowmap is not None:
-                assert (not self.consistent)
+                assert not self.consistent
                 result = []
                 for idx, i in enumerate(imgmap):
                     proposal = []
@@ -402,21 +391,23 @@ class RandomCrop:
                     ):  # number of proposal: use the one with largest optical flow
                         x = random.randint(0, w - tw)
                         y = random.randint(0, h - th)
-                        proposal.append([
-                            x, y,
-                            abs(np.mean(flowmap[idx, y:y + th, x:x + tw, :]))
-                        ])
+                        proposal.append(
+                            [
+                                x,
+                                y,
+                                abs(np.mean(flowmap[idx, y : y + th, x : x + tw, :])),
+                            ]
+                        )
                     [x1, y1, _] = max(proposal, key=lambda x: x[-1])
                     result.append(i.crop((x1, y1, x1 + tw, y1 + th)))
                 return result
             else:
-                raise ValueError('wrong case')
+                raise ValueError("wrong case")
         else:
             return imgmap
 
 
 class RandomCropWithProb:
-
     def __init__(self, size, p=0.8, consistent=True):
         if isinstance(size, numbers.Number):
             self.size = (int(size), int(size))
@@ -437,8 +428,8 @@ class RandomCropWithProb:
                     x1 = random.randint(0, w - tw)
                     y1 = random.randint(0, h - th)
                 else:
-                    x1 = int(round((w-tw) / 2.))
-                    y1 = int(round((h-th) / 2.))
+                    x1 = int(round((w - tw) / 2.0))
+                    y1 = int(round((h - th) / 2.0))
                 return [i.crop((x1, y1, x1 + tw, y1 + th)) for i in imgmap]
             else:
                 result = []
@@ -447,8 +438,8 @@ class RandomCropWithProb:
                         x1 = random.randint(0, w - tw)
                         y1 = random.randint(0, h - th)
                     else:
-                        x1 = int(round((w-tw) / 2.))
-                        y1 = int(round((h-th) / 2.))
+                        x1 = int(round((w - tw) / 2.0))
+                        y1 = int(round((h - th) / 2.0))
                     result.append(i.crop((x1, y1, x1 + tw, y1 + th)))
                 return result
         else:
@@ -456,7 +447,6 @@ class RandomCropWithProb:
 
 
 class TimeChannelMask:
-
     def __init__(self, prob, time_mask_size, channel_mask_size):
         self.prob = prob
         self.time_mask_size = time_mask_size
@@ -468,12 +458,12 @@ class TimeChannelMask:
         if np.random.uniform() < self.prob:
             mask_size = np.random.randint(0, self.time_mask_size)
             idx = np.random.randint(0, x.shape[1] - mask_size)
-            x[:, idx:idx + mask_size, :] = 0.
+            x[:, idx : idx + mask_size, :] = 0.0
 
         # Neuron mask
         if np.random.uniform() < self.prob:
             mask_size = np.random.randint(0, self.channel_mask_size)
             idx = np.random.randint(0, x.shape[2] - mask_size)
-            x[:, :, idx:idx + mask_size] = 0.
+            x[:, :, idx : idx + mask_size] = 0.0
 
         return x

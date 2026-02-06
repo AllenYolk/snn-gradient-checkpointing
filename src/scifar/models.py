@@ -23,21 +23,18 @@ class SeqToANNContainer(layer.SeqToANNContainer):
 
 
 class ConvBNNeuron(nn.Module):
-
     def __init__(
         self,
         in_channels,
         out_channels,
         neuron_type,
         preceding_avg_pool: bool = False,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         conv = [nn.AvgPool1d(2, 2)] if preceding_avg_pool else []
         conv += [
-            nn.Conv1d(
-                in_channels, out_channels, kernel_size=3, padding=1, bias=True
-            )
+            nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1, bias=True)
         ]
         self.conv = SeqToANNContainer(*conv)
 
@@ -54,7 +51,6 @@ class ConvBNNeuron(nn.Module):
 
 
 class AvgPoolFlattenLinearNeuron(nn.Module):
-
     def __init__(self, channels: int, neuron_type, **kwargs):
         super().__init__()
         self.fc = SeqToANNContainer(
@@ -72,17 +68,14 @@ class AvgPoolFlattenLinearNeuron(nn.Module):
 
 
 class SequentialCIFARNet(nn.Module):
-
-    def __init__(
-        self, channels: int, neuron_type: str, num_classes=100, **kwargs
-    ):
+    def __init__(self, channels: int, neuron_type: str, num_classes=100, **kwargs):
         """A Conv1d-based network for Sequential CIFAR-10/100 classification.
 
         Args:
             channels (int)
             neuron_type (str)
             num_classes (int, optional): Defaults to 100.
-            **kwargs: Additional arguments for `get_neuron(...)`. See 
+            **kwargs: Additional arguments for `get_neuron(...)`. See
                 `src/models/neuron.py` for details.
         """
         super().__init__()
@@ -127,13 +120,14 @@ def GCSequentialCIFARNet(
     num_classes=100,
     compress_x: bool = True,
     level: int = 0,
-    **kwargs
+    **kwargs,
 ):
     net = SequentialCIFARNet(channels, neuron_type, num_classes, **kwargs)
     return memory_optimization(
-        net, (ConvBNNeuron, AvgPoolFlattenLinearNeuron),
+        net,
+        (ConvBNNeuron, AvgPoolFlattenLinearNeuron),
         dummy_input=torch.zeros(128, 3, 32, 32) + 0.9,
         compress_x=compress_x,
         level=level,
-        verbose=True
+        verbose=True,
     )

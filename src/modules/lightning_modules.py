@@ -5,26 +5,25 @@ import torch.nn as nn
 
 
 class ClassificationLightningModule(LightningModule):
-
     def __init__(
         self,
         num_classes: int,
         y_with_T: bool = False,  # for computing accuracy
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
-        kwargs.update({
-            "num_classes": num_classes,
-        })
+        kwargs.update(
+            {
+                "num_classes": num_classes,
+            }
+        )
         self.save_hyperparameters(kwargs)
         self.y_with_T = y_with_T
 
         self.train_acc = Accuracy(
             task="multiclass", num_classes=self.hparams.num_classes
         )
-        self.val_acc = Accuracy(
-            task="multiclass", num_classes=self.hparams.num_classes
-        )
+        self.val_acc = Accuracy(task="multiclass", num_classes=self.hparams.num_classes)
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
 
@@ -43,8 +42,7 @@ class ClassificationLightningModule(LightningModule):
 
     def configure_optimizers(self):
         raise NotImplementedError(
-            "ClassificationLightningModule.configure_optimizers() is not "
-            "implemented."
+            "ClassificationLightningModule.configure_optimizers() is not implemented."
         )
 
     def forward(self, x):
@@ -76,7 +74,7 @@ class ClassificationLightningModule(LightningModule):
             print(
                 f"Epoch {self.current_epoch}/{self.trainer.max_epochs}: "
                 f"train_loss={train_loss:.2f}, "
-                f"train_acc={train_acc*100:.2f}%"
+                f"train_acc={train_acc * 100:.2f}%"
             )
 
     def validation_step(self, batch, batch_idx):
@@ -102,5 +100,5 @@ class ClassificationLightningModule(LightningModule):
         if self.global_rank == 0:
             print(
                 f"Epoch {self.current_epoch}/{self.trainer.max_epochs}: "
-                f"val_loss={val_loss:.2f}, val_acc={val_acc*100:.2f}%"
+                f"val_loss={val_loss:.2f}, val_acc={val_acc * 100:.2f}%"
             )

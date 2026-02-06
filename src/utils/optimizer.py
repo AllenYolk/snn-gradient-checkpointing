@@ -3,15 +3,14 @@ from torch.optim import Optimizer
 
 
 class Lomo(Optimizer):
-    """https://github.com/OpenLMLab/LOMO/blob/main/lomo_optim/lomo.py
-    """
+    """https://github.com/OpenLMLab/LOMO/blob/main/lomo_optim/lomo.py"""
 
     def __init__(
         self,
         optimizer: Optimizer,
         clip_grad_norm=None,
         clip_grad_value=None,
-        scaler=None
+        scaler=None,
     ):
         self.optimizer = optimizer
         self.clip_grad_norm = clip_grad_norm
@@ -58,7 +57,6 @@ class Lomo(Optimizer):
             return False
 
     def _make_hook(self):
-
         def hook(x):
             with torch.no_grad():
                 for group in self.optimizer.param_groups:
@@ -67,8 +65,7 @@ class Lomo(Optimizer):
                             grad = p.grad
                             if self.clip_grad_value is not None:
                                 grad.clamp_(
-                                    min=-self.clip_grad_value,
-                                    max=self.clip_grad_value
+                                    min=-self.clip_grad_value, max=self.clip_grad_value
                                 )
                             if self.clip_grad_norm is not None:
                                 raise NotImplementedError(
@@ -106,8 +103,7 @@ class Lomo(Optimizer):
                             grad = p.grad
                             if self.clip_grad_value is not None:
                                 grad.clamp_(
-                                    min=-self.clip_grad_value,
-                                    max=self.clip_grad_value
+                                    min=-self.clip_grad_value, max=self.clip_grad_value
                                 )
                             if self.clip_grad_norm is not None:
                                 raise NotImplementedError(

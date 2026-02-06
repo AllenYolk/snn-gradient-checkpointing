@@ -19,7 +19,6 @@ from data_module import CIFAR10DVSDataModule
 
 
 class CIFAR10DVSLightningModule(ClassificationLightningModule):
-
     def __init__(
         self,
         T: int,
@@ -64,7 +63,7 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
         else:
             return TETLoss(
                 base_criterion=torch.nn.CrossEntropyLoss(),
-                mean=1.,
+                mean=1.0,
                 tet_lambda=1e-3,
             )
 
@@ -73,7 +72,7 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             self.parameters(),
             lr=self.hparams.learning_rate,
             momentum=self.hparams.momentum,
-            weight_decay=self.hparams.l2_factor
+            weight_decay=self.hparams.l2_factor,
         )
         if self.hparams.lomo:
             optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
@@ -92,14 +91,11 @@ def main():
         trainer_defaults={
             "logger": {
                 "class_path": "CSVLogger",
-                "init_args": {
-                    "save_dir": "./logs",
-                    "name": "CIFAR10DVS"
-                }
+                "init_args": {"save_dir": "./logs", "name": "CIFAR10DVS"},
             },
             "enable_model_summary": False,
             "enable_checkpointing": False,
-        }
+        },
     )
     assert cli.model.hparams.T == cli.datamodule.T
     cli.trainer.callbacks += [
@@ -108,7 +104,7 @@ def main():
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
+            mode="max",
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),
         SamplePerSecondCallback(),
@@ -119,5 +115,5 @@ def main():
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

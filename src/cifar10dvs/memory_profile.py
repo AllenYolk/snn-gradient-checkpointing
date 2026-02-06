@@ -19,7 +19,6 @@ from utils.profiler import *
 
 
 class CIFAR10DVSLightningModule(ClassificationLightningModule):
-
     def __init__(
         self,
         T: int,
@@ -52,7 +51,7 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             self.parameters(),
             lr=self.hparams.learning_rate,
             momentum=self.hparams.momentum,
-            weight_decay=self.hparams.l2_factor
+            weight_decay=self.hparams.l2_factor,
         )
         if self.hparams.lomo:
             optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
@@ -74,7 +73,7 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
         else:
             return TETLoss(
                 base_criterion=torch.nn.CrossEntropyLoss(),
-                mean=1.,
+                mean=1.0,
                 tet_lambda=1e-3,
             )
 
@@ -83,7 +82,7 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
             self.parameters(),
             lr=self.hparams.learning_rate,
             momentum=self.hparams.momentum,
-            weight_decay=self.hparams.l2_factor
+            weight_decay=self.hparams.l2_factor,
         )
         if self.hparams.lomo:
             optimizer = Lomo(optimizer, scaler=self.trainer.scaler)
@@ -95,7 +94,9 @@ class CIFAR10DVSLightningModule(ClassificationLightningModule):
 
     def training_step(self, batch, batch_idx):
         x, label = batch[0].float(), batch[1]
-        x.requires_grad = True  # so that the BP peak memory of the 1st layer can be properly recorded
+        x.requires_grad = (
+            True  # so that the BP peak memory of the 1st layer can be properly recorded
+        )
         y = self(x)
         batch_loss = self.criterion(y, label)  # must properly handle the sizes!
         if self.y_with_T:
@@ -117,16 +118,13 @@ def main():
         trainer_defaults={
             "logger": {
                 "class_path": "CSVLogger",
-                "init_args": {
-                    "save_dir": "./logs",
-                    "name": "CIFAR10DVS"
-                }
+                "init_args": {"save_dir": "./logs", "name": "CIFAR10DVS"},
             },
             "enable_model_summary": False,
             "enable_checkpointing": False,
             "max_steps": 3,
             "enable_progress_bar": False,
-        }
+        },
     )
     if cli.trainer.is_global_zero:
         print(cli.model)
@@ -138,8 +136,8 @@ def main():
     log_path = Path("profile_logs") / f"CIFAR10DVS"
     if not log_path.exists():
         log_path.mkdir(parents=True)
-    mem_data_path = log_path / (run_name+".prof.pt")
-    profile_log_path = log_path / (run_name+".prof.txt")
+    mem_data_path = log_path / (run_name + ".prof.pt")
+    profile_log_path = log_path / (run_name + ".prof.txt")
 
     net = cli.model.net
     profiler = LayerWiseMemoryProfiler(
@@ -154,5 +152,5 @@ def main():
     profiler.export(output=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

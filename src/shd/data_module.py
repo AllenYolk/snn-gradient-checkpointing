@@ -25,7 +25,7 @@ def binary_image_readout(times, units, dt=1e-3):
 
 def generate_dataset(file_path, output_dir, dt=1e-3):
     print("generating SHD dataset at: ", file_path)
-    with h5py.File(file_path, 'r') as fileh:
+    with h5py.File(file_path, "r") as fileh:
         units = fileh["spikes"]["units"]
         times = fileh["spikes"]["times"]
         labels = fileh["labels"]
@@ -41,7 +41,6 @@ def generate_dataset(file_path, output_dir, dt=1e-3):
 
 
 class MyDataset(data.Dataset):
-
     def __init__(self, data_paths, transform=None):
         self.data_paths = data_paths
         self.transform = transform
@@ -52,8 +51,8 @@ class MyDataset(data.Dataset):
     def __getitem__(self, index):
         p = str(self.data_paths[index])
         x = torch.from_numpy(np.load(p)["x"]).to(torch.float32)
-        y_ = p.split('_')[-1]
-        y_ = int(y_.split('.')[0])
+        y_ = p.split("_")[-1]
+        y_ = int(y_.split(".")[0])
         y = torch.tensor(int(y_))
         if self.transform:
             x = self.transform(x)
@@ -61,13 +60,12 @@ class MyDataset(data.Dataset):
 
 
 class SHDDataModule(L.LightningDataModule):
-
     def __init__(
         self,
         data_dir: str,
         dt: int,  # unit: ms
         batch_size: int = 128,
-        num_workers: int = 4
+        num_workers: int = 4,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)

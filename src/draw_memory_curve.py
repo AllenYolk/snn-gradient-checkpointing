@@ -40,7 +40,7 @@ def plot_curve(ax, fp_curve, bp_curve, label, color):
         marker="o",
         markersize=2,
         label=label,
-        color=color
+        color=color,
     )
     ax.plot(
         np.arange(
@@ -50,7 +50,7 @@ def plot_curve(ax, fp_curve, bp_curve, label, color):
         bp_curve,
         marker="d",
         markersize=2,
-        color=color
+        color=color,
     )
 
 

@@ -11,8 +11,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-KB = 1024.
-MB = 1024. * 1024.
+KB = 1024.0
+MB = 1024.0 * 1024.0
 
 
 def _get_caller_info(depth=1):
@@ -69,7 +69,7 @@ def _cuda_tensors():
         try:
             if torch.is_tensor(obj):
                 tensor = obj
-            elif hasattr(obj, 'data') and torch.is_tensor(obj.data):
+            elif hasattr(obj, "data") and torch.is_tensor(obj.data):
                 tensor = obj.data
             else:
                 continue
@@ -81,8 +81,7 @@ def _cuda_tensors():
 
 
 class BaseProfiler(abc.ABC):
-    """For profiling memory / time usage.
-    """
+    """For profiling memory / time usage."""
 
     def __init__(self, models: Tuple[nn.Module]):
         """Constructing a profiler.
@@ -106,12 +105,11 @@ class BaseProfiler(abc.ABC):
 
 
 class CategoryMemoryProfiler(BaseProfiler):
-
     def __init__(
         self,
         models: Tuple[nn.Module],
         optimizers: Tuple[optim.Optimizer],
-        log_path='snn_memory.prof.txt',
+        log_path="snn_memory.prof.txt",
     ):
         super().__init__(models)
 
@@ -136,7 +134,7 @@ class CategoryMemoryProfiler(BaseProfiler):
             for param in model.parameters():
                 if param.is_cuda:
                     nbytes = param.element_size() * param.numel()
-                    memory_usage['weight'] += nbytes
+                    memory_usage["weight"] += nbytes
                     weight_tensors.add(param.data_ptr())
             for buffer in model.buffers():
                 if buffer.is_cuda:
@@ -150,20 +148,20 @@ class CategoryMemoryProfiler(BaseProfiler):
             for param in model.parameters():
                 if param.grad is not None and param.grad.is_cuda:
                     nbytes = param.grad.element_size() * param.grad.numel()
-                    memory_usage['gradient'] += nbytes
+                    memory_usage["gradient"] += nbytes
                     gradient_tensors.add(param.grad.data_ptr())
 
         # optimizer state
         optimizer_state_tensors = set()
         for optimizer in self.optimizers:
             for group in optimizer.param_groups:
-                for param in group['params']:
+                for param in group["params"]:
                     if param in optimizer.state:
                         state = optimizer.state[param]
                         for key, value in state.items():
                             if torch.is_tensor(value) and value.is_cuda:
                                 nbytes = value.element_size() * value.numel()
-                                memory_usage['optimizer_state'] += nbytes
+                                memory_usage["optimizer_state"] += nbytes
                                 optimizer_state_tensors.add(value.data_ptr())
 
         classified_tensors = weight_tensors | gradient_tensors | optimizer_state_tensors
@@ -182,15 +180,13 @@ class CategoryMemoryProfiler(BaseProfiler):
         for device_id in range(self.device_count):
             with torch.cuda.device(device_id):
                 total_mem[device_id] = {
-                    'allocated': torch.cuda.memory_allocated() / MB,
-                    'reserved': torch.cuda.memory_reserved() / MB,
+                    "allocated": torch.cuda.memory_allocated() / MB,
+                    "reserved": torch.cuda.memory_reserved() / MB,
                 }
 
         if output:
             caller_str = _get_caller_info(depth)
-            header_str = (
-                f"=== Category-wise Memory ({time.ctime()}; {caller_str}) ==="
-            )
+            header_str = f"=== Category-wise Memory ({time.ctime()}; {caller_str}) ==="
 
             out_str = "=" * len(header_str) + "\n"
             out_str += header_str + "\n"
@@ -206,10 +202,10 @@ class CategoryMemoryProfiler(BaseProfiler):
                 out_str += f"  {category}: {usage / MB:.2f} MB\n"
             out_str += f"  Total: {sum(memory_usage.values()) / MB:.2f} MB\n"
             out_str += "=" * len(header_str) + "\n"
-            out_str += "=" * len(header_str) + "\n"*3
+            out_str += "=" * len(header_str) + "\n" * 3
 
             print(out_str)
-            with open(self.log_path, 'a') as f:
+            with open(self.log_path, "a") as f:
                 f.write(out_str)
 
         return memory_usage, total_mem
@@ -219,7 +215,6 @@ class CategoryMemoryProfiler(BaseProfiler):
 
 
 class LayerWiseMemoryProfiler(BaseProfiler):
-
     field_idx = {
         "name": 0,
         "forward_start_memory": 1,
@@ -238,8 +233,8 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         model_names: Tuple[str] = None,
         search_mode: Tuple[str] = ("direct_children",),
         instances: Tuple[nn.Module] = (nn.Module,),
-        log_path='layer_memory.prof.txt',
-        data_path='layer_memory.prof.pt',
+        log_path="layer_memory.prof.txt",
+        data_path="layer_memory.prof.pt",
         device: str = "cuda",
     ):
         super().__init__(models)
@@ -250,18 +245,14 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         if not isinstance(model_names, (tuple, list)):
             raise ValueError("model_names should be a tuple of strings")
         if len(model_names) != len(models):
-            raise ValueError(
-                "model_names should have the same length as models"
-            )
+            raise ValueError("model_names should have the same length as models")
 
         if isinstance(search_mode, str):
             search_mode = (search_mode,)
         elif not isinstance(search_mode, tuple):
             search_mode = tuple(search_mode)
         if len(search_mode) != len(self.models):
-            raise ValueError(
-                "search_mode should have the same length as models"
-            )
+            raise ValueError("search_mode should have the same length as models")
 
         if isinstance(instances, nn.Module):
             instances = (instances,)
@@ -286,7 +277,6 @@ class LayerWiseMemoryProfiler(BaseProfiler):
         self.module_obj = {}  # mapping from module name to the module itself
 
         def pre_hook_generator(name):
-
             def pre_hook(module, input):
                 torch.cuda.synchronize(self.device)
                 torch.cuda.empty_cache()
@@ -299,21 +289,17 @@ class LayerWiseMemoryProfiler(BaseProfiler):
             return pre_hook
 
         def post_hook_generator(name):
-
             def post_hook(module, input, output):
                 torch.cuda.synchronize(self.device)
                 self.forward_peak_memory[name] = max(
                     torch.cuda.max_memory_allocated(self.device),
-                    self.forward_peak_memory[name]
+                    self.forward_peak_memory[name],
                 )
-                self.forward_end_memory[name] = torch.cuda.memory_allocated(
-                    self.device
-                )
+                self.forward_end_memory[name] = torch.cuda.memory_allocated(self.device)
 
             return post_hook
 
         def backward_pre_hook_generator(name):
-
             def backward_pre_hook(module, grad_output):
                 torch.cuda.synchronize(self.device)
                 torch.cuda.empty_cache()
@@ -326,12 +312,11 @@ class LayerWiseMemoryProfiler(BaseProfiler):
             return backward_pre_hook
 
         def backward_post_hook_generator(name):
-
             def backward_post_hook(module, grad_input, grad_output):
                 torch.cuda.synchronize(self.device)
                 self.backward_peak_memory[name] = max(
                     torch.cuda.max_memory_allocated(self.device),
-                    self.backward_peak_memory[name]
+                    self.backward_peak_memory[name],
                 )
                 self.backward_end_memory[name] = torch.cuda.memory_allocated(
                     self.device
@@ -360,9 +345,7 @@ class LayerWiseMemoryProfiler(BaseProfiler):
                     )
                     self.hooks += [h1, h2, h3, h4]
 
-    def export(
-        self, depth=2, sort_by=None, output: bool = True, *args, **kwargs
-    ):
+    def export(self, depth=2, sort_by=None, output: bool = True, *args, **kwargs):
         results = []
         for name in self.forward_peak_memory.keys():
             f_start = self.forward_start_memory[name]
@@ -374,10 +357,9 @@ class LayerWiseMemoryProfiler(BaseProfiler):
             b_peak = self.backward_peak_memory[name]
             b_delta = b_peak - b_start
 
-            results.append((
-                name, f_start, f_end, f_peak, f_delta, b_start, b_end, b_peak,
-                b_delta
-            ))
+            results.append(
+                (name, f_start, f_end, f_peak, f_delta, b_start, b_end, b_peak, b_delta)
+            )
 
         if sort_by is not None:
             results = sorted(
@@ -396,8 +378,15 @@ class LayerWiseMemoryProfiler(BaseProfiler):
             out_str += header_str + "\n"
             out_str += "=" * len(header_str) + "\n"
             for (
-                name, f_start, f_end, f_peak, f_delta, b_start, b_end, b_peak,
-                b_delta
+                name,
+                f_start,
+                f_end,
+                f_peak,
+                f_delta,
+                b_start,
+                b_end,
+                b_peak,
+                b_delta,
             ) in results:
                 out_str += f"{name}:{str(self.module_obj[name])}\n"
                 out_str += f" forward_start_memory: {f_start / MB:.2f} MB, "
@@ -409,20 +398,23 @@ class LayerWiseMemoryProfiler(BaseProfiler):
                 out_str += f"backward_peak_memory: {b_peak / MB:.2f} MB, "
                 out_str += f"backward_delta_memory: {b_delta / MB:.2f} MB\n"
             out_str += "=" * len(header_str) + "\n"
-            out_str += "=" * len(header_str) + "\n"*3
+            out_str += "=" * len(header_str) + "\n" * 3
 
             print(out_str)
-            with open(self.log_path, 'a') as f:
+            with open(self.log_path, "a") as f:
                 f.write(out_str)
 
-            torch.save({
-                "forward_start_memory": self.forward_start_memory,
-                "forward_end_memory": self.forward_end_memory,
-                "forward_peak_memory": self.forward_peak_memory,
-                "backward_start_memory": self.backward_start_memory,
-                "backward_end_memory": self.backward_end_memory,
-                "backward_peak_memory": self.backward_peak_memory,
-            }, self.data_path)
+            torch.save(
+                {
+                    "forward_start_memory": self.forward_start_memory,
+                    "forward_end_memory": self.forward_end_memory,
+                    "forward_peak_memory": self.forward_peak_memory,
+                    "backward_start_memory": self.backward_start_memory,
+                    "backward_end_memory": self.backward_end_memory,
+                    "backward_peak_memory": self.backward_peak_memory,
+                },
+                self.data_path,
+            )
 
         return results
 
@@ -436,7 +428,6 @@ class LayerWiseMemoryProfiler(BaseProfiler):
 
 
 class LayerWiseFPCUDATimeProfiler(BaseProfiler):
-
     def __init__(
         self,
         models: Tuple[nn.Module],
@@ -444,7 +435,7 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         search_mode: Tuple[str] = ("direct_children",),
         instances: Tuple[nn.Module] = (nn.Module,),
         warmup: int = 10,
-        log_path='layer_time_fp.prof.txt',
+        log_path="layer_time_fp.prof.txt",
     ):
         super().__init__(models)
 
@@ -453,18 +444,14 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         if not isinstance(model_names, (tuple, list)):
             raise ValueError("model_names should be a tuple of strings")
         if len(model_names) != len(models):
-            raise ValueError(
-                "model_names should have the same length as models"
-            )
+            raise ValueError("model_names should have the same length as models")
 
         if isinstance(search_mode, str):
             search_mode = (search_mode,)
         elif not isinstance(search_mode, tuple):
             search_mode = tuple(search_mode)
         if len(search_mode) != len(self.models):
-            raise ValueError(
-                "search_mode should have the same length as models"
-            )
+            raise ValueError("search_mode should have the same length as models")
 
         if isinstance(instances, nn.Module):
             instances = (instances,)
@@ -484,7 +471,6 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
         self.hooks = []
 
         def pre_hook_generator(name):
-
             def pre_hook(module, input):
                 start_event = torch.cuda.Event(enable_timing=True)
                 # make sure that previous modules have been FPed
@@ -495,7 +481,6 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
             return pre_hook
 
         def post_hook_generator(name):
-
             def post_hook(module, input, output):
                 end_event = torch.cuda.Event(enable_timing=True)
                 end_event.record()
@@ -523,19 +508,15 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
                 if isinstance(m, instances):
                     mname = f"{model_names[i]}'s {name}"
                     self.module_obj[mname] = m
-                    pre_handle = m.register_forward_pre_hook(
-                        pre_hook_generator(mname)
-                    )
-                    post_handle = m.register_forward_hook(
-                        post_hook_generator(mname)
-                    )
+                    pre_handle = m.register_forward_pre_hook(pre_hook_generator(mname))
+                    post_handle = m.register_forward_hook(post_hook_generator(mname))
                     self.start_events[mname] = None
                     self.hooks += [pre_handle, post_handle]
 
     def export(self, output: bool = True, *args, **kwargs):
         table = []
         for name in self.result.keys():
-            forward_time = self.result[name][self.warmup:]
+            forward_time = self.result[name][self.warmup :]
             avg_t = sum(forward_time) / len(forward_time)
             table.append((name, avg_t))
 
@@ -563,7 +544,6 @@ class LayerWiseFPCUDATimeProfiler(BaseProfiler):
 
 
 class LayerWiseBPCUDATimeProfiler(BaseProfiler):
-
     def __init__(
         self,
         models: Tuple[nn.Module],
@@ -571,7 +551,7 @@ class LayerWiseBPCUDATimeProfiler(BaseProfiler):
         search_mode: Tuple[str] = ("direct_children",),
         instances: Tuple[nn.Module] = (nn.Module,),
         warmup: int = 10,
-        log_path='layer_time_bp.prof.txt',
+        log_path="layer_time_bp.prof.txt",
     ):
         super().__init__(models)
 
@@ -580,18 +560,14 @@ class LayerWiseBPCUDATimeProfiler(BaseProfiler):
         if not isinstance(model_names, (tuple, list)):
             raise ValueError("model_names should be a tuple of strings")
         if len(model_names) != len(models):
-            raise ValueError(
-                "model_names should have the same length as models"
-            )
+            raise ValueError("model_names should have the same length as models")
 
         if isinstance(search_mode, str):
             search_mode = (search_mode,)
         elif not isinstance(search_mode, tuple):
             search_mode = tuple(search_mode)
         if len(search_mode) != len(self.models):
-            raise ValueError(
-                "search_mode should have the same length as models"
-            )
+            raise ValueError("search_mode should have the same length as models")
 
         if isinstance(instances, nn.Module):
             instances = (instances,)
@@ -610,7 +586,6 @@ class LayerWiseBPCUDATimeProfiler(BaseProfiler):
         self.hooks = []
 
         def bp_pre_hook_generator(name):
-
             def pre_hook(module, grad_input):
                 start_event = torch.cuda.Event(enable_timing=True)
                 torch.cuda.synchronize()
@@ -620,7 +595,6 @@ class LayerWiseBPCUDATimeProfiler(BaseProfiler):
             return pre_hook
 
         def bp_post_hook_generator(name):
-
             def post_hook(module, grad_input, grad_output):
                 end_event = torch.cuda.Event(enable_timing=True)
                 end_event.record()
@@ -659,7 +633,7 @@ class LayerWiseBPCUDATimeProfiler(BaseProfiler):
     def export(self, output: bool = True):
         table = []
         for name in self.result.keys():
-            bp_times = self.result[name][self.warmup:]
+            bp_times = self.result[name][self.warmup :]
             avg_t = sum(bp_times) / len(bp_times)
             table.append((name, avg_t))
 
@@ -687,7 +661,6 @@ class LayerWiseBPCUDATimeProfiler(BaseProfiler):
 
 
 class ProfilerList(list):
-
     def __init__(self, *args):
         super().__init__()
         for e in args:

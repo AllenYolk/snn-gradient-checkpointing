@@ -1,5 +1,5 @@
-"""Modified from Spikformer and QKFormer source code.
-"""
+"""Modified from Spikformer and QKFormer source code."""
+
 import sys
 
 sys.path.append("./src")
@@ -24,7 +24,6 @@ from utils import Lomo
 
 
 class TransformerImageNetLightningModule(ClassificationLightningModule):
-
     def __init__(
         self,
         network: str,
@@ -64,10 +63,8 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
         )
 
     def configure_criterion(self):
-        if self.hparams.smoothing > 0.:
-            criterion = LabelSmoothingCrossEntropy(
-                smoothing=self.hparams.smoothing
-            )
+        if self.hparams.smoothing > 0.0:
+            criterion = LabelSmoothingCrossEntropy(smoothing=self.hparams.smoothing)
         else:
             criterion = torch.nn.CrossEntropyLoss()
         print(f"Criterion: {criterion}")
@@ -91,9 +88,7 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
                 f"`LightningCLI.instantiate_classes`."
             )
         else:
-            print(
-                f"{self.batch_per_training_epoch} batches per training epoch."
-            )
+            print(f"{self.batch_per_training_epoch} batches per training epoch.")
         lr_scheduler, total_epochs = create_scheduler_v2(
             optimizer,
             sched="cosine",
@@ -103,7 +98,7 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
             warmup_lr=1e-6,
             cooldown_epochs=10,
             step_on_epochs=False,
-            updates_per_epoch=self.batch_per_training_epoch
+            updates_per_epoch=self.batch_per_training_epoch,
         )
         if self.trainer.max_epochs != total_epochs:
             print(
@@ -112,11 +107,16 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
             )
             self.trainer.fit_loop.max_epochs = total_epochs
 
-        return ([optimizer], [{
-            "scheduler": lr_scheduler,
-            "interval": "step",
-            "frequency": 1,
-        }])
+        return (
+            [optimizer],
+            [
+                {
+                    "scheduler": lr_scheduler,
+                    "interval": "step",
+                    "frequency": 1,
+                }
+            ],
+        )
 
     def lr_scheduler_step(self, scheduler, metric):
         """timm's scheduler is not a subclass of torch's scheduler.
@@ -126,9 +126,8 @@ class TransformerImageNetLightningModule(ClassificationLightningModule):
 
 
 class CustomLightningCLI(LightningCLI):
-
     def instantiate_classes(self) -> None:
-        """Assign LightningModule.batch_per_training_epoch 
+        """Assign LightningModule.batch_per_training_epoch
         once LightningModule is instantiated.
         """
         self.config_init = self.parser.instantiate_classes(self.config)
@@ -148,14 +147,11 @@ def main():
         trainer_defaults={
             "logger": {
                 "class_path": "CSVLogger",
-                "init_args": {
-                    "save_dir": "./logs",
-                    "name": "ImageNet-transformer"
-                }
+                "init_args": {"save_dir": "./logs", "name": "ImageNet-transformer"},
             },
             "enable_model_summary": False,
             "enable_checkpointing": False,
-        }
+        },
     )
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
@@ -163,7 +159,7 @@ def main():
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
+            mode="max",
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),
         SamplePerSecondCallback(),
@@ -174,5 +170,5 @@ def main():
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

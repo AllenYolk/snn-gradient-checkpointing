@@ -22,7 +22,6 @@ class SeqToANNContainer(layer.SeqToANNContainer):
 
 
 class Conv3x3(nn.Module):
-
     def __init__(self, in_channels, out_channels, neuron_type, **kwargs):
         super().__init__()
         self.conv = SeqToANNContainer(
@@ -32,7 +31,7 @@ class Conv3x3(nn.Module):
                 kernel_size=3,
                 stride=1,
                 padding=1,
-                bias=False
+                bias=False,
             )
         )
         self.bn_neuron = nn.Sequential(
@@ -48,13 +47,10 @@ class Conv3x3(nn.Module):
 
 
 class Conv1x1(nn.Module):
-
     def __init__(self, in_channels, out_channels, neuron_type, **kwargs):
         super().__init__()
         self.conv = SeqToANNContainer(
-            nn.Conv2d(
-                in_channels, out_channels, kernel_size=1, stride=1, bias=False
-            ),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, bias=False),
         )
         self.bn_neuron = nn.Sequential(
             SeqToANNContainer(BatchNorm2d_(out_channels)),
@@ -69,7 +65,6 @@ class Conv1x1(nn.Module):
 
 
 class SEWBlock(nn.Module):
-
     def __init__(self, in_channels, mid_channels, neuron_type, **kwargs):
         super().__init__()
         self.conv = nn.Sequential(
@@ -85,51 +80,42 @@ class SEWBlock(nn.Module):
 
 
 class ResNetN(nn.Module):
-
     def __init__(self, layer_list, num_classes, neuron_type, **kwargs):
         super().__init__()
         in_channels = 2
         conv = []
 
         for cfg_dict in layer_list:
-            channels = cfg_dict['channels']
+            channels = cfg_dict["channels"]
 
-            if 'mid_channels' in cfg_dict:
-                mid_channels = cfg_dict['mid_channels']
+            if "mid_channels" in cfg_dict:
+                mid_channels = cfg_dict["mid_channels"]
             else:
                 mid_channels = channels
 
             if in_channels != channels:
-                if cfg_dict['up_kernel_size'] == 3:
-                    conv.append(
-                        Conv3x3(in_channels, channels, neuron_type, **kwargs)
-                    )
-                elif cfg_dict['up_kernel_size'] == 1:
-                    conv.append(
-                        Conv1x1(in_channels, channels, neuron_type, **kwargs)
-                    )
+                if cfg_dict["up_kernel_size"] == 3:
+                    conv.append(Conv3x3(in_channels, channels, neuron_type, **kwargs))
+                elif cfg_dict["up_kernel_size"] == 1:
+                    conv.append(Conv1x1(in_channels, channels, neuron_type, **kwargs))
                 else:
                     raise NotImplementedError
 
             in_channels = channels
 
-            if 'num_blocks' in cfg_dict:
-                num_blocks = cfg_dict['num_blocks']
-                if cfg_dict['block_type'] == 'sew':
+            if "num_blocks" in cfg_dict:
+                num_blocks = cfg_dict["num_blocks"]
+                if cfg_dict["block_type"] == "sew":
                     for _ in range(num_blocks):
                         conv.append(
-                            SEWBlock(
-                                in_channels, mid_channels, neuron_type, **kwargs
-                            )
+                            SEWBlock(in_channels, mid_channels, neuron_type, **kwargs)
                         )
                 else:
                     raise NotImplementedError
 
-            if 'k_pool' in cfg_dict:
-                k_pool = cfg_dict['k_pool']
-                conv.append(
-                    layer.SeqToANNContainer(nn.MaxPool2d(k_pool, k_pool))
-                )
+            if "k_pool" in cfg_dict:
+                k_pool = cfg_dict["k_pool"]
+                conv.append(layer.SeqToANNContainer(nn.MaxPool2d(k_pool, k_pool)))
 
         conv.append(nn.Flatten(2))
 
@@ -155,60 +141,60 @@ class ResNetN(nn.Module):
 def SEWResNet(neuron_type, **kwargs):
     layer_list = [
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
         {
-            'channels': 32,
-            'up_kernel_size': 1,
-            'mid_channels': 32,
-            'num_blocks': 1,
-            'block_type': 'sew',
-            'k_pool': 2
+            "channels": 32,
+            "up_kernel_size": 1,
+            "mid_channels": 32,
+            "num_blocks": 1,
+            "block_type": "sew",
+            "k_pool": 2,
         },
     ]
     num_classes = 11

@@ -1,5 +1,5 @@
-"""Modified from SEW ResNet source code.
-"""
+"""Modified from SEW ResNet source code."""
+
 import sys
 
 sys.path.append("./src")
@@ -21,7 +21,6 @@ from utils import TETLoss, TMeanCrossEntropyLoss, Lomo
 
 
 class SEWImageNetLightningModule(ClassificationLightningModule):
-
     def __init__(
         self,
         neuron_type: str,
@@ -61,9 +60,7 @@ class SEWImageNetLightningModule(ClassificationLightningModule):
         if self.hparams.loss == "ce":
             return TMeanCrossEntropyLoss()
         elif self.hparams.loss == "tet":
-            return TETLoss(
-                base_criterion=torch.nn.CrossEntropyLoss(), tet_lambda=0.
-            )
+            return TETLoss(base_criterion=torch.nn.CrossEntropyLoss(), tet_lambda=0.0)
         else:
             raise ValueError(f"`loss` should be either 'ce' or 'tet'")
 
@@ -91,14 +88,11 @@ def main():
         trainer_defaults={
             "logger": {
                 "class_path": "CSVLogger",
-                "init_args": {
-                    "save_dir": "./logs",
-                    "name": "ImageNet-sew"
-                }
+                "init_args": {"save_dir": "./logs", "name": "ImageNet-sew"},
             },
             "enable_model_summary": False,
             "enable_checkpointing": False,
-        }
+        },
     )
     cli.trainer.callbacks += [
         callbacks.ModelSummary(max_depth=-1),
@@ -106,7 +100,7 @@ def main():
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
+            mode="max",
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),
         SamplePerSecondCallback(),
@@ -117,5 +111,5 @@ def main():
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -15,7 +15,6 @@ CIFAR100_STD = (0.2675, 0.2565, 0.2761)
 
 
 class SequentialCIFARClassificationPresetTrain:
-
     def __init__(
         self,
         mean=CIFAR10_MEAN,
@@ -30,9 +29,7 @@ class SequentialCIFARClassificationPresetTrain:
             trans.append(transforms.RandomHorizontalFlip(hflip_prob))
         if auto_augment_policy is not None:
             if auto_augment_policy == "ra":
-                trans.append(
-                    autoaugment.RandAugment(interpolation=interpolation)
-                )
+                trans.append(autoaugment.RandAugment(interpolation=interpolation))
             elif auto_augment_policy == "ta_wide":
                 trans.append(
                     autoaugment.TrivialAugmentWide(interpolation=interpolation)
@@ -44,11 +41,13 @@ class SequentialCIFARClassificationPresetTrain:
                         policy=aa_policy, interpolation=interpolation
                     )
                 )
-        trans.extend([
-            transforms.PILToTensor(),
-            transforms.ConvertImageDtype(torch.float),
-            transforms.Normalize(mean=mean, std=std),
-        ])
+        trans.extend(
+            [
+                transforms.PILToTensor(),
+                transforms.ConvertImageDtype(torch.float),
+                transforms.Normalize(mean=mean, std=std),
+            ]
+        )
         if random_erase_prob > 0:
             trans.append(transforms.RandomErasing(p=random_erase_prob))
 
@@ -59,13 +58,12 @@ class SequentialCIFARClassificationPresetTrain:
 
 
 class SCIFARDataModule(L.LightningDataModule):
-
     def __init__(
         self,
         data_dir: str,
         num_classes: int = 10,
         batch_size: int = 128,
-        num_workers: int = 4
+        num_workers: int = 4,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -89,33 +87,29 @@ class SCIFARDataModule(L.LightningDataModule):
     def setup(self, stage: str):
         mixup_transforms = []
         mixup_transforms.append(RandomMixup(self.num_classes, p=1.0, alpha=0.2))
-        mixup_transforms.append(RandomCutmix(self.num_classes, p=1.0, alpha=1.))
+        mixup_transforms.append(RandomCutmix(self.num_classes, p=1.0, alpha=1.0))
         mixupcutmix = transforms.RandomChoice(mixup_transforms)
         self.collate_fn = lambda batch: mixupcutmix(*default_collate(batch))
 
         transform_train = SequentialCIFARClassificationPresetTrain(
             mean=self.mu,
             std=self.sigma,
-            interpolation=InterpolationMode('bilinear'),
-            auto_augment_policy='ta_wide',
-            random_erase_prob=0.1
+            interpolation=InterpolationMode("bilinear"),
+            auto_augment_policy="ta_wide",
+            random_erase_prob=0.1,
         )
-        transform_test = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(self.mu, self.sigma),
-        ])
+        transform_test = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(self.mu, self.sigma),
+            ]
+        )
 
         self.train_set = self.ds_class(
-            root=self.data_dir,
-            train=True,
-            download=True,
-            transform=transform_train
+            root=self.data_dir, train=True, download=True, transform=transform_train
         )
         self.test_set = self.ds_class(
-            root=self.data_dir,
-            train=False,
-            download=True,
-            transform=transform_test
+            root=self.data_dir, train=False, download=True, transform=transform_test
         )
 
     def train_dataloader(self):

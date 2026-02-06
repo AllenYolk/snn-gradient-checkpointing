@@ -1,5 +1,5 @@
-"""Lossless spike compression tools.
-"""
+"""Lossless spike compression tools."""
+
 import abc
 import torch
 
@@ -13,7 +13,6 @@ def get_spike_compressor(spike_compressor: str):
 
 
 class BaseSpikeCompressor(abc.ABC):
-
     def __init__(self):
         pass
 
@@ -36,14 +35,15 @@ class BaseSpikeCompressor(abc.ABC):
 
 class NullSpikeCompressor(BaseSpikeCompressor):
     """Similar to IdentitySpikeCompressor, but the decompressed tensor must have
-    the same dtype as the original one. 
-    
-    NullSpikeCompressor is used for dealing with non-binary tensors. It is the 
-    only "spike compressor" module that can deal with non-binary tensors 
-    losslessly (actually, we shouldn't call is a "spike" compressor). For 
-    instance, the input layer should always use NullSpikeCompressor, as its 
+    the same dtype as the original one.
+
+    NullSpikeCompressor is used for dealing with non-binary tensors. It is the
+    only "spike compressor" module that can deal with non-binary tensors
+    losslessly (actually, we shouldn't call is a "spike" compressor). For
+    instance, the input layer should always use NullSpikeCompressor, as its
     input is a float tensor rather than a spike tensor.
     """
+
     requires_strictly_binary = False
 
     def __init__(self):
@@ -58,12 +58,13 @@ class NullSpikeCompressor(BaseSpikeCompressor):
 
 class IdentitySpikeCompressor(BaseSpikeCompressor):
     """Similar to NullSpikeCompressor, but the decompressed tensor might have
-    a dtype that is different from the original tensor. 
-    
-    IdentitySpikeCompressor is more memory-efficient than NullSpikeCompressor 
+    a dtype that is different from the original tensor.
+
+    IdentitySpikeCompressor is more memory-efficient than NullSpikeCompressor
     if amp is enabled, as it decompresses the tensor to low-precision float even
     if the original tensor is with float32 dtype.
     """
+
     requires_strictly_binary = False
 
     def __init__(self):
@@ -79,7 +80,6 @@ class IdentitySpikeCompressor(BaseSpikeCompressor):
 
 
 class BooleanSpikeCompressor(BaseSpikeCompressor):
-
     requires_strictly_binary = True
 
     def __init__(self):
@@ -95,7 +95,6 @@ class BooleanSpikeCompressor(BaseSpikeCompressor):
 
 
 class Uint8SpikeCompressor(BaseSpikeCompressor):
-
     requires_strictly_binary = False
 
     def __init__(self):
@@ -111,7 +110,6 @@ class Uint8SpikeCompressor(BaseSpikeCompressor):
 
 
 class BitSpikeCompressor(BaseSpikeCompressor):
-
     requires_strictly_binary = True
 
     def __init__(self):
@@ -130,14 +128,12 @@ class BitSpikeCompressor(BaseSpikeCompressor):
 
 
 class NvcompSpikeCompressor(BaseSpikeCompressor):
-
     requires_strictly_binary = False
 
     def __init__(self):
         super().__init__()
         self.codec = NvcompCompressor(
-            algorithm=DEFAULT_NVCOMP_CODEC_ALGORITHM,
-            compressed_dtype=torch.uint8
+            algorithm=DEFAULT_NVCOMP_CODEC_ALGORITHM, compressed_dtype=torch.uint8
         )
 
     def _compress(self, s_seq: torch.Tensor):
@@ -158,14 +154,12 @@ class NvcompSpikeCompressor(BaseSpikeCompressor):
 
 
 class BitNvcompSpikeCompressor(BaseSpikeCompressor):
-
     requires_strictly_binary = True
 
     def __init__(self):
         super().__init__()
         self.codec = NvcompCompressor(
-            algorithm=DEFAULT_NVCOMP_CODEC_ALGORITHM,
-            compressed_dtype=torch.uint8
+            algorithm=DEFAULT_NVCOMP_CODEC_ALGORITHM, compressed_dtype=torch.uint8
         )
 
     def _compress(self, s_seq: torch.Tensor):
@@ -174,9 +168,10 @@ class BitNvcompSpikeCompressor(BaseSpikeCompressor):
         return s_seq_compressed
 
     def _decompress(self, s_seq, shape) -> torch.Tensor:
-        s_seq = self.codec.decompress(
-            s_seq, target_shape=(-1,), target_dtype=torch.uint8
-        ) + 0  #? An error occurs if s_seq is directly handled by triton. `+0` is a workaround.
+        s_seq = (
+            self.codec.decompress(s_seq, target_shape=(-1,), target_dtype=torch.uint8)
+            + 0
+        )  # ? An error occurs if s_seq is directly handled by triton. `+0` is a workaround.
         s_seq_decompressed = bit_spike_decompress(s_seq, shape)
 
         ac = is_autocast_enabled()
@@ -185,7 +180,6 @@ class BitNvcompSpikeCompressor(BaseSpikeCompressor):
 
 
 class SparseSpikeCompressor(BaseSpikeCompressor):
-
     requires_strictly_binary = True
 
     def __init__(self, dtype=torch.int64):

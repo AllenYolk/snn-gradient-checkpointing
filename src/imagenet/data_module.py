@@ -1,24 +1,53 @@
 from pathlib import Path
 import PIL
 import time
+import os
+import errno
 import sys
-
-sys.path.append("./src")
 
 import hashlib
 import lightning as L
 import torch
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import Subset
+import torch.distributed as dist
 from torchvision import datasets
 import torchvision.transforms as transforms
 from timm.data import create_transform
 
-from utils import save_on_master, mkdir
+
+def mkdir(path):
+    try:
+        os.makedirs(path)
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
+
+def is_main_process():
+    return get_rank() == 0
+
+
+def save_on_master(*args, **kwargs):
+    if is_main_process():
+        torch.save(*args, **kwargs)
 
 
 class ImageNetDataModule(L.LightningDataModule):
-
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
@@ -29,7 +58,7 @@ class ImageNetDataModule(L.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         for_model: str = "transformer",
-        dummy: bool = False
+        dummy: bool = False,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -68,7 +97,7 @@ class ImageNetDataModule(L.LightningDataModule):
                     input_size=224,
                     is_training=True,
                     auto_augment="rand-m9-mstd0.5-inc1",
-                    interpolation='bicubic',
+                    interpolation="bicubic",
                     re_prob=0.25,
                     re_mode="pixel",
                     re_count=1,
@@ -77,32 +106,32 @@ class ImageNetDataModule(L.LightningDataModule):
                 )
             else:
                 t = []
-                t.append(
-                    transforms.Resize(256, interpolation=PIL.Image.BICUBIC)
-                )
+                t.append(transforms.Resize(256, interpolation=PIL.Image.BICUBIC))
                 t.append(transforms.CenterCrop(224))
                 t.append(transforms.ToTensor())
                 t.append(normalize)
                 return transforms.Compose(t)
         elif for_model == "sew":
             if is_train:
-                return transforms.Compose([
-                    transforms.RandomResizedCrop(224),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
+                return transforms.Compose(
+                    [
+                        transforms.RandomResizedCrop(224),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.ToTensor(),
+                        normalize,
+                    ]
+                )
             else:
-                return transforms.Compose([
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
+                return transforms.Compose(
+                    [
+                        transforms.Resize(256),
+                        transforms.CenterCrop(224),
+                        transforms.ToTensor(),
+                        normalize,
+                    ]
+                )
         else:
-            raise ValueError(
-                f"`for_model` must be either 'transformer' or 'sew'"
-            )
+            raise ValueError(f"`for_model` must be either 'transformer' or 'sew'")
 
     @staticmethod
     def _load_dataset(dir, cache_dataset, is_train, for_model):
@@ -114,10 +143,7 @@ class ImageNetDataModule(L.LightningDataModule):
             ds, _ = torch.load(cache_path)
         else:
             ds = datasets.ImageFolder(
-                dir,
-                transform=ImageNetDataModule._build_transform(
-                    is_train, for_model
-                )
+                dir, transform=ImageNetDataModule._build_transform(is_train, for_model)
             )
             if cache_dataset:
                 print(f"Saving dataset_train to {cache_path}")
@@ -163,7 +189,7 @@ class ImageNetDataModule(L.LightningDataModule):
             sampler=train_sampler,
             num_workers=self.num_workers,
             pin_memory=True,
-            drop_last=(self.for_model == "transformer")
+            drop_last=(self.for_model == "transformer"),
         )
 
     def val_dataloader(self):
@@ -174,7 +200,7 @@ class ImageNetDataModule(L.LightningDataModule):
             sampler=val_sampler,
             num_workers=self.num_workers,
             pin_memory=True,
-            drop_last=False
+            drop_last=False,
         )
 
     def test_dataloader(self):

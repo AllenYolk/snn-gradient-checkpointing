@@ -9,13 +9,8 @@ from spikingjelly.datasets.dvs128_gesture import DVS128Gesture
 
 
 class DVSGestureDataModule(L.LightningDataModule):
-
     def __init__(
-        self,
-        data_dir: str,
-        T: int,
-        batch_size: int = 128,
-        num_workers: int = 4
+        self, data_dir: str, T: int, batch_size: int = 128, num_workers: int = 4
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -27,32 +22,32 @@ class DVSGestureDataModule(L.LightningDataModule):
         DVS128Gesture(
             root=self.data_dir,
             train=True,
-            data_type='frame',
+            data_type="frame",
             frames_number=self.T,
-            split_by='number'
+            split_by="number",
         )
         DVS128Gesture(
             root=self.data_dir,
             train=False,
-            data_type='frame',
+            data_type="frame",
             frames_number=self.T,
-            split_by='number'
+            split_by="number",
         )
 
     def setup(self, stage: str):
         self.train_set = DVS128Gesture(
             root=self.data_dir,
             train=True,
-            data_type='frame',
+            data_type="frame",
             frames_number=self.T,
-            split_by='number'
+            split_by="number",
         )
         self.test_set = DVS128Gesture(
             root=self.data_dir,
             train=False,
-            data_type='frame',
+            data_type="frame",
             frames_number=self.T,
-            split_by='number'
+            split_by="number",
         )
 
     def train_dataloader(self):

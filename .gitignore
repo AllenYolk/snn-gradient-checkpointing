@@ -147,6 +147,7 @@ logs*/
 imgs/
 
 **/*.prof
+uv.lock
 
 spikformer*/
 QKFormer*/

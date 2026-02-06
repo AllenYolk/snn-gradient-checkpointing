@@ -19,10 +19,10 @@ class GlobalMeanBatchTimeCallback(callbacks.Callback):
         super().__init__()
         # all local: results on a single GPU
         self.local_train_batch_start_time = 0
-        self.local_total_train_batch_duration = 0.
+        self.local_total_train_batch_duration = 0.0
         self.local_n_train_batch = 0
         self.local_val_batch_start_time = 0
-        self.local_total_val_batch_duration = 0.
+        self.local_total_val_batch_duration = 0.0
         self.local_n_val_batch = 0
         self.reset_per_epoch = reset_per_epoch
 
@@ -40,10 +40,7 @@ class GlobalMeanBatchTimeCallback(callbacks.Callback):
         if dist.is_available() and dist.is_initialized():
             # synchronize across all processes (all GPUs)
             total_duration_tensor = torch.tensor(
-                [
-                    self.local_total_train_batch_duration,
-                    self.local_n_train_batch
-                ],
+                [self.local_total_train_batch_duration, self.local_n_train_batch],
                 dtype=torch.float,
                 device=pl_module.device,
             )
@@ -58,7 +55,7 @@ class GlobalMeanBatchTimeCallback(callbacks.Callback):
             te = trainer.max_epochs
             print(
                 f"Epoch {e}/{te}: "
-                f"global_mean_train_batch_time={avg_duration*1000:.2f} ms"
+                f"global_mean_train_batch_time={avg_duration * 1000:.2f} ms"
             )
 
         if self.reset_per_epoch:
@@ -94,7 +91,7 @@ class GlobalMeanBatchTimeCallback(callbacks.Callback):
             te = trainer.max_epochs
             print(
                 f"Epoch {e}/{te}: "
-                f"global_mean_val_batch_time={avg_duration*1000:.2f} ms"
+                f"global_mean_val_batch_time={avg_duration * 1000:.2f} ms"
             )
 
         if self.reset_per_epoch:
@@ -102,28 +99,19 @@ class GlobalMeanBatchTimeCallback(callbacks.Callback):
             self.local_n_val_batch = 0
 
     def load_state_dict(self, sd):
-        self.local_total_train_batch_duration = (
-            sd["local_total_train_batch_duration"]
-        )
+        self.local_total_train_batch_duration = sd["local_total_train_batch_duration"]
         self.local_n_train_batch = sd["local_n_train_batch"]
-        self.local_total_val_batch_duration = (
-            sd["local_total_val_batch_duration"]
-        )
+        self.local_total_val_batch_duration = sd["local_total_val_batch_duration"]
         self.local_n_val_batch = sd["local_n_val_batch"]
         self.reset_per_epoch = sd["reset_per_epoch"]
 
     def state_dict(self):
         return {
-            "local_total_val_batch_duration":
-                self.local_total_val_batch_duration,
-            "local_n_val_batch":
-                self.local_n_val_batch,
-            "local_total_train_batch_duration":
-                self.local_total_train_batch_duration,
-            "local_n_train_batch":
-                self.local_n_train_batch,
-            "reset_per_epoch":
-                self.reset_per_epoch,
+            "local_total_val_batch_duration": self.local_total_val_batch_duration,
+            "local_n_val_batch": self.local_n_val_batch,
+            "local_total_train_batch_duration": self.local_total_train_batch_duration,
+            "local_n_train_batch": self.local_n_train_batch,
+            "reset_per_epoch": self.reset_per_epoch,
         }
 
 
@@ -153,9 +141,7 @@ class SamplePerSecondCallback(callbacks.Callback):
         self.local_n_train_samples = 0
         self.local_train_epoch_start_time = time.time()
 
-    def on_train_batch_end(
-        self, trainer, pl_module, outputs, batch, *args, **kwargs
-    ):
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, *args, **kwargs):
         if self.batch_size is None:
             self.local_n_train_samples += batch[1].shape[0]  # batch size
         else:
@@ -183,10 +169,7 @@ class SamplePerSecondCallback(callbacks.Callback):
         if trainer.is_global_zero:
             e = pl_module.current_epoch
             te = trainer.max_epochs
-            print(
-                f"Epoch {e}/{te}: "
-                f"train_samples_per_second={sps:.2f} samples/s"
-            )
+            print(f"Epoch {e}/{te}: train_samples_per_second={sps:.2f} samples/s")
 
     def on_validation_epoch_start(self, *args, **kwargs):
         self.local_n_val_samples = 0
@@ -221,10 +204,7 @@ class SamplePerSecondCallback(callbacks.Callback):
         if trainer.is_global_zero:
             e = pl_module.current_epoch
             te = trainer.max_epochs
-            print(
-                f"Epoch {e}/{te}: "
-                f"val_samples_per_second={sps:.2f} samples/s"
-            )
+            print(f"Epoch {e}/{te}: val_samples_per_second={sps:.2f} samples/s")
 
     def load_state_dict(self, sd):
         self.local_n_train_samples = sd["local_n_train_samples"]
@@ -240,7 +220,6 @@ class SamplePerSecondCallback(callbacks.Callback):
 
 
 class PeakMemoryTillNowCallback(callbacks.Callback):
-
     def on_fit_start(self, trainer, pl_module):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -280,5 +259,5 @@ class PeakMemoryTillNowCallback(callbacks.Callback):
                     f"Epoch {e}/{te}: "
                     f"peak_allocated={peak_allocated} MB, "
                     f"peak_reserved={peak_reserved} MB",
-                    flush=True
+                    flush=True,
                 )

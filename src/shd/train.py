@@ -18,7 +18,6 @@ from data_module import SHDDataModule
 
 
 class SHDLightningModule(ClassificationLightningModule):
-
     def __init__(
         self,
         network: str,
@@ -61,21 +60,13 @@ class SHDLightningModule(ClassificationLightningModule):
                 base_params.append(param)
         optimizer = torch.optim.Adam(
             [
-                {
-                    'params': base_params,
-                    'lr': learning_rate
-                },
-                {
-                    'params': other_params,
-                    'lr': learning_rate * 2
-                },
+                {"params": base_params, "lr": learning_rate},
+                {"params": other_params, "lr": learning_rate * 2},
             ],
             lr=learning_rate,
         )
 
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=20, gamma=.5
-        )
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
         return ([optimizer], [scheduler])
 
 
@@ -87,14 +78,11 @@ def main():
         trainer_defaults={
             "logger": {
                 "class_path": "CSVLogger",
-                "init_args": {
-                    "save_dir": "./logs",
-                    "name": "SHD"
-                }
+                "init_args": {"save_dir": "./logs", "name": "SHD"},
             },
             "enable_model_summary": False,
             "enable_checkpointing": False,
-        }
+        },
     )
     assert cli.model.hparams.T * cli.datamodule.dt == 1000
     cli.trainer.callbacks += [
@@ -103,7 +91,7 @@ def main():
             filename="best-{epoch}-{train_acc:.4f}-{val_acc:.4f}",
             save_top_k=1,
             monitor="val_acc",
-            mode="max"
+            mode="max",
         ),
         GlobalMeanBatchTimeCallback(reset_per_epoch=True),
         SamplePerSecondCallback(),
@@ -114,5 +102,5 @@ def main():
     cli.trainer.fit(cli.model, datamodule=cli.datamodule)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

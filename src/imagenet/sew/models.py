@@ -9,7 +9,6 @@ from spikingjelly.activation_based import layer
 from modules.neuron import get_neuron
 from modules.checkpointing import memory_optimization
 from modules.bn import BatchNorm2d_
-from modules.merge_split import RepeatT
 
 
 class SeqToANNContainer(layer.SeqToANNContainer):
@@ -23,7 +22,6 @@ class SeqToANNContainer(layer.SeqToANNContainer):
 
 
 class Conv3x3(nn.Module):
-
     def __init__(
         self,
         in_channels,
@@ -32,7 +30,7 @@ class Conv3x3(nn.Module):
         groups=1,
         dilation=1,
         neuron_type="SJLIF",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.conv = SeqToANNContainer(
@@ -44,7 +42,7 @@ class Conv3x3(nn.Module):
                 padding=dilation,
                 groups=groups,
                 dilation=dilation,
-                bias=False
+                bias=False,
             )
         )
         self.bn_neuron = nn.Sequential(
@@ -60,23 +58,13 @@ class Conv3x3(nn.Module):
 
 
 class Conv1x1(nn.Module):
-
     def __init__(
-        self,
-        in_channels,
-        out_channels,
-        stride=1,
-        neuron_type="SJLIF",
-        **kwargs
+        self, in_channels, out_channels, stride=1, neuron_type="SJLIF", **kwargs
     ):
         super().__init__()
         self.conv = SeqToANNContainer(
             nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=1,
-                stride=stride,
-                bias=False
+                in_channels, out_channels, kernel_size=1, stride=stride, bias=False
             ),
         )
         self.bn_neuron = nn.Sequential(
@@ -104,17 +92,15 @@ class BasicBlock(nn.Module):
         groups=1,
         base_width=64,
         dilation=1,
-        **kwargs  # neuronal parameters
+        **kwargs,  # neuronal parameters
     ):
         super().__init__()
         if groups != 1 or base_width != 64:
             raise ValueError(
-                'SpikingBasicBlock only supports groups=1 and base_width=64'
+                "SpikingBasicBlock only supports groups=1 and base_width=64"
             )
         if dilation > 1:
-            raise NotImplementedError(
-                "Dilation > 1 not supported in SpikingBasicBlock"
-            )
+            raise NotImplementedError("Dilation > 1 not supported in SpikingBasicBlock")
         self.stride = stride
 
         self.conv1 = Conv3x3(
@@ -150,20 +136,12 @@ class Bottleneck(nn.Module):
     ):
         super().__init__()
         self.stride = stride
-        width = int(planes * (base_width/64.)) * groups
+        width = int(planes * (base_width / 64.0)) * groups
         self.width = width
 
-        self.conv1 = Conv1x1(
-            in_planes, width, neuron_type=neuron_type, **kwargs
-        )
+        self.conv1 = Conv1x1(in_planes, width, neuron_type=neuron_type, **kwargs)
         self.conv2 = Conv3x3(
-            width,
-            width,
-            stride,
-            groups,
-            dilation,
-            neuron_type=neuron_type,
-            **kwargs
+            width, width, stride, groups, dilation, neuron_type=neuron_type, **kwargs
         )
         self.conv3 = Conv1x1(
             width, planes * self.expansion, neuron_type=neuron_type, **kwargs
@@ -188,8 +166,19 @@ def _zero_init_blocks(net: nn.Module):
             nn.init.constant_(m.conv2.bn_neuron.module[0].weight, 0)
 
 
-class PreConv(nn.Module):
+class RepeatT(nn.Module):
+    def __init__(self, T):
+        super().__init__()
+        self.T = T
 
+    def forward(self, x):
+        return x.repeat(self.T, *[1 for _ in range(x.ndim)])
+
+    def extra_repr(self):
+        return f"T={self.T}"
+
+
+class PreConv(nn.Module):
     def __init__(self, C_in, planes, T, neuron_type, **kwargs):
         super().__init__()
         self.T = T
@@ -220,7 +209,6 @@ class PreConv(nn.Module):
 
 
 class SEWResNet(nn.Module):
-
     def __init__(
         self,
         neuron_type,
@@ -244,15 +232,12 @@ class SEWResNet(nn.Module):
         if len(replace_stride_with_dilation) != 3:
             raise ValueError(
                 "replace_stride_with_dilation should be None "
-                "or a 3-element tuple, got {}".
-                format(replace_stride_with_dilation)
+                "or a 3-element tuple, got {}".format(replace_stride_with_dilation)
             )
         self.groups = groups
         self.base_width = width_per_group
 
-        self.pre_conv = PreConv(
-            3, self.in_planes, neuron_type=neuron_type, **kwargs
-        )
+        self.pre_conv = PreConv(3, self.in_planes, neuron_type=neuron_type, **kwargs)
 
         self.layer1 = self._make_layer(
             neuron_type,
@@ -294,9 +279,7 @@ class SEWResNet(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(
-                    m.weight, mode='fan_out', nonlinearity='relu'
-                )
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -325,7 +308,7 @@ class SEWResNet(nn.Module):
                 planes * block.expansion,
                 stride,
                 neuron_type=neuron_type,
-                **kwargs
+                **kwargs,
             )
             downsample.x_compressor = "Uint8SpikeCompressor"
 
@@ -353,7 +336,7 @@ class SEWResNet(nn.Module):
                     groups=self.groups,
                     base_width=self.base_width,
                     dilation=self.dilation,
-                    **kwargs
+                    **kwargs,
                 )
             )
 
@@ -374,31 +357,26 @@ class SEWResNet(nn.Module):
 
 
 class SEWResNet18(SEWResNet):
-
     def __init__(self, neuron_type, **kwargs):
         super().__init__(neuron_type, BasicBlock, [2, 2, 2, 2], **kwargs)
 
 
 class SEWResNet34(SEWResNet):
-
     def __init__(self, neuron_type, **kwargs):
         super().__init__(neuron_type, BasicBlock, [3, 4, 6, 3], **kwargs)
 
 
 class SEWResNet50(SEWResNet):
-
     def __init__(self, neuron_type, **kwargs):
         super().__init__(neuron_type, Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
 class SEWResNet101(SEWResNet):
-
     def __init__(self, neuron_type, **kwargs):
         super().__init__(neuron_type, Bottleneck, [3, 4, 23, 3], **kwargs)
 
 
 class SEWResNet152(SEWResNet):
-
     def __init__(self, neuron_type, **kwargs):
         super().__init__(neuron_type, Bottleneck, [3, 8, 36, 3], **kwargs)
 

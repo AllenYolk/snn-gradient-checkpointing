@@ -15,6 +15,7 @@ from .kernels import *
 
 try:
     import cupy
+
     DEFAULT_SJ_BACKEND = "cupy"
 except Exception:
     DEFAULT_SJ_BACKEND = "torch"
@@ -22,22 +23,23 @@ except Exception:
 if mp.current_process().name == "MainProcess":
     print(f"Using {DEFAULT_SJ_BACKEND} backend for spikingjelly by default.")
 
+__all__ = ["get_neuron", "SJLIF", "PTLIF", "PSN", "SlidingPSN", "MELIF"]
+
 
 def get_neuron(neuron_type: str, **kwargs):
     return globals()[neuron_type](**kwargs)
 
 
 @torch.jit.script
-def atan_derivative(x: torch.Tensor, alpha: float = 2.):
+def atan_derivative(x: torch.Tensor, alpha: float = 2.0):
     return alpha / 2 / (1 + (torch.pi / 2 * alpha * x).pow_(2))
 
 
 # TODO: implement Triton kernels
 def lif_rnn_function(
-    x_seq: torch.Tensor, v: torch.Tensor, decay_lambda: float,
-    detach_reset: bool
+    x_seq: torch.Tensor, v: torch.Tensor, decay_lambda: float, detach_reset: bool
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """T-step RNN-like LIF neuron: 
+    """T-step RNN-like LIF neuron:
     s_seq[0...T-1], v[T-1] = lif_rnn(x_seq[0...T-1], v[-1])
 
     Args:
@@ -52,12 +54,12 @@ def lif_rnn_function(
     T = x_seq.shape[0]
     s_seq = torch.empty_like(x_seq)
     for t in range(T):
-        v = decay_lambda*v + x_seq[t]
-        s = surrogate.atan.apply(v - 1., 2.)
+        v = decay_lambda * v + x_seq[t]
+        s = surrogate.atan.apply(v - 1.0, 2.0)
         s_seq[t] = s
         if detach_reset:
             s = s.detach()
-        v = v * (1.-s)
+        v = v * (1.0 - s)
     return s_seq, v
 
 
@@ -76,18 +78,18 @@ class SJLIF(neuron.LIFNode):
         detach_reset: bool = True,
         backend: str = DEFAULT_SJ_BACKEND,
         *args,
-        **kwargs
+        **kwargs,
     ):
-        if decay_lambda < 0. or decay_lambda > 1.:
-            raise ValueError('`decay_lambda` should be in the range [0, 1).')
-        tau = 1. / (1.-decay_lambda)
+        if decay_lambda < 0.0 or decay_lambda > 1.0:
+            raise ValueError("`decay_lambda` should be in the range [0, 1).")
+        tau = 1.0 / (1.0 - decay_lambda)
         self.decay_lambda = decay_lambda
 
         super().__init__(
             tau,
             decay_input=False,
-            v_threshold=1.,
-            v_reset=0.,
+            v_threshold=1.0,
+            v_reset=0.0,
             surrogate_function=surrogate.ATan(),
             detach_reset=detach_reset,
             step_mode="m",
@@ -106,8 +108,8 @@ class SJLIF(neuron.LIFNode):
         return lif_rnn_function(x_seq, v, self.decay_lambda, self.detach_reset)
 
 
-# =========================== Simplified SJLIF ===========================
-class AutogradLIF(nn.Module):
+# ========================= Simplified SJLIF in pure PyTorch ===========================
+class PTLIF(nn.Module):
     """Multi-step LIF neuron with:
     * decay_input=False
     * v_threshold = 1.
@@ -117,16 +119,12 @@ class AutogradLIF(nn.Module):
     """
 
     def __init__(
-        self,
-        decay_lambda: float = 0.5,
-        detach_reset: bool = True,
-        *args,
-        **kwargs
+        self, decay_lambda: float = 0.5, detach_reset: bool = True, *args, **kwargs
     ):
         super().__init__()
-        if decay_lambda < 0. or decay_lambda > 1.:
-            raise ValueError('`decay_lambda` should be in the range [0, 1).')
-        self.tau = 1. / (1.-decay_lambda)
+        if decay_lambda < 0.0 or decay_lambda > 1.0:
+            raise ValueError("`decay_lambda` should be in the range [0, 1).")
+        self.tau = 1.0 / (1.0 - decay_lambda)
         self.decay_lambda = decay_lambda
         self.detach_reset = detach_reset
         self.sg = surrogate.ATan()
@@ -137,11 +135,11 @@ class AutogradLIF(nn.Module):
         s_seq = torch.empty_like(x_seq)
         for t in range(T):
             v = self.decay_lambda * v + x_seq[t]
-            s = self.sg(v - 1.)
+            s = self.sg(v - 1.0)
             s_seq[t] = s
             if self.detach_reset:
                 s = s.detach()
-            v = v * (1.-s)
+            v = v * (1.0 - s)
         return s_seq
 
     def __tc_init_states__(self, x_seq):
@@ -167,7 +165,7 @@ class PSN(neuron.PSN):
     def forward_function(x_seq, weight, bias):
         # x_seq.shape = [T, N, ...]; weight.shape = [T, T]; bias.shape = [T, 1]
         h_seq = torch.addmm(bias, weight, x_seq.flatten(1))
-        s_seq = surrogate.atan.apply(h_seq, 2.)
+        s_seq = surrogate.atan.apply(h_seq, 2.0)
         return s_seq.reshape(x_seq.shape)
 
 
@@ -187,7 +185,7 @@ class SlidingPSN(neuron.SlidingPSN):
             exp_init=True,
             surrogate_function=surrogate.ATan(),
             step_mode="m",
-            backend="gemm"
+            backend="gemm",
         )
 
     def forward(self, x_seq):  # disable single-step forward!!!
@@ -202,22 +200,21 @@ class SlidingPSN(neuron.SlidingPSN):
             end = i + 1
             start = max(0, i + 1 - k)
             length = min(end - start, k)
-            gemm_weight[i][start:end] = weight[k - length:k]
+            gemm_weight[i][start:end] = weight[k - length : k]
 
         h_seq = torch.addmm(
             bias,
             gemm_weight,
             x_seq.flatten(1),
         ).reshape(x_seq.shape)
-        return surrogate.atan.apply(h_seq, 2.)
+        return surrogate.atan.apply(h_seq, 2.0)
 
 
 # ================ Hand-written Multistep LIF neuron ================
-class HandWrittenLIFAutogradFunction(autograd.Function):
-
+class MELIFAutogradFunction(autograd.Function):
     @staticmethod
     def forward(ctx, x_seq, decay_lambda: float, detach_reset: bool):
-        s_seq, h_seq = handwritten_lif_forward(x_seq.contiguous(), decay_lambda)
+        s_seq, h_seq = melif_forward(x_seq.contiguous(), decay_lambda)
         if any(ctx.needs_input_grad):
             ctx.save_for_backward(h_seq)  # internal states
             ctx.decay_lambda = decay_lambda
@@ -227,7 +224,7 @@ class HandWrittenLIFAutogradFunction(autograd.Function):
     @staticmethod
     def backward(ctx, grad_s_seq):
         h_seq = ctx.saved_tensors[0]
-        grad_x_seq = handwritten_lif_backward(
+        grad_x_seq = melif_backward(
             grad_s_seq.contiguous(),
             h_seq.contiguous(),
             ctx.decay_lambda,
@@ -236,14 +233,12 @@ class HandWrittenLIFAutogradFunction(autograd.Function):
         return grad_x_seq, None, None
 
 
-class HandWrittenLIF(nn.Module):
-    """Multi-step handwritten LIF neuron with:
+class MELIF(nn.Module):
+    """Memory-efficient multi-step LIF (MELIF) with:
     * decay_input=False
     * v_threshold = 1.
     * hard_reset, v_reset = 0.
     * ATan surrogate function
-    Experiments show that HandWrittenLIFNode consumes much less memory than
-    SJLIF, while its computational efficiency is nearly the same.
 
     Args:
         decay_lambda (float): the neuronal decay factor. Should be in
@@ -254,20 +249,17 @@ class HandWrittenLIF(nn.Module):
 
     def __init__(self, decay_lambda=0.5, detach_reset=True, *args, **kwargs):
         super().__init__()
-        if decay_lambda < 0. or decay_lambda > 1.:
-            raise ValueError('`decay_lambda` should be in the range [0, 1).')
+        if decay_lambda < 0.0 or decay_lambda > 1.0:
+            raise ValueError("`decay_lambda` should be in the range [0, 1).")
         self.decay_lambda = decay_lambda
         self.detach_reset = detach_reset
-        self.core = HandWrittenLIFAutogradFunction.apply
+        self.core = MELIFAutogradFunction.apply
 
     def forward(self, x_seq):
         return self.core(x_seq, self.decay_lambda, self.detach_reset)
 
     def extra_repr(self):
-        return (
-            f"decay_lambda={self.decay_lambda}, "
-            f"detach_reset={self.detach_reset}, "
-        )
+        return f"decay_lambda={self.decay_lambda}, detach_reset={self.detach_reset}, "
 
     def __tc_init_states__(self, x_seq):
         return [torch.zeros([], device=x_seq.device, dtype=x_seq.dtype)]

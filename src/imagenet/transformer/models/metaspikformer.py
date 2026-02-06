@@ -24,7 +24,6 @@ class SeqToANNContainer(layer.SeqToANNContainer):
 
 
 class NeuronConv2dBN(nn.Module):
-
     def __init__(
         self,
         in_channels,
@@ -34,7 +33,7 @@ class NeuronConv2dBN(nn.Module):
         padding=0,
         groups=1,
         neuron_type="SJLIF",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.neuron = get_neuron(neuron_type, **kwargs)
@@ -46,7 +45,7 @@ class NeuronConv2dBN(nn.Module):
                 stride=stride,
                 padding=padding,
                 groups=groups,
-                bias=False
+                bias=False,
             ),
             BatchNorm2d_(out_channels),
         )
@@ -61,7 +60,6 @@ class NeuronConv2dBN(nn.Module):
 
 
 class NeuronConv2dConv2dBN(nn.Module):
-
     def __init__(
         self,
         in_channels1,
@@ -77,7 +75,7 @@ class NeuronConv2dConv2dBN(nn.Module):
         groups1=1,
         groups2=1,
         neuron_type="SJLIF",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.neuron = get_neuron(neuron_type, **kwargs)
@@ -89,7 +87,7 @@ class NeuronConv2dConv2dBN(nn.Module):
                 stride=stride1,
                 padding=padding1,
                 groups=groups1,
-                bias=False
+                bias=False,
             ),
             nn.Conv2d(
                 in_channels2,
@@ -98,7 +96,7 @@ class NeuronConv2dConv2dBN(nn.Module):
                 stride=stride2,
                 padding=padding2,
                 groups=groups2,
-                bias=False
+                bias=False,
             ),
             BatchNorm2d_(out_channels2),
         )
@@ -113,7 +111,6 @@ class NeuronConv2dConv2dBN(nn.Module):
 
 
 class BNAndPadLayer(nn.Module):
-
     def __init__(
         self,
         pad_pixels,
@@ -124,9 +121,7 @@ class BNAndPadLayer(nn.Module):
         track_running_stats=True,
     ):
         super().__init__()
-        self.bn = BatchNorm2d_(
-            num_features, eps, momentum, affine, track_running_stats
-        )
+        self.bn = BatchNorm2d_(num_features, eps, momentum, affine, track_running_stats)
         self.pad_pixels = pad_pixels
 
     def forward(self, input):
@@ -134,9 +129,10 @@ class BNAndPadLayer(nn.Module):
         if self.pad_pixels > 0:
             if self.bn.affine:
                 pad_values = (
-                    self.bn.bias.detach() -
-                    self.bn.running_mean * self.bn.weight.detach() /
-                    torch.sqrt(self.bn.running_var + self.bn.eps)
+                    self.bn.bias.detach()
+                    - self.bn.running_mean
+                    * self.bn.weight.detach()
+                    / torch.sqrt(self.bn.running_var + self.bn.eps)
                 )
             else:
                 pad_values = -self.bn.running_mean / torch.sqrt(
@@ -144,10 +140,10 @@ class BNAndPadLayer(nn.Module):
                 )
             output = F.pad(output, [self.pad_pixels] * 4)
             pad_values = pad_values.view(1, -1, 1, 1)
-            output[:, :, 0:self.pad_pixels, :] = pad_values
-            output[:, :, -self.pad_pixels:, :] = pad_values
-            output[:, :, :, 0:self.pad_pixels] = pad_values
-            output[:, :, :, -self.pad_pixels:] = pad_values
+            output[:, :, 0 : self.pad_pixels, :] = pad_values
+            output[:, :, -self.pad_pixels :, :] = pad_values
+            output[:, :, :, 0 : self.pad_pixels] = pad_values
+            output[:, :, :, -self.pad_pixels :] = pad_values
         return output
 
     @property
@@ -172,18 +168,13 @@ class BNAndPadLayer(nn.Module):
 
 
 class RepConv(nn.Module):
-
     def __init__(self, in_channel, out_channel):
         super().__init__()
         # hidden_channel = in_channel
-        conv1x1 = nn.Conv2d(
-            in_channel, in_channel, 1, 1, 0, bias=False, groups=1
-        )
+        conv1x1 = nn.Conv2d(in_channel, in_channel, 1, 1, 0, bias=False, groups=1)
         bn = BNAndPadLayer(pad_pixels=1, num_features=in_channel)
         conv3x3 = nn.Sequential(
-            nn.Conv2d(
-                in_channel, in_channel, 3, 1, 0, groups=in_channel, bias=False
-            ),
+            nn.Conv2d(in_channel, in_channel, 3, 1, 0, groups=in_channel, bias=False),
             nn.Conv2d(in_channel, out_channel, 1, 1, 0, groups=1, bias=False),
             BatchNorm2d_(out_channel),
         )
@@ -194,7 +185,6 @@ class RepConv(nn.Module):
 
 
 class RepConvBNNeuron(nn.Module):
-
     def __init__(self, in_channel, out_channel, neuron_type, **kwargs):
         super().__init__()
         self.conv = SeqToANNContainer(
@@ -211,7 +201,6 @@ class RepConvBNNeuron(nn.Module):
 
 
 class SepConv(nn.Module):
-
     def __init__(
         self,
         dim,
@@ -219,7 +208,7 @@ class SepConv(nn.Module):
         kernel_size=7,
         padding=3,
         neuron_type="SJLIF",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         med_channels = int(expansion_ratio * dim)
@@ -229,7 +218,7 @@ class SepConv(nn.Module):
             kernel_size=1,
             stride=1,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
         self.lif_conv_bn2 = NeuronConv2dConv2dBN(
             in_channels1=med_channels,
@@ -242,7 +231,7 @@ class SepConv(nn.Module):
             kernel_size2=1,
             stride2=1,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
 
     def forward(self, x):
@@ -252,7 +241,6 @@ class SepConv(nn.Module):
 
 
 class MS_ConvBlock(nn.Module):
-
     def __init__(self, dim, mlp_ratio=4.0, neuron_type="SJLIF", **kwargs):
         super().__init__()
         self.sep_conv = SepConv(dim=dim, neuron_type=neuron_type, **kwargs)
@@ -264,7 +252,7 @@ class MS_ConvBlock(nn.Module):
             groups=1,
             bias=False,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
         self.lif_conv_bn2 = NeuronConv2dBN(
             dim * mlp_ratio,
@@ -274,7 +262,7 @@ class MS_ConvBlock(nn.Module):
             groups=1,
             bias=False,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
 
     def forward(self, x):
@@ -287,14 +275,13 @@ class MS_ConvBlock(nn.Module):
 
 
 class MS_MLP(nn.Module):
-
     def __init__(
         self,
         in_features,
         hidden_features=None,
         out_features=None,
         neuron_type="SJLIF",
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -305,7 +292,7 @@ class MS_MLP(nn.Module):
             kernel_size=1,
             stride=1,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
         self.lif_conv_bn2 = NeuronConv2dBN(
             hidden_features,
@@ -313,7 +300,7 @@ class MS_MLP(nn.Module):
             kernel_size=1,
             stride=1,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
         self.c_hidden = hidden_features
         self.c_output = out_features
@@ -325,7 +312,6 @@ class MS_MLP(nn.Module):
 
 
 class HA3DCore(nn.Module):
-
     def __init__(self, num_heads, dim, neuron_type, **kwargs):
         super().__init__()
         self.num_heads = num_heads
@@ -341,29 +327,26 @@ class HA3DCore(nn.Module):
         q = (
             q.permute(1, 0, 3, 4, 2)  # [B, T, H, W, C]
             .flatten(1, 3)  # [B, THW, C]
-            .reshape(B, N, self.num_heads,
-                     C // self.num_heads)  # [B, THW, M, C/M]
+            .reshape(B, N, self.num_heads, C // self.num_heads)  # [B, THW, M, C/M]
             .permute(0, 2, 1, 3)  # [B, M, THW, C/M]
             .contiguous()
         )
         k = (
             k.permute(1, 0, 3, 4, 2)  # [B, T, H, W, C]
             .flatten(1, 3)  # [B, THW, C]
-            .reshape(B, N, self.num_heads,
-                     C // self.num_heads)  # [B, THW, M, C/M]
+            .reshape(B, N, self.num_heads, C // self.num_heads)  # [B, THW, M, C/M]
             .permute(0, 2, 1, 3)  # [B, M, THW, C/M]
             .contiguous()
         )
         v = (
             v.permute(1, 0, 3, 4, 2)  # [B, T, H, W, C]
             .flatten(1, 3)  # [B, THW, C]
-            .reshape(B, N, self.num_heads,
-                     C // self.num_heads)  # [B, THW, M, C/M]
+            .reshape(B, N, self.num_heads, C // self.num_heads)  # [B, THW, M, C/M]
             .permute(0, 2, 1, 3)  # [B, M, THW, C/M]
             .contiguous()
         )
-        x = (2*k - 1).transpose(-2, -1) @ v
-        x = (2*q - 1) @ x
+        x = (2 * k - 1).transpose(-2, -1) @ v
+        x = (2 * q - 1) @ x
         x = x / (2 * self.dim)
 
         x = (
@@ -377,12 +360,11 @@ class HA3DCore(nn.Module):
 
 
 class MS_Attention_3D_RepConv(nn.Module):
-
     def __init__(self, dim, num_heads=8, neuron_type="SJLIF", **kwargs):
         super().__init__()
-        assert (
-            dim % num_heads == 0
-        ), f"dim {dim} should be divided by num_heads {num_heads}."
+        assert dim % num_heads == 0, (
+            f"dim {dim} should be divided by num_heads {num_heads}."
+        )
         self.dim = dim
         self.num_heads = num_heads
 
@@ -406,10 +388,7 @@ class MS_Attention_3D_RepConv(nn.Module):
 
 
 class MS_Block(nn.Module):
-
-    def __init__(
-        self, dim, num_heads, mlp_ratio=4.0, neuron_type="SJLIF", **kwargs
-    ):
+    def __init__(self, dim, num_heads, mlp_ratio=4.0, neuron_type="SJLIF", **kwargs):
         super().__init__()
 
         self.attn = MS_Attention_3D_RepConv(
@@ -420,7 +399,7 @@ class MS_Block(nn.Module):
             in_features=dim,
             hidden_features=mlp_hidden_dim,
             neuron_type=neuron_type,
-            **kwargs
+            **kwargs,
         )
 
     def forward(self, x):
@@ -430,7 +409,6 @@ class MS_Block(nn.Module):
 
 
 class MS_DownSampling(nn.Module):
-
     def __init__(
         self,
         in_channels=2,
@@ -451,7 +429,7 @@ class MS_DownSampling(nn.Module):
                 stride=stride,
                 padding=padding,
                 neuron_type=neuron_type,
-                **kwargs
+                **kwargs,
             )
         else:
             self.proj = SeqToANNContainer(
@@ -461,7 +439,8 @@ class MS_DownSampling(nn.Module):
                     kernel_size=kernel_size,
                     stride=stride,
                     padding=padding,
-                ), BatchNorm2d_(embed_dims)
+                ),
+                BatchNorm2d_(embed_dims),
             )
 
     def forward(self, x):
@@ -469,7 +448,6 @@ class MS_DownSampling(nn.Module):
 
 
 class Spiking_vit_MetaFormer(nn.Module):
-
     def __init__(
         self,
         in_channels=2,
@@ -498,14 +476,16 @@ class Spiking_vit_MetaFormer(nn.Module):
             **kwargs,
         )
 
-        self.ConvBlock1_1 = nn.ModuleList([
-            MS_ConvBlock(
-                dim=embed_dim[0] // 2,
-                mlp_ratio=mlp_ratios,
-                neuron_type=neuron_type,
-                **kwargs
-            )
-        ])
+        self.ConvBlock1_1 = nn.ModuleList(
+            [
+                MS_ConvBlock(
+                    dim=embed_dim[0] // 2,
+                    mlp_ratio=mlp_ratios,
+                    neuron_type=neuron_type,
+                    **kwargs,
+                )
+            ]
+        )
 
         self.downsample1_2 = MS_DownSampling(
             in_channels=embed_dim[0] // 2,
@@ -518,14 +498,16 @@ class Spiking_vit_MetaFormer(nn.Module):
             **kwargs,
         )
 
-        self.ConvBlock1_2 = nn.ModuleList([
-            MS_ConvBlock(
-                dim=embed_dim[0],
-                mlp_ratio=mlp_ratios,
-                neuron_type=neuron_type,
-                **kwargs
-            )
-        ])
+        self.ConvBlock1_2 = nn.ModuleList(
+            [
+                MS_ConvBlock(
+                    dim=embed_dim[0],
+                    mlp_ratio=mlp_ratios,
+                    neuron_type=neuron_type,
+                    **kwargs,
+                )
+            ]
+        )
 
         self.downsample2 = MS_DownSampling(
             in_channels=embed_dim[0],
@@ -538,23 +520,27 @@ class Spiking_vit_MetaFormer(nn.Module):
             **kwargs,
         )
 
-        self.ConvBlock2_1 = nn.ModuleList([
-            MS_ConvBlock(
-                dim=embed_dim[1],
-                mlp_ratio=mlp_ratios,
-                neuron_type=neuron_type,
-                **kwargs
-            )
-        ])
+        self.ConvBlock2_1 = nn.ModuleList(
+            [
+                MS_ConvBlock(
+                    dim=embed_dim[1],
+                    mlp_ratio=mlp_ratios,
+                    neuron_type=neuron_type,
+                    **kwargs,
+                )
+            ]
+        )
 
-        self.ConvBlock2_2 = nn.ModuleList([
-            MS_ConvBlock(
-                dim=embed_dim[1],
-                mlp_ratio=mlp_ratios,
-                neuron_type=neuron_type,
-                **kwargs
-            )
-        ])
+        self.ConvBlock2_2 = nn.ModuleList(
+            [
+                MS_ConvBlock(
+                    dim=embed_dim[1],
+                    mlp_ratio=mlp_ratios,
+                    neuron_type=neuron_type,
+                    **kwargs,
+                )
+            ]
+        )
 
         self.downsample3 = MS_DownSampling(
             in_channels=embed_dim[1],
@@ -567,15 +553,18 @@ class Spiking_vit_MetaFormer(nn.Module):
             **kwargs,
         )
 
-        self.block3 = nn.ModuleList([
-            MS_Block(
-                dim=embed_dim[2],
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratios,
-                neuron_type=neuron_type,
-                **kwargs
-            ) for j in range(6)
-        ])
+        self.block3 = nn.ModuleList(
+            [
+                MS_Block(
+                    dim=embed_dim[2],
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratios,
+                    neuron_type=neuron_type,
+                    **kwargs,
+                )
+                for j in range(6)
+            ]
+        )
 
         self.downsample4 = MS_DownSampling(
             in_channels=embed_dim[2],
@@ -588,20 +577,22 @@ class Spiking_vit_MetaFormer(nn.Module):
             **kwargs,
         )
 
-        self.block4 = nn.ModuleList([
-            MS_Block(
-                dim=embed_dim[3],
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratios,
-                neuron_type=neuron_type,
-                **kwargs
-            ) for j in range(2)
-        ])
+        self.block4 = nn.ModuleList(
+            [
+                MS_Block(
+                    dim=embed_dim[3],
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratios,
+                    neuron_type=neuron_type,
+                    **kwargs,
+                )
+                for j in range(2)
+            ]
+        )
 
         self.final_lif = get_neuron(neuron_type, **kwargs)
         self.head = (
-            nn.Linear(embed_dim[3], num_classes)
-            if num_classes > 0 else nn.Identity()
+            nn.Linear(embed_dim[3], num_classes) if num_classes > 0 else nn.Identity()
         )
         self.apply(self._init_weights)
 
@@ -660,8 +651,11 @@ def GCMetaSpikformer(neuron_type, compress_x, level, **kwargs):
     return memory_optimization(
         net,
         (
-            NeuronConv2dBN, NeuronConv2dConv2dBN, RepConvBNNeuron, HA3DCore,
-            SeqToANNContainer
+            NeuronConv2dBN,
+            NeuronConv2dConv2dBN,
+            RepConvBNNeuron,
+            HA3DCore,
+            SeqToANNContainer,
         ),
         dummy_input=torch.zeros(4, 3, 224, 224) + 0.9,
         compress_x=compress_x,

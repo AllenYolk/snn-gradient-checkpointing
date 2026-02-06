@@ -19,26 +19,24 @@ COMPRESS_X = True
 if __name__ == "__main__":
     net = models.CIFAR10DVSVGG(
         10,
-        neuron_type="HandWrittenLIF",
+        neuron_type="MELIF",
         dropout=0.25,
         decay_lambda=0.5,
         k=2,
     )
     net = memory_optimization(
-        net, (models.VGGBlock,),
+        net,
+        (models.VGGBlock,),
         dummy_input=torch.zeros(32, 10, 2, 48, 48) + 0.9,
         compress_x=COMPRESS_X,
         level=LEVEL,
-        verbose=True
+        verbose=True,
     ).to(DEVICE)
 
     loss_fn = TMeanCrossEntropyLoss()
 
     dm = CIFAR10DVSDataModule(
-        "/export/home/data_allenyolk/CIFAR10DVS",
-        T=10,
-        batch_size=32,
-        num_workers=4
+        "/export/home/data_allenyolk/CIFAR10DVS", T=10, batch_size=32, num_workers=4
     )
     dm.setup("fit")
     loader = dm.train_dataloader()
