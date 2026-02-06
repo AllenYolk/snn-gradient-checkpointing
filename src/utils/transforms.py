@@ -15,22 +15,6 @@ from torchvision import transforms
 from .misc import get_one_hot
 
 
-class TransformedDatasetWrapper(torch.utils.data.Dataset):
-    def __init__(self, dataset, transform=None):
-        self.transform = transform
-        self.dataset = dataset
-
-    def __getitem__(self, index):
-        data, label = self.dataset[index]
-        data = torch.FloatTensor(data)
-        if self.transform:
-            data = self.transform(data)
-        return data, label
-
-    def __len__(self):
-        return len(self.dataset)
-
-
 ################################################################################
 #                  Mixup and Cutmix for classification tasks                   #
 ################################################################################

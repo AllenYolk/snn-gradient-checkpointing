@@ -78,7 +78,7 @@ class ClassificationLightningModule(LightningModule):
             )
 
     def validation_step(self, batch, batch_idx):
-        x, label = batch
+        x, label = batch[0].float(), batch[1]
         y = self(x)
         batch_loss = self.criterion(y, label)  # must properly handle the sizes!
         if self.y_with_T:
