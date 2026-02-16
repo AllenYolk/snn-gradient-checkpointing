@@ -4,7 +4,7 @@
 
 The official implementation of [Towards Lossless Memory-efficient Training of Spiking Neural Networks via Gradient Checkpointing and Spike Compression](https://openreview.net/forum?id=nrBJ0Uvj7c) (ICLR 2026) by Yifan Huang, Wei Fang, Zecheng Hao, Zhengyu Ma and Yonghong Tian.
 
-This work is an extension and augmentation of [SpikingJelly](https://github.com/fangwei123456/spikingjelly), conceived and developed by SpikingJelly's developer group. The `memory_optimization` API and its tutorial will soon be available in the latest version of SpikingJelly.
+This work is an extension and augmentation of [SpikingJelly](https://github.com/fangwei123456/spikingjelly). The `memory_optimization` API has been refined and integrated to the latest version of SpikingJelly. Read the [tutorial](https://spikingjelly.readthedocs.io/zh-cn/latest/tutorials/en/memopt.html) for more details.
 
 ## Environment Setup
 
@@ -91,7 +91,9 @@ Usage of these scripts are similar to the above.
 
 ## Use the Pipeline for Your Own SNN
 
-The `memory_optimization` API will soon be available in the latest version of [SpikingJelly](https://github.com/fangwei123456/spikingjelly). Read the docs and tutorials for more details.
+The `memory_optimization` API has been integrate to the latest version of [SpikingJelly](https://github.com/fangwei123456/spikingjelly). Read the [docs](https://spikingjelly.readthedocs.io/zh-cn/latest/APIs/spikingjelly.activation_based.memopt.html) and [tutorials](https://spikingjelly.readthedocs.io/zh-cn/latest/tutorials/en/memopt.html) for more details.
+
+Note that `memory_optimization` in SpikingJelly is an improved and refined version of the code in this repository. It is more user-friendly: users don't even have to manually define temporal partitioning rules. **It's highly recommended to use the API in SpikingJelly!**
 
 <p align="center">
     <img src="./assets/sj-logo.png" alt="spikingjelly" width="160" />
